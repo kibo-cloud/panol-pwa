@@ -1,0 +1,3 @@
+PAÑOL · archivo de datos
+Guardalo, compartilo o abrilo desde la app Pañol. No lo edites a mano.
+{"app":"panol","format":"panol-txt","version":2,"savedAt":"2026-11-01T10:00:00.000Z","data":{"users":{"uadmin":{"name":"Ana Admin","role":"admin","active":true,"salt":"salt1","pinHash":"sha256:99c2ba03269502e5604f138c6b97c2e8f6039406b4a8c8b3d8c4118341480ce3","createdAt":"2026-11-01T10:00:00.000Z","updatedAt":"2026-11-01T10:00:00.000Z"}},"techs":{"t1":"str","t2":null,"t3":{"name":5}}}}

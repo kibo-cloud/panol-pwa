@@ -1,0 +1,4 @@
+* text=auto eol=lf
+*.png binary
+# Fixtures keep their exact bytes (the .txt header uses CRLF like real exports).
+tests/e2e/fixtures/*.txt -text

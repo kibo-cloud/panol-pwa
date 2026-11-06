@@ -1,0 +1,3 @@
+PAÑOL · archivo de datos
+Guardalo, compartilo o abrilo desde la app Pañol. No lo edites a mano.
+{"app":"panol","format":"panol-txt","version":2,"savedAt":"2026-11-01T10:00:00.000Z","data":{"config":{"turnos":{"list":[{"id":"\"><img src=x onerror=window.__xss=2>","name":"Turno trampa","order":1}],"updatedAt":"2099-01-01T00:00:00.000Z"}}}}

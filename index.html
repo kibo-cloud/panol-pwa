@@ -589,12 +589,81 @@ const FILE={handle:null,name:'',perm:'none',savedAt:null,error:''};
 const CAN_LINK=typeof window.showSaveFilePicker==='function';
 const CAN_OPEN_HANDLE=typeof window.showOpenFilePicker==='function';
 let chan=null;try{chan=new BroadcastChannel('panol')}catch(e){}
-function payload(){const data={};for(const c of COLS)data[c]=S[c];return{app:'panol',format:'panol-txt',version:2,savedAt:nowISO(),data}}
+/* ---------- validación de datos (archivo .txt y almacenamiento) ---------- */
+// Todo lo que entra desde un archivo pasa por este esquema antes de tocar los datos:
+// ids con caracteres seguros, números finitos, estados conocidos. Así nada importado puede
+// inyectar HTML ni romper las vistas.
+const MAX_IMPORT=20*1024*1024;
+const BAD_KEYS=new Set(['__proto__','constructor','prototype']);
+const validId=id=>typeof id==='string'&&/^[A-Za-z0-9_\-.~:@+]{1,200}$/.test(id)&&id!=='.'&&id!=='..'&&!BAD_KEYS.has(id);
+const isObj=v=>!!v&&typeof v==='object'&&!Array.isArray(v);
+const vStr=(max=20000)=>v=>typeof v==='string'&&v.length<=max;
+const vNum=v=>typeof v==='number'&&Number.isFinite(v);
+const vInt=(a,b)=>v=>Number.isInteger(v)&&v>=a&&v<=b;
+const vOne=(...a)=>v=>a.includes(v);
+const opt=f=>v=>v==null||f(v);
+const PRIM=v=>v==null||typeof v==='boolean'||vNum(v)||vStr()(v);
+const STR=opt(vStr()),DATE=opt(vStr(40)),OID=opt(validId),NUM=opt(vNum),BOOL=opt(v=>typeof v==='boolean');
+const POOL_K=['disponible','asignado','reparacion','retirado','pendiente','baja','externo'];
+function recBad(r,sc){if(!isObj(r))return'registro';for(const k of sc.req||[])if(r[k]==null)return k;for(const [k,v] of Object.entries(r)){const f=sc.f[k]||COMMON_F[k];if(f?!f(v):!PRIM(v))return k}return null}
+const shape=sc=>v=>recBad(v,sc)===null;
+const COMMON_F={createdAt:DATE,updatedAt:DATE,by:OID,demo:BOOL};
+const PERIOD=shape({req:['y','m','w'],f:{y:vInt(1900,9999),m:vInt(1,12),w:vInt(1,4)}});
+const ITEM=shape({req:['state'],f:{state:vOne('bueno','cambio','faltante'),note:STR,toolId:OID,toolName:STR,category:STR,unitId:OID,unitCode:STR,qty:NUM}});
+const TRANSFER=shape({req:['toolId','qty','from','to'],f:{toolId:validId,qty:vNum,from:vOne(...POOL_K),to:vOne(...POOL_K),unitId:OID}});
+const ROLE_K=['admin','responsable','consulta'];
+const SCHEMA={
+  techs:{req:['name'],f:{name:vStr(500),legajo:opt(v=>vStr(200)(v)||vNum(v)),shiftId:OID,active:BOOL,alta:DATE}},
+  shiftChanges:{req:['techId'],f:{techId:validId,from:OID,to:OID,fromName:STR,toName:STR,effectiveFrom:DATE,note:STR,at:DATE}},
+  categories:{req:['name'],f:{name:vStr(500)}},
+  tools:{req:['name'],f:{name:vStr(500),description:STR,categoryId:OID,serialized:BOOL,active:BOOL}},
+  units:{req:['toolId','code','status'],f:{toolId:validId,code:vStr(200),status:vOne(...POOL_K),techId:OID}},
+  assignments:{req:['techId','toolId'],f:{techId:validId,toolId:validId,unitId:OID,qty:NUM,active:BOOL,since:DATE,until:DATE,movementId:OID,replaces:OID,endReason:STR,replacedBy:OID,endMovementId:OID}},
+  controls:{req:['techId','period','pkey','status'],f:{techId:validId,techName:STR,shiftId:OID,period:PERIOD,pkey:v=>typeof v==='string'&&/^\d{4}-\d{2}-[1-4]$/.test(v),pnum:NUM,status:vOne('borrador','finalizado'),
+    items:opt(v=>isObj(v)&&Object.entries(v).every(([k,x])=>validId(k)&&ITEM(x))),counts:opt(shape({f:{bueno:NUM,cambio:NUM,faltante:NUM}})),correction:BOOL,supersedes:OID,startedAt:DATE,finishedAt:DATE}},
+  movements:{req:['type'],f:{type:vOne(...Object.keys(MV)),techId:OID,toolId:OID,qty:NUM,unitId:OID,newAssignmentId:OID,oldAssignmentId:OID,oldUnitId:OID,newUnitId:OID,oldState:opt(vOne(...Object.keys(ST))),returned:BOOL,
+    oldDest:opt(vOne(...POOL_K)),condition:opt(vOne(...POOL_K)),linkedControlId:OID,resolvesMovementId:OID,transfers:opt(v=>Array.isArray(v)&&v.length<=100000&&v.every(TRANSFER)),reason:STR,notes:STR,at:DATE}},
+  alertRes:{f:{type:STR,title:STR,text:STR,techId:OID,note:STR,at:DATE}},
+  audit:{f:{action:STR,entity:STR,entityId:STR,detail:STR,at:DATE}},
+  users:{req:['name','role','salt','pinHash'],f:{name:vStr(500),role:vOne(...ROLE_K),active:BOOL,salt:vStr(200),pinHash:vStr(400)}},
+  config:{f:{}}
+};
+const CONFIG_SCHEMA={
+  turnos:{req:['list'],f:{list:v=>Array.isArray(v)&&v.length<=100&&v.every(shape({req:['id','name'],f:{id:validId,name:vStr(500),order:NUM}}))}},
+  permisos:{f:Object.fromEntries(ROLE_K.map(r=>[r,opt(v=>isObj(v)&&Object.entries(v).every(([k,x])=>validId(k)&&typeof x==='boolean'))]))}
+};
+const DEL_KEY=k=>{const i=k.indexOf('/');return i>0&&COLS.includes(k.slice(0,i))&&validId(k.slice(i+1))};
+// Revisa todas las colecciones. strict: el primer problema rechaza todo (importación);
+// si no, descarta solo los registros inválidos (datos ya guardados en el dispositivo).
+function checkData(src,strict){
+  if(!isObj(src))throw new UErr('El archivo no tiene datos de Pañol.');
+  const data={},deleted={},bad=[];
+  for(const c of COLS){
+    data[c]={};const col=src[c];if(col==null)continue;
+    if(!isObj(col)){bad.push(c);continue}
+    for(const [id,r] of Object.entries(col)){const sc=c==='config'?(CONFIG_SCHEMA[id]||SCHEMA.config):SCHEMA[c];const e=validId(id)?recBad(r,sc):'id';if(e)bad.push(`${c} › ${validId(id)?id:'id no válido'} › ${e}`);else data[c][id]=clone(r)}
+  }
+  if(src.deleted!=null){if(!isObj(src.deleted))bad.push('deleted');else for(const [k,at] of Object.entries(src.deleted)){if(DEL_KEY(k)&&vStr(40)(at))deleted[k]=at;else bad.push('deleted › '+k)}}
+  if(bad.length){if(strict)throw new UErr(`El archivo tiene datos con un formato no válido (${bad[0]}). No se cargó nada.`);console.warn('Registros descartados por formato no válido:',bad)}
+  return{data,deleted};
+}
+const hasAdmin=users=>Object.values(users||{}).some(u=>u.role==='admin'&&u.active!==false);
+let DEL={};// borrados: 'colección/id' -> fecha, para que Combinar no resucite registros
+function payload(){const data={};for(const c of COLS)data[c]=S[c];data.deleted=DEL;return{app:'panol',format:'panol-txt',version:2,savedAt:nowISO(),data}}
 function serialize(){return'PAÑOL · archivo de datos\r\nGuardalo, compartilo o abrilo desde la app Pañol. No lo edites a mano.\r\n'+JSON.stringify(payload())}
-function parseDataText(txt){const i=String(txt).indexOf('{');if(i<0)throw new UErr('El archivo no tiene datos de Pañol.');let p;try{p=JSON.parse(String(txt).slice(i))}catch(e){throw new UErr('El archivo está dañado o no es de Pañol.')}if(!p||p.app!=='panol'||!p.data||typeof p.data!=='object')throw new UErr('El archivo no es de Pañol.');return p}
-function loadPayload(p){for(const c of COLS){const v=p.data[c];S[c]=v&&typeof v==='object'&&!Array.isArray(v)?clone(v):{}}}
+function parseDataText(txt){
+  txt=String(txt);if(txt.length>MAX_IMPORT)throw new UErr('El archivo es demasiado grande para ser de Pañol.');
+  const i=txt.indexOf('{');if(i<0)throw new UErr('El archivo no tiene datos de Pañol.');
+  let p,badKey=false;try{p=JSON.parse(txt.slice(i),(k,v)=>{if(BAD_KEYS.has(k))badKey=true;return v})}catch(e){throw new UErr('El archivo está dañado o no es de Pañol.')}
+  if(!isObj(p)||p.app!=='panol'||!isObj(p.data))throw new UErr('El archivo no es de Pañol.');
+  if(badKey)throw new UErr('El archivo tiene datos con un formato no válido. No se cargó nada.');
+  if(!COLS.some(c=>isObj(p.data[c])&&Object.keys(p.data[c]).length))throw new UErr('El archivo no tiene datos de Pañol.');
+  const {data,deleted}=checkData(p.data,true);
+  return{savedAt:vStr(40)(p.savedAt)?p.savedAt:null,data,deleted};
+}
+function loadPayload(p,strict){const {data,deleted}=checkData(p.data,!!strict);for(const c of COLS)S[c]=data[c];DEL=deleted}
 async function initBackend(){
-  try{const p=await idbGet('data');if(p&&p.app==='panol')loadPayload(p)}catch(e){console.warn(e);B.storageError=true}
+  try{const p=await idbGet('data');if(p&&p.app==='panol'&&isObj(p.data))loadPayload(p)}catch(e){console.warn(e);B.storageError=true}
   try{FILE.savedAt=(await idbGet('fileSavedAt'))||null;const h=await idbGet('fileHandle');if(h){FILE.handle=h;FILE.name=h.name;FILE.perm=h.queryPermission?await h.queryPermission({mode:'readwrite'}):'prompt'}}catch(e){}
   try{if(navigator.storage&&navigator.storage.persist)B.persisted=await navigator.storage.persist()}catch(e){}
   restoreSession();
@@ -1279,7 +1348,6 @@ VIEWS.mas=()=>{
   <button class="btn danger lg block" style="margin-top:18px" data-act="logout">Cerrar sesión</button>
   <p class="s" style="text-align:center;margin-top:12px">Pañol 2.0 · Datos guardados en este dispositivo</p>`;
 };
-const validId=id=>/^[A-Za-z0-9_\-.~:@+]{1,200}$/.test(id)&&id!=='.'&&id!=='..';
 /* ---------- ingreso ---------- */
 UI.auth={uid:'',pin:'',pin2:'',name:'',keep:true,show:false};
 function activeUsers(){return Object.entries(S.users).map(([id,u])=>({id,...u})).filter(u=>u.active!==false).sort((a,b)=>(a.name||'').localeCompare(b.name||'','es'))}
@@ -1297,8 +1365,7 @@ function authView(){
   :`<div class="authf">${field('Usuario',`<select id="a-user" data-ch="authUser">${users.map(u=>`<option value="${u.id}" ${u.id===A.uid?'selected':''}>${esc(u.name)} · ${ROLES[u.role]||''}</option>`).join('')}</select>`,'a-user')}${pinField('a-pin','authPin','PIN','••••')}
     <label class="check"><input type="checkbox" data-ch="authKeep" ${A.keep?'checked':''}>Mantener la sesión en este dispositivo</label></div>
     <span class="aerr" id="a-err" role="alert"></span>
-    <button class="btn pri lg block" data-act="authLogin">Ingresar</button>
-    <button class="btn ghost block" data-act="dataOpen">${icon('upload',18)}Abrir archivo .txt de otro equipo</button>`;
+    <button class="btn pri lg block" data-act="authLogin">Ingresar</button>`;
   return`<div class="authw"><div class="authc"><span class="logo">${icon('wrench',28)}</span><div><h1>Pañol</h1><div class="s">Control de herramientas por técnico</div></div>${body}${install}${B.storageError?'<div class="hint warn">'+icon('alert',16)+'<span>Este navegador no deja guardar datos. Revisá que no esté en modo incógnito.</span></div>':''}</div></div>`;
 }
 IN.authName=v=>{UI.auth.name=v};IN.authPin=v=>{UI.auth.pin=v};IN.authPin2=v=>{UI.auth.pin2=v};
@@ -1347,25 +1414,43 @@ ACT.fileReconnect=async()=>{if(!FILE.handle)return;try{FILE.perm=await FILE.hand
 ACT.fileUnlink=async()=>{FILE.handle=null;FILE.name='';FILE.perm='none';try{await idbDel('fileHandle')}catch(e){}modalRerender();scheduleRender();toast('Archivo desvinculado')};
 ACT.fileShare=async()=>{const f=new File([serialize()],dataFileName(),{type:'text/plain'});try{await navigator.share({files:[f],title:'Datos de Pañol',text:'Archivo de datos de Pañol. Abrilo desde la app con Abrir archivo .txt.'});if(ME.id)audit('file_share','system','file','Archivo de datos compartido')}catch(e){if(!isAbort(e))toast('No se pudo compartir. Probá con Descargar.','err')}};
 ACT.fileDownload=async()=>{await saveFile(dataFileName(),serialize());if(ME.id)audit('file_download','system','file','Descarga del archivo de datos')};
+// Abrir un archivo reemplaza o combina todos los datos (usuarios incluidos): solo un
+// administrador con sesión iniciada, o el primer uso del equipo (sin usuarios activos).
+const canImport=()=>!activeUsers().length||(!!ME.id&&myRole()==='admin');
+const IMPORT_DENIED='Solo un administrador con la sesión iniciada puede abrir archivos de datos.';
+async function readImportFile(f,handle){
+  if(!canImport()){toast(IMPORT_DENIED,'err');return}
+  if(f.size>MAX_IMPORT){toast('El archivo es demasiado grande para ser de Pañol.','err');return}
+  importText(await f.text(),handle);
+}
 ACT.dataOpen=async()=>{
-  if(ME.id&&myRole()!=='admin'){toast('Solo un administrador puede abrir archivos de datos.','err');return}
-  if(CAN_OPEN_HANDLE){try{const [h]=await window.showOpenFilePicker({types:[{description:'Archivo de datos de Pañol',accept:{'text/plain':['.txt'],'application/json':['.json']}}]});const f=await h.getFile();importText(await f.text(),h)}catch(e){if(!isAbort(e))toast('No se pudo abrir el archivo.','err')}return}
+  if(!canImport()){toast(IMPORT_DENIED,'err');return}
+  if(CAN_OPEN_HANDLE){try{const [h]=await window.showOpenFilePicker({types:[{description:'Archivo de datos de Pañol',accept:{'text/plain':['.txt'],'application/json':['.json']}}]});await readImportFile(await h.getFile(),h)}catch(e){if(!isAbort(e))toast('No se pudo abrir el archivo.','err')}return}
   const inp=document.createElement('input');inp.type='file';inp.accept='.txt,.json,text/plain,application/json';inp.style.display='none';document.body.appendChild(inp);
-  inp.onchange=async()=>{const f=inp.files&&inp.files[0];inp.remove();if(f)importText(await f.text(),null)};inp.click();
+  inp.onchange=async()=>{const f=inp.files&&inp.files[0];inp.remove();if(f)try{await readImportFile(f,null)}catch(e){toast('No se pudo abrir el archivo.','err')}};inp.click();
 };
 const stamp=d=>String(d.updatedAt||d.finishedAt||d.at||d.createdAt||'');
 function importText(txt,handle){
+  if(!canImport()){toast(IMPORT_DENIED,'err');return}
   let p;try{p=parseDataText(txt)}catch(e){toast(errMsg(e),'err');return}
-  const n=COLS.reduce((a,c)=>a+Object.keys(p.data[c]||{}).length,0);const nu=Object.keys(p.data.users||{}).length;
+  const n=COLS.reduce((a,c)=>a+Object.keys(p.data[c]).length,0);const nu=Object.keys(p.data.users).length;
   const empty=!COLS.some(c=>Object.keys(S[c]).length);
   openModal({title:'Abrir archivo de datos',render:st=>`<p class="muted" style="margin-top:0">Archivo guardado el ${fdt(p.savedAt||p.exportedAt)}, con ${nf(n)} registros${nu?` y ${nu} ${nu===1?'usuario':'usuarios'}`:''}.</p>${empty?'':field('¿Qué hacemos con los datos de este equipo?',`<div class="opts"><button type="button" class="opt ${st.mode==='merge'?'on':''}" data-act="mset" data-k="mode" data-v="merge"><span><b>Combinar</b><br><span class="s">Suma lo nuevo y actualiza lo que cambió. No borra nada.</span></span></button><button type="button" class="opt ${st.mode==='replace'?'on':''}" data-act="mset" data-k="mode" data-v="replace"><span><b>Reemplazar todo</b><br><span class="s">Este equipo queda igual al archivo.</span></span></button></div>`)}${handle&&CAN_LINK?field('',`<div class="opts"><button type="button" class="opt ${st.link==='1'?'on':''}" data-act="mset" data-k="link" data-v="${st.link==='1'?'0':'1'}">Seguir guardando los cambios en este archivo</button></div>`):''}${nu&&!ME.id?'<p class="s">Después vas a ingresar con un usuario y PIN del archivo.</p>':''}`,
   actions:[{label:'Cancelar',close:true},{label:'Abrir datos',kind:'pri',run:async st=>{
+    if(!canImport())throw new UErr(IMPORT_DENIED);
     const mode=empty?'replace':(st.mode||'merge');
-    if(mode==='replace')loadPayload(p);
-    else for(const c of COLS){for(const [id,d] of Object.entries(p.data[c]||{})){if(!validId(id)||!d||typeof d!=='object'||Array.isArray(d))continue;const cur=S[c][id];if(!cur||stamp(d)>=stamp(cur))S[c][id]=clone(d)}}
+    if(mode==='replace'){
+      if(!hasAdmin(p.data.users))throw new UErr('El archivo no tiene un administrador activo. Reemplazar dejaría el equipo sin administrador.');
+      for(const c of COLS)S[c]=clone(p.data[c]);DEL=clone(p.deleted);
+    }else{
+      const nd=Object.fromEntries(COLS.map(c=>[c,clone(S[c])]));
+      for(const c of COLS)for(const [id,d] of Object.entries(p.data[c])){const cur=nd[c][id];if(!cur||stamp(d)>=stamp(cur))nd[c][id]=clone(d)}
+      if(hasAdmin(S.users)&&!hasAdmin(nd.users))throw new UErr('Combinar dejaría el equipo sin administrador activo. No se cargó nada.');
+      for(const c of COLS)S[c]=nd[c];
+    }
     version++;schedulePersist();
     if(ME.id&&(!S.users[ME.id]||S.users[ME.id].active===false))logout(true);
-    if(ME.id)await audit('data_import','system','file',`Datos abiertos desde archivo (${mode==='replace'?'reemplazo':'combinación'}, ${n} registros)`);
+    await audit('data_import','system','file',`Datos abiertos desde archivo (${mode==='replace'?'reemplazo':'combinación'}, ${n} registros)`);
     if(handle&&st.link==='1'&&CAN_LINK)await linkHandle(handle);
     toast('Datos cargados');scheduleRender();
   }}]});
@@ -1667,7 +1752,9 @@ ACT.clearDemo=async()=>{if(!gateUI('demo_manage'))return;if(!await confirmBox('B
     await audit('demo_clear','system','demo','Borrado de datos de demostración')},'Datos de demostración borrados')};
 
 /* ================= arranque ================= */
-initBackend().then(()=>{if('launchQueue' in window&&window.launchQueue)window.launchQueue.setConsumer(async params=>{if(!params.files||!params.files.length)return;if(ME.id&&myRole()!=='admin'){toast('Solo un administrador puede abrir archivos de datos.','err');return}try{const h=params.files[0];const f=await h.getFile();importText(await f.text(),h)}catch(e){toast('No se pudo abrir el archivo.','err')}})});
+// "Abrir con › Pañol" (app instalada): mismas reglas que Abrir archivo .txt.
+async function onLaunch(params){if(!params||!params.files||!params.files.length)return;if(!canImport()){toast(IMPORT_DENIED,'err');return}try{const h=params.files[0];await readImportFile(await h.getFile(),h.kind==='file'?h:null)}catch(e){toast('No se pudo abrir el archivo.','err')}}
+initBackend().then(()=>{if('launchQueue' in window&&window.launchQueue)window.launchQueue.setConsumer(onLaunch)});
 </script>
 </body>
 </html>
