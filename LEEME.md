@@ -56,6 +56,8 @@ Con la app instalada en PC, también podés abrir un `.txt` de Pañol con *Abrir
 ## 5. Cosas a tener en cuenta
 
 - Los datos viven en el navegador del dispositivo. Si se borran los datos del sitio o se desinstala la app, se pierden: mantené un `.txt` vinculado o descargá copias seguido.
-- El PIN ordena quién hace cada cosa y queda en la auditoría, pero **no cifra los datos**. Quien tenga el archivo `.txt` puede leer su contenido.
+- El PIN ordena quién hace cada cosa y queda en la auditoría, pero **no cifra los datos**. Quien tenga el archivo `.txt` puede leer su contenido, incluidos los usuarios y una versión protegida (hash PBKDF2) de cada PIN: con un PIN de 4 números, alguien con el archivo y tiempo podría adivinarlo. Usá PIN largos (hasta 8 números) y compartí el `.txt` solo con quien corresponde.
+- Después de 5 PIN incorrectos seguidos, ese usuario tiene que esperar 30 segundos en ese equipo, y el doble con cada nuevo error (hasta 15 minutos).
+- Los PIN creados con la versión 2.0 siguen funcionando y se protegen con el formato nuevo la primera vez que el usuario ingresa.
 - La exportación a Excel y PDF descarga sus librerías la primera vez que se usa. Después funciona sin conexión.
 - Para actualizar la app, reemplazá los archivos publicados y cambiá `VERSION` en `sw.js`.

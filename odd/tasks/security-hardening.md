@@ -45,9 +45,14 @@ with their behavior. Single PR-sized branch requested by the user; chain decisio
       Evidence: tombstones live in `data.deleted` (`'col/id' -> ISO`), outside the collections, so
       views need no filtering and 2.0.0 ignores them. RED on baseline (`t3`: 3 of 4 failed);
       GREEN 4/4 (newer wins, tie keeps local, file tombstone deletes, local deletion not
-      resurrected, persisted after reload). LEEME updated.
-- [ ] T4 PIN hardening: PBKDF2-SHA-256 (high iterations) with transparent upgrade of legacy
+      resurrected, persisted after reload). LEEME updated. Commit `38eb9c7`.
+- [x] T4 PIN hardening: PBKDF2-SHA-256 (high iterations) with transparent upgrade of legacy
       hashes on successful login; progressive lockout after failed attempts; LEEME note.
+      Evidence: `pbkdf2$210000$<hex>` with 16-byte random salts; `sha256:` and `fnv:` verified and
+      re-hashed on login (`patch(..., {keepStamp:true})` so the upgrade does not win merges);
+      lockout state per device in IDB `pinLocks` (not synced, so failed logins never overwrite a
+      newer PIN through Combine): 5 failures -> 30 s, doubling, max 15 min. RED on baseline (3/3
+      failed); GREEN 3/3 including the 2.0.0 fixture (sha256 and fnv users log in and upgrade).
 - [ ] T5 Robustness and PWA: SW caches navigations only when `r.ok && !r.redirected` inside
       `waitUntil`; flush pending writes on `pagehide`/`visibilitychange`; protect pending writes
       from BroadcastChannel reload; catch handler rejections; bump `VERSION` to `panol-v2.1.0`.
@@ -78,6 +83,7 @@ with their behavior. Single PR-sized branch requested by the user; chain decisio
   16 of 23 specs failed. T1 done.
 - 2026-11-06: T2 done.
 - 2026-11-06: T3 done.
+- 2026-11-06: T4 done.
 
 ## Next step
-T4.
+T5.

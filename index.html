@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Rvxz2jMv1lTJVqRMIu2mfZIrXJoUllbmh56lEmLbMaY=' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-kuxmB3C7YVa2w7tEmlkW6apgwPkED+USWanxKyPa6zw=' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#101828">
 <link rel="manifest" href="manifest.webmanifest">
@@ -667,6 +667,7 @@ async function initBackend(){
   try{const p=await idbGet('data');if(p&&p.app==='panol'&&isObj(p.data))loadPayload(p)}catch(e){console.warn(e);B.storageError=true}
   try{FILE.savedAt=(await idbGet('fileSavedAt'))||null;const h=await idbGet('fileHandle');if(h){FILE.handle=h;FILE.name=h.name;FILE.perm=h.queryPermission?await h.queryPermission({mode:'readwrite'}):'prompt'}}catch(e){}
   try{if(navigator.storage&&navigator.storage.persist)B.persisted=await navigator.storage.persist()}catch(e){}
+  await loadLocks();
   restoreSession();
   B.mode='local';COLS.forEach(c=>loaded.add(c));version++;scheduleRender();
 }
@@ -691,7 +692,33 @@ function restoreSession(){let s=null;try{s=JSON.parse(localStorage.getItem('pano
 function setUser(uid){ME.id=uid;ME.name=(S.users[uid]||{}).name||'';}
 function startSession(uid,keep){setUser(uid);const v=JSON.stringify({uid,at:nowISO()});try{localStorage.removeItem('panol-session');sessionStorage.removeItem('panol-session');(keep?localStorage:sessionStorage).setItem('panol-session',v)}catch(e){}}
 function logout(silent){try{localStorage.removeItem('panol-session');sessionStorage.removeItem('panol-session')}catch(e){}ME.id=null;ME.name='';UI.ck=null;closeModal();if(location.hash&&location.hash!=='#inicio')history.replaceState(null,'','#inicio');if(!silent)toast('Sesión cerrada');scheduleRender()}
-async function hashPin(pin,salt){const txt=salt+':'+pin;try{if(crypto&&crypto.subtle){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(txt));return'sha256:'+[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}}catch(e){}let h1=0x811c9dc5,h2=0x1234567;for(let i=0;i<txt.length;i++){h1=Math.imul(h1^txt.charCodeAt(i),16777619);h2=Math.imul(h2+txt.charCodeAt(i),2654435761)}return'fnv:'+(h1>>>0).toString(16)+(h2>>>0).toString(16)}
+/* ---------- PIN ---------- */
+// PBKDF2-SHA-256 con muchas iteraciones: el .txt lleva los hashes, así que adivinar un PIN
+// probando combinaciones tiene que ser lento. Formato: pbkdf2$<iteraciones>$<hex>.
+// Los formatos de 2.0.0 (sha256: y fnv:) se siguen aceptando y se actualizan al ingresar.
+const PBKDF2_ITER=210000;
+const hexOf=b=>[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');
+const hasSubtle=()=>{try{return!!(crypto&&crypto.subtle&&crypto.subtle.deriveBits)}catch(e){return false}};
+function newSalt(){try{return hexOf(crypto.getRandomValues(new Uint8Array(16)))}catch(e){return uid()+uid()}}
+async function pbkdf2(pin,salt,iter){const te=new TextEncoder();const k=await crypto.subtle.importKey('raw',te.encode(pin),'PBKDF2',false,['deriveBits']);return hexOf(await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:te.encode(salt),iterations:iter},k,256))}
+// Hash de 2.0.0: SHA-256 simple, o FNV si el navegador no tenía crypto.subtle. fnv=true fuerza FNV.
+async function legacyHash(pin,salt,fnv){const txt=salt+':'+pin;try{if(!fnv&&crypto&&crypto.subtle){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(txt));return'sha256:'+[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}}catch(e){}let h1=0x811c9dc5,h2=0x1234567;for(let i=0;i<txt.length;i++){h1=Math.imul(h1^txt.charCodeAt(i),16777619);h2=Math.imul(h2+txt.charCodeAt(i),2654435761)}return'fnv:'+(h1>>>0).toString(16)+(h2>>>0).toString(16)}
+async function hashPin(pin,salt){if(hasSubtle())return`pbkdf2$${PBKDF2_ITER}$${await pbkdf2(pin,salt,PBKDF2_ITER)}`;return legacyHash(pin,salt)}
+function sameStr(a,b){a=String(a);b=String(b);let d=a.length^b.length;for(let i=0;i<Math.min(a.length,b.length);i++)d|=a.charCodeAt(i)^b.charCodeAt(i);return d===0}
+// ok: el PIN coincide. upgrade: conviene volver a guardarlo con el formato actual.
+async function verifyPin(pin,u){
+  const h=String(u.pinHash||''),m=/^pbkdf2\$(\d{4,8})\$([0-9a-f]{64})$/.exec(h);
+  if(m){const it=+m[1];if(it<10000||it>5000000||!hasSubtle())return{ok:false};return{ok:sameStr(await pbkdf2(pin,String(u.salt),it),m[2]),upgrade:it<PBKDF2_ITER}}
+  return{ok:sameStr(await legacyHash(pin,String(u.salt),h.startsWith('fnv:')),h),upgrade:hasSubtle()};
+}
+// Bloqueo progresivo por usuario, guardado en este dispositivo (no viaja en el .txt):
+// desde el 5.º PIN incorrecto seguido hay que esperar 30 s, y el doble en cada nuevo error (hasta 15 min).
+const LOCK_AFTER=5;let LOCKS={};
+async function loadLocks(){try{const l=await idbGet('pinLocks');LOCKS=isObj(l)?l:{}}catch(e){}}
+const lockLeft=id=>{const l=LOCKS[id];return l&&l.until>Date.now()?Math.ceil((l.until-Date.now())/1000):0};
+const lockMsg=s=>`Demasiados PIN incorrectos. Esperá ${s>90?Math.ceil(s/60)+' min':s+' s'} y volvé a probar.`;
+async function noteFail(id){const l=LOCKS[id]||{n:0,until:0};l.n++;if(l.n>=LOCK_AFTER)l.until=Date.now()+Math.min(900,30*2**(l.n-LOCK_AFTER))*1000;LOCKS[id]=l;try{await idbSet('pinLocks',LOCKS)}catch(e){}return l}
+async function clearFails(id){if(!LOCKS[id])return;delete LOCKS[id];try{await idbSet('pinLocks',LOCKS)}catch(e){}}
 const allLoaded=()=>COLS.every(c=>loaded.has(c));
 let renderQueued=false;
 function bump(){version++;scheduleRender()}
@@ -1385,7 +1412,13 @@ const aErr=m=>{const e=$('#a-err');if(e)e.textContent=m};
 ACT.authLogin=async()=>{
   const A=UI.auth;const u=S.users[A.uid];if(!u||u.active===false){aErr('Elegí un usuario.');return}
   const pin=(A.pin||'').trim();if(!pin){aErr('Ingresá tu PIN.');return}
-  const h=await hashPin(pin,u.salt);if(h!==u.pinHash){await sleep(400);aErr('El PIN no es correcto. Probá de nuevo.');const p=$('#a-pin');if(p){p.value='';p.focus()}A.pin='';return}
+  const clearPin=()=>{const p=$('#a-pin');if(p){p.value='';p.focus()}A.pin=''};
+  await loadLocks();let left=lockLeft(A.uid);if(left){aErr(lockMsg(left));clearPin();return}
+  const r=await verifyPin(pin,u);
+  if(!r.ok){const l=await noteFail(A.uid);await sleep(400);left=lockLeft(A.uid);const rest=LOCK_AFTER-l.n;aErr(left?lockMsg(left):`El PIN no es correcto. Probá de nuevo.${rest<=2?` Te quedan ${rest} ${rest===1?'intento':'intentos'} antes del bloqueo.`:''}`);clearPin();return}
+  await clearFails(A.uid);
+  // PIN de 2.0.0 o con menos iteraciones: se guarda de nuevo con PBKDF2 sin cambiar la fecha del registro.
+  if(r.upgrade){try{const salt=newSalt();await patch('users',A.uid,{salt,pinHash:await hashPin(pin,salt)},{keepStamp:true})}catch(e){console.warn(e)}}
   startSession(A.uid,A.keep);A.pin='';toast(`Hola, ${u.name.split(/\s+/)[0]}`);if(location.hash!=='#inicio')location.hash='#inicio';else render();
 };
 ACT.authSetup=async()=>{
@@ -1394,7 +1427,7 @@ ACT.authSetup=async()=>{
   if(!/^\d{4,8}$/.test(pin)){aErr('El PIN tiene que tener entre 4 y 8 números.');return}
   if(pin!==(A.pin2||'').trim()){aErr('Los PIN no coinciden.');return}
   if(activeUsers().length){render();return}
-  const id='u'+uid(),salt=uid();await put('users',id,{name,role:'admin',active:true,salt,pinHash:await hashPin(pin,salt),createdAt:nowISO(),updatedAt:nowISO()});
+  const id='u'+uid(),salt=newSalt();await put('users',id,{name,role:'admin',active:true,salt,pinHash:await hashPin(pin,salt),createdAt:nowISO(),updatedAt:nowISO()});
   startSession(id,true);await audit('user_create','users',id,`Alta del administrador ${name} en este dispositivo`);A.pin=A.pin2='';toast('Listo, ya podés usar Pañol');render();
 };
 ACT.logout=async()=>{if(await confirmBox('Cerrar sesión','Para volver a entrar vas a necesitar tu PIN. Los datos siguen guardados en este dispositivo.','Cerrar sesión','dark'))logout()};
@@ -1402,8 +1435,8 @@ ACT.logout=async()=>{if(await confirmBox('Cerrar sesión','Para volver a entrar 
 /* ---------- usuarios ---------- */
 function userForm(isNew){return st=>`${isNew?field('Nombre y apellido',`<input id="u-name" type="text" data-mi="name" value="${esc(st.name||'')}">`,'u-name')+field('Perfil',`<div class="opts">${['admin','responsable','consulta'].map(r=>`<button type="button" class="opt ${st.role===r?'on':''}" data-act="mset" data-k="role" data-v="${esc(r)}">${ROLES[r]}</button>`).join('')}</div>`):''}${field(isNew?'PIN inicial (4 a 8 números)':'PIN nuevo (4 a 8 números)',`<input id="u-pin" type="password" inputmode="numeric" maxlength="8" data-mi="pin" value="${esc(st.pin||'')}">`,'u-pin')}${field('Repetí el PIN',`<input id="u-pin2" type="password" inputmode="numeric" maxlength="8" data-mi="pin2" value="${esc(st.pin2||'')}">`,'u-pin2')}`}
 function validPin(st){const p=(st.pin||'').trim();if(!/^\d{4,8}$/.test(p))throw new UErr('El PIN tiene que tener entre 4 y 8 números.');if(p!==(st.pin2||'').trim())throw new UErr('Los PIN no coinciden.');return p}
-ACT.userNew=()=>{if(myRole()!=='admin')return;openModal({title:'Nuevo usuario',render:userForm(true),actions:[{label:'Cancelar',close:true},{label:'Crear usuario',kind:'pri',run:async st=>{if(myRole()!=='admin')throw new UErr('Solo un administrador puede crear usuarios.');const name=(st.name||'').trim();if(name.length<3)throw new UErr('Ingresá nombre y apellido.');if(activeUsers().some(u=>u.name.toLowerCase()===name.toLowerCase()))throw new UErr('Ya existe un usuario con ese nombre.');const pin=validPin(st);const id='u'+uid(),salt=uid();await put('users',id,{name,role:st.role||'responsable',active:true,salt,pinHash:await hashPin(pin,salt),createdAt:nowISO(),updatedAt:nowISO(),by:ME.id});await audit('user_create','users',id,`Alta de usuario ${name} (${ROLES[st.role||'responsable']})`);toast('Usuario creado')}}]});MOD.st.role='responsable';modalRerender()};
-function pinModal(uidv){const u=S.users[uidv];if(!u)return;openModal({title:uidv===ME.id?'Cambiar mi PIN':`PIN de ${u.name}`,render:userForm(false),actions:[{label:'Cancelar',close:true},{label:'Guardar PIN',kind:'pri',run:async st=>{if(uidv!==ME.id&&myRole()!=='admin')throw new UErr('Solo un administrador puede cambiar el PIN de otra persona.');const pin=validPin(st);const salt=uid();await patch('users',uidv,{salt,pinHash:await hashPin(pin,salt),updatedAt:nowISO()});await audit('user_pin','users',uidv,`Cambio de PIN de ${u.name}`);toast('PIN actualizado')}}]})}
+ACT.userNew=()=>{if(myRole()!=='admin')return;openModal({title:'Nuevo usuario',render:userForm(true),actions:[{label:'Cancelar',close:true},{label:'Crear usuario',kind:'pri',run:async st=>{if(myRole()!=='admin')throw new UErr('Solo un administrador puede crear usuarios.');const name=(st.name||'').trim();if(name.length<3)throw new UErr('Ingresá nombre y apellido.');if(activeUsers().some(u=>u.name.toLowerCase()===name.toLowerCase()))throw new UErr('Ya existe un usuario con ese nombre.');const pin=validPin(st);const id='u'+uid(),salt=newSalt();await put('users',id,{name,role:st.role||'responsable',active:true,salt,pinHash:await hashPin(pin,salt),createdAt:nowISO(),updatedAt:nowISO(),by:ME.id});await audit('user_create','users',id,`Alta de usuario ${name} (${ROLES[st.role||'responsable']})`);toast('Usuario creado')}}]});MOD.st.role='responsable';modalRerender()};
+function pinModal(uidv){const u=S.users[uidv];if(!u)return;openModal({title:uidv===ME.id?'Cambiar mi PIN':`PIN de ${u.name}`,render:userForm(false),actions:[{label:'Cancelar',close:true},{label:'Guardar PIN',kind:'pri',run:async st=>{if(uidv!==ME.id&&myRole()!=='admin')throw new UErr('Solo un administrador puede cambiar el PIN de otra persona.');const pin=validPin(st);const salt=newSalt();await patch('users',uidv,{salt,pinHash:await hashPin(pin,salt),updatedAt:nowISO()});await audit('user_pin','users',uidv,`Cambio de PIN de ${u.name}`);toast('PIN actualizado')}}]})}
 ACT.userPin=ds=>pinModal(ds.u);ACT.myPin=()=>pinModal(ME.id);
 ACT.userToggle=async ds=>{const u=S.users[ds.u];if(!u||myRole()!=='admin')return;if(ds.u===ME.id){toast('No podés desactivar tu propio usuario.','err');return}const on=u.active===false;if(!on&&u.role==='admin'&&activeUsers().filter(x=>x.role==='admin').length<2){toast('Tiene que quedar al menos un administrador activo.','err');return}if(!on&&!await confirmBox('Desactivar usuario',`${esc(u.name)} no va a poder ingresar. Su historial se conserva.`,'Desactivar','danger'))return;await act(async()=>{await patch('users',ds.u,{active:on,updatedAt:nowISO()});await audit('user_toggle','users',ds.u,`${on?'Reactivación':'Desactivación'} de usuario ${u.name}`)},on?'Usuario reactivado':'Usuario desactivado')};
 CH.setRole=async(v,el)=>{const u=el.dataset.u;const usr=S.users[u];await act(async()=>{if(myRole()!=='admin')throw new UErr('Solo un administrador puede cambiar perfiles.');if(u===ME.id)throw new UErr('No podés cambiar tu propio perfil.');if(usr.role==='admin'&&v!=='admin'&&activeUsers().filter(x=>x.role==='admin').length<2)throw new UErr('Tiene que quedar al menos un administrador.');await patch('users',u,{role:v,updatedAt:nowISO()});await audit('role_set','users',u,`Perfil de ${usr.name}: ${ROLES[v]}`)},'Perfil actualizado')};
