@@ -14,7 +14,7 @@ Los datos se comparten entre equipos con un archivo `.txt`.
 
 ## 1. Publicarla (una sola vez)
 
-Para instalarse como app, Chrome exige que la página se abra desde `https://` o desde `localhost`. Al abrir `index.html` con doble clic, la app funciona, pero no se puede instalar ni usar sin conexión.
+Para instalarse como app, Chrome exige que la página se abra desde `https://` o desde `localhost`. Al abrir `index.html` con doble clic, la app funciona, pero no se puede instalar ni usar sin conexión. Además, la verificación del PIN necesita las funciones criptográficas del navegador (`crypto.subtle`), que solo están disponibles en `https://` o `localhost`: publicala siempre así.
 
 **Opción A: Netlify Drop (gratis, 2 minutos, sin programar)**
 1. Entrá a https://app.netlify.com/drop

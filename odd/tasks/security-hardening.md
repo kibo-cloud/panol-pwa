@@ -74,7 +74,22 @@ with their behavior. Single PR-sized branch requested by the user; chain decisio
       online); inline script `node --check` OK; `node tests/csp-hash.mjs --check` OK. Commit `2fcb173`.
 - [ ] T7 Close: `versiones/panol v2.1.0`, workspace index update, GitHub repo (user-authorized).
 
-## Route declaration
+## Verifier correction
+- [x] V1 Independent verifier (PASS with minor issues) — one scoped correction, test-first
+      (`tests/e2e/specs/t7-verifier.mjs`, 6 specs, all RED before the fix):
+      1. `panol-unsaved` removed after every successful IDB write; Replace clears it and writes
+         tombstones for every record it drops (no resurrection via copy, tab or later merge).
+      2. Inputs carry `maxlength` and validators enforce `LIM`; `put`/`patch` reject records
+         that fail the schema (`guardRec`); records dropped on load go to IDB `quarantine` with a
+         toast and an integrity entry.
+      3. Dates must be ISO-8601 on import (`alta`/`effectiveFrom` date-only); invalid stored
+         dates become ''; merge clamps stamps more than 1 day in the future to now.
+      4. Login guarded against re-entry (button disabled while `verifyPin` runs).
+      LEEME: must be served over https or localhost (crypto.subtle). Unchanged by request: mixed-
+      version ties, tombstone pruning, insecure context.
+      Evidence: `node tests/e2e/run.mjs` 30 passed, 0 failed, 0 skipped; inline `node --check` OK;
+      `node tests/csp-hash.mjs --check` OK. Commit: see `git log` (`fix: address verifier findings for 2.1.0`).
+
 - Setup (backup `versiones/panol v2.0.0`, `git init`, baseline commit 11296b1): inline.
 - T1–T6: delegated to one writer (2+ non-trivial files; preparation reading of a 1673-line file).
 - T7: parent, inline.

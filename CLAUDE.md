@@ -37,7 +37,12 @@ equipos con un archivo `.txt` (Combinar o Reemplazar todo).
 - PIN: `pbkdf2$210000$<hex>`; `sha256:` y `fnv:` de 2.0.0 se aceptan y se actualizan al ingresar.
   Bloqueo progresivo por equipo en IndexedDB `pinLocks` (no viaja en el `.txt`).
 - Guardado: en la tarea siguiente, flush en `pagehide`, copia de seguridad `panol-unsaved` en
-  localStorage si una escritura pudo quedar cortada (se combina al arrancar).
+  localStorage si una escritura pudo quedar cortada (se combina al arrancar y se borra apenas
+  se escribe en IndexedDB). Reemplazar deja marcas de borrado para todo lo que descarta.
+- `put`/`patch` validan contra el mismo esquema (`guardRec`); los formularios tienen `maxlength`
+  (`LIM`). Registros invalidos al cargar van a IndexedDB `quarantine` con aviso visible.
+- Fechas ISO-8601 obligatorias al importar; al combinar, fechas a mas de un dia en el futuro
+  cuentan como ahora.
 
 ## Como correr
 

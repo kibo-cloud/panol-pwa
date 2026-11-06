@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-FIOudZ8OauTY3hdFL455Ycj2JBoAQtNk9/HSnMFfC8g=' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-RYIUw3Z0CmezcMlGl+j+gQTlpeHRe9h1hmBDhdHFX2Y=' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#101828">
 <link rel="manifest" href="manifest.webmanifest">
@@ -535,6 +535,8 @@ function wrange(p){const[a,b]=weekRange(p);return`${a.getDate()}–${b.getDate()
 function inRange(iso,[a,b]){if(!iso)return false;const t=new Date(iso).getTime();return t>=a.getTime()&&t<=b.getTime()}
 function groupBy(arr,k){const o={};for(const x of arr){(o[x[k]]||(o[x[k]]=[])).push(x)}return o}
 class UErr extends Error{}
+const LIM={name:120,legajo:50,code:60,text:2000};
+function tooLong(v,n,what){if(String(v||'').length>n)throw new UErr(`${what} admite hasta ${n} caracteres.`)}
 
 /* ================= íconos ================= */
 const IC={
@@ -606,7 +608,10 @@ const vInt=(a,b)=>v=>Number.isInteger(v)&&v>=a&&v<=b;
 const vOne=(...a)=>v=>a.includes(v);
 const opt=f=>v=>v==null||f(v);
 const PRIM=v=>v==null||typeof v==='boolean'||vNum(v)||vStr()(v);
-const STR=opt(vStr()),DATE=opt(vStr(40)),OID=opt(validId),NUM=opt(vNum),BOOL=opt(v=>typeof v==='boolean');
+// Fechas: ISO-8601 con hora (o solo día para alta y vigencia); '' es una fecha vacía.
+const ISO_DT=/^\d{4}-\d{2}-\d{2}T/,ISO_D=/^\d{4}-\d{2}-\d{2}/;
+const DATE=opt(v=>v===''||(vStr(40)(v)&&ISO_DT.test(v))),DAY=opt(v=>v===''||(vStr(40)(v)&&ISO_D.test(v)));
+const STR=opt(vStr()),OID=opt(validId),NUM=opt(vNum),BOOL=opt(v=>typeof v==='boolean');
 const POOL_K=['disponible','asignado','reparacion','retirado','pendiente','baja','externo'];
 function recBad(r,sc){if(!isObj(r))return'registro';for(const k of sc.req||[])if(r[k]==null)return k;for(const [k,v] of Object.entries(r)){const f=sc.f[k]||COMMON_F[k];if(f?!f(v):!PRIM(v))return k}return null}
 const shape=sc=>v=>recBad(v,sc)===null;
@@ -616,8 +621,8 @@ const ITEM=shape({req:['state'],f:{state:vOne('bueno','cambio','faltante'),note:
 const TRANSFER=shape({req:['toolId','qty','from','to'],f:{toolId:validId,qty:vNum,from:vOne(...POOL_K),to:vOne(...POOL_K),unitId:OID}});
 const ROLE_K=['admin','responsable','consulta'];
 const SCHEMA={
-  techs:{req:['name'],f:{name:vStr(500),legajo:opt(v=>vStr(200)(v)||vNum(v)),shiftId:OID,active:BOOL,alta:DATE}},
-  shiftChanges:{req:['techId'],f:{techId:validId,from:OID,to:OID,fromName:STR,toName:STR,effectiveFrom:DATE,note:STR,at:DATE}},
+  techs:{req:['name'],f:{name:vStr(500),legajo:opt(v=>vStr(200)(v)||vNum(v)),shiftId:OID,active:BOOL,alta:DAY}},
+  shiftChanges:{req:['techId'],f:{techId:validId,from:OID,to:OID,fromName:STR,toName:STR,effectiveFrom:DAY,note:STR,at:DATE}},
   categories:{req:['name'],f:{name:vStr(500)}},
   tools:{req:['name'],f:{name:vStr(500),description:STR,categoryId:OID,serialized:BOOL,active:BOOL}},
   units:{req:['toolId','code','status'],f:{toolId:validId,code:vStr(200),status:vOne(...POOL_K),techId:OID}},
@@ -636,18 +641,24 @@ const CONFIG_SCHEMA={
   permisos:{f:Object.fromEntries(ROLE_K.map(r=>[r,opt(v=>isObj(v)&&Object.entries(v).every(([k,x])=>validId(k)&&typeof x==='boolean'))]))}
 };
 const DEL_KEY=k=>{const i=k.indexOf('/');return i>0&&COLS.includes(k.slice(0,i))&&validId(k.slice(i+1))};
+const schemaOf=(c,id)=>c==='config'?(CONFIG_SCHEMA[id]||SCHEMA.config):SCHEMA[c];
+// Datos ya guardados: una fecha ilegible se vacía ('') en lugar de perder el registro.
+function fixDates(r,sc){if(!isObj(r))return r;const o={...r};for(const k of Object.keys(o)){const f=sc.f[k]||COMMON_F[k];if((f===DATE||f===DAY)&&!f(o[k]))o[k]=''}return o}
+// Registros que no pasan la revisión al cargar: no se pierden en silencio. Se guardan tal cual
+// en IndexedDB (clave quarantine), se avisa y quedan en la verificación de integridad.
+async function quarantine(list){toast(`Se apartaron ${list.length} ${list.length===1?'registro':'registros'} con formato no válido. Quedan guardados aparte en este equipo (Administración › Datos e integridad).`,'err');try{const q=(await idbGet('quarantine'))||[];q.push({at:nowISO(),records:list});await idbSet('quarantine',q);B.quarantined=q.reduce((a,x)=>a+x.records.length,0);scheduleRender()}catch(e){console.warn(e)}}
 // Revisa todas las colecciones. strict: el primer problema rechaza todo (importación);
 // si no, descarta solo los registros inválidos (datos ya guardados en el dispositivo).
 function checkData(src,strict){
   if(!isObj(src))throw new UErr('El archivo no tiene datos de Pañol.');
-  const data={},deleted={},bad=[];
+  const data={},deleted={},bad=[],dropped=[];
   for(const c of COLS){
     data[c]={};const col=src[c];if(col==null)continue;
     if(!isObj(col)){bad.push(c);continue}
-    for(const [id,r] of Object.entries(col)){const sc=c==='config'?(CONFIG_SCHEMA[id]||SCHEMA.config):SCHEMA[c];const e=validId(id)?recBad(r,sc):'id';if(e)bad.push(`${c} › ${validId(id)?id:'id no válido'} › ${e}`);else data[c][id]=clone(r)}
+    for(const [id,r0] of Object.entries(col)){const sc=schemaOf(c,id);const r=strict?r0:fixDates(r0,sc);const e=validId(id)?recBad(r,sc):'id';if(e){bad.push(`${c} › ${validId(id)?id:'id no válido'} › ${e}`);dropped.push({col:c,id,record:r0})}else data[c][id]=clone(r)}
   }
-  if(src.deleted!=null){if(!isObj(src.deleted))bad.push('deleted');else for(const [k,at] of Object.entries(src.deleted)){if(DEL_KEY(k)&&vStr(40)(at))deleted[k]=at;else bad.push('deleted › '+k)}}
-  if(bad.length){if(strict)throw new UErr(`El archivo tiene datos con un formato no válido (${bad[0]}). No se cargó nada.`);console.warn('Registros descartados por formato no válido:',bad)}
+  if(src.deleted!=null){if(!isObj(src.deleted))bad.push('deleted');else for(const [k,at] of Object.entries(src.deleted)){if(DEL_KEY(k)&&vStr(40)(at)&&ISO_DT.test(at))deleted[k]=at;else bad.push('deleted › '+k)}}
+  if(bad.length){if(strict)throw new UErr(`El archivo tiene datos con un formato no válido (${bad[0]}). No se cargó nada.`);console.warn('Registros apartados por formato no válido:',bad);if(dropped.length)quarantine(dropped)}
   return{data,deleted};
 }
 const hasAdmin=users=>Object.values(users||{}).some(u=>u.role==='admin'&&u.active!==false);
@@ -667,6 +678,7 @@ function parseDataText(txt){
 function loadPayload(p,strict){const {data,deleted}=checkData(p.data,!!strict);for(const c of COLS)S[c]=data[c];DEL=deleted}
 async function initBackend(){
   try{const p=await idbGet('data');if(p&&p.app==='panol'&&isObj(p.data))loadPayload(p)}catch(e){console.warn(e);B.storageError=true}
+  try{const q=await idbGet('quarantine');if(Array.isArray(q))B.quarantined=q.reduce((a,x)=>a+((x&&x.records)||[]).length,0)}catch(e){}
   recoverUnsaved();
   try{FILE.savedAt=(await idbGet('fileSavedAt'))||null;const h=await idbGet('fileHandle');if(h){FILE.handle=h;FILE.name=h.name;FILE.perm=h.queryPermission?await h.queryPermission({mode:'readwrite'}):'prompt'}}catch(e){}
   try{if(navigator.storage&&navigator.storage.persist)B.persisted=await navigator.storage.persist()}catch(e){}
@@ -680,7 +692,7 @@ if(chan)chan.onmessage=async ev=>{if(ev.data!=='saved')return;try{const p=await 
   if(idbTimer||writing){const o=checkData(p.data,false);mergeInto(S,DEL,o.data,o.deleted);schedulePersist()}else loadPayload(p);
   if(ME.id&&!S.users[ME.id])logout(true);version++;scheduleRender()}catch(e){console.warn(e)}};
 let idbTimer=null,fileTimer=null,writing=0;
-async function writeIdb(){writing++;try{await idbPutNow('data',payload());B.storageError=false;if(chan)chan.postMessage('saved')}catch(e){console.warn(e);B.storageError=true;toast('No se pudo guardar en este dispositivo. Descargá el archivo .txt como resguardo.','err')}finally{writing--}}
+async function writeIdb(){writing++;try{await idbPutNow('data',payload());B.storageError=false;try{localStorage.removeItem(UNSAVED)}catch(x){}if(chan)chan.postMessage('saved')}catch(e){console.warn(e);B.storageError=true;toast('No se pudo guardar en este dispositivo. Descargá el archivo .txt como resguardo.','err')}finally{writing--}}
 // Se guarda en la tarea siguiente: junta las escrituras seguidas (p. ej. los datos de demostración)
 // sin dejar una ventana en la que recargar la página pierda el último cambio.
 function schedulePersist(){
@@ -752,17 +764,22 @@ function who(id){if(!id)return'—';const u=S.users[id];if(!u)return id==='local
 async function retry(fn){return fn()}
 function tag(data){return DEMO_FLAG?{...data,demo:true}:data}
 // Cada escritura deja updatedAt: Combinar decide por fecha (gana la más nueva; si empatan, queda la local).
-async function put(col,id,data){data=tag(data);S[col][id]={...clone(data),updatedAt:nowISO()};delete DEL[col+'/'+id];bump();schedulePersist()}
+// Nada se guarda si no pasa el mismo esquema que se usa al cargar (no se crean registros que después se descartarían).
+function guardRec(col,id,r){const e=validId(id)?recBad(r,schemaOf(col,id)):'id';if(e)throw new UErr(`No se pudo guardar: el dato «${e}» es demasiado largo o no es válido.`)}
+async function put(col,id,data){data=tag(data);const rec={...clone(data),updatedAt:nowISO()};guardRec(col,id,rec);S[col][id]=rec;delete DEL[col+'/'+id];bump();schedulePersist()}
 function deepMerge(a,b){for(const k of Object.keys(b)){if(b[k]&&typeof b[k]==='object'&&!Array.isArray(b[k])&&a[k]&&typeof a[k]==='object'&&!Array.isArray(a[k]))deepMerge(a[k],b[k]);else a[k]=b[k]}return a}
-async function patch(col,id,data,o={}){if(!S[col][id])throw new UErr('El registro no existe.');const r=deepMerge(clone(S[col][id]),clone(data));if(!o.keepStamp)r.updatedAt=nowISO();S[col][id]=r;bump();schedulePersist()}
+async function patch(col,id,data,o={}){if(!S[col][id])throw new UErr('El registro no existe.');const r=deepMerge(clone(S[col][id]),clone(data));if(!o.keepStamp)r.updatedAt=nowISO();guardRec(col,id,r);S[col][id]=r;bump();schedulePersist()}
 // Borrar deja una marca (DEL) con la fecha, así Combinar no vuelve a traer el registro.
 async function del(col,id){delete S[col][id];DEL[col+'/'+id]=nowISO();bump();schedulePersist()}
 // Combina src en dst (colecciones y borrados) registro por registro: gana la fecha más nueva,
 // los empates quedan como están en dst, y un borrado más nuevo elimina el registro.
 function mergeInto(dst,dstDel,src,srcDel){
+  // Fechas más de un día en el futuro (reloj adelantado o archivo editado) cuentan como ahora.
+  const now=nowISO(),lim=new Date(Date.now()+864e5).toISOString(),cl=t=>typeof t==='string'&&t>lim?now:t;
+  const clampRec=r=>{const o=clone(r);for(const k of['updatedAt','finishedAt','at','createdAt','startedAt'])if(k in o)o[k]=cl(o[k]);return o};
   const localTime=(c,id)=>{const cur=dst[c][id];return cur?stamp(cur):(dstDel[c+'/'+id]||'')};
-  for(const c of COLS)for(const [id,r] of Object.entries(src[c]||{})){const k=c+'/'+id;const known=dst[c][id]||k in dstDel;if(!known||stamp(r)>localTime(c,id)){dst[c][id]=clone(r);delete dstDel[k]}}
-  for(const [k,at] of Object.entries(srcDel||{})){const i=k.indexOf('/'),c=k.slice(0,i),id=k.slice(i+1);if(!dst[c])continue;if(at>localTime(c,id)){delete dst[c][id];dstDel[k]=at}}
+  for(const c of COLS)for(const [id,r0] of Object.entries(src[c]||{})){const r=clampRec(r0),k=c+'/'+id;const known=dst[c][id]||k in dstDel;if(!known||stamp(r)>localTime(c,id)){dst[c][id]=clone(r);delete dstDel[k]}}
+  for(const [k,at0] of Object.entries(srcDel||{})){const at=cl(at0),i=k.indexOf('/'),c=k.slice(0,i),id=k.slice(i+1);if(!dst[c])continue;if(at>localTime(c,id)){delete dst[c][id];dstDel[k]=at}}
 }
 async function audit(action,entity,entityId,detail){try{await put('audit','l'+uid(),{action,entity,entityId,detail,at:nowISO(),by:ME.id})}catch(e){console.warn(e)}}
 function errMsg(e){
@@ -1236,8 +1253,8 @@ function mvForm(){
       }
     }
   }
-  h+=field('Motivo',`<input id="mvreason" type="text" data-in="mvReason" value="${esc(m.reason||'')}" placeholder="Motivo de la ${m.type==='devolucion'?'devolución':m.type==='retiro'?'baja de asignación':'entrega'}"><div class="quick">${(REASONS[m.type]||[]).map(r=>`<button type="button" class="qchip" data-act="mvReasonQ" data-q="${esc(r)}">${esc(r)}</button>`).join('')}</div>`,'mvreason');
-  h+=field('Observaciones',`<textarea id="mvnotes" data-in="mvNotes" rows="2" placeholder="Opcional">${esc(m.notes||'')}</textarea>`,'mvnotes');
+  h+=field('Motivo',`<input id="mvreason" type="text" maxlength="2000" data-in="mvReason" value="${esc(m.reason||'')}" placeholder="Motivo de la ${m.type==='devolucion'?'devolución':m.type==='retiro'?'baja de asignación':'entrega'}"><div class="quick">${(REASONS[m.type]||[]).map(r=>`<button type="button" class="qchip" data-act="mvReasonQ" data-q="${esc(r)}">${esc(r)}</button>`).join('')}</div>`,'mvreason');
+  h+=field('Observaciones',`<textarea id="mvnotes" maxlength="2000" data-in="mvNotes" rows="2" placeholder="Opcional">${esc(m.notes||'')}</textarea>`,'mvnotes');
   h+=`<button class="btn ${m.type==='reposicion'?'dark':'pri'} lg block" data-act="mvSubmit">${SUBMIT[m.type]}</button>`;
   return h;
 }
@@ -1378,6 +1395,7 @@ function integrity(){
     for(const k of['disponible','asignado','reparacion','retirado','pendiente','baja'])if(p[k]<0)out.push({sev:'bad',t:`${t.name}: saldo negativo`,s:`${POOL[k]}: ${p[k]}`});
     if(t.serialized){for(const k of['disponible','asignado','reparacion','retirado','pendiente','baja']){const n=(d.unitsByTool[t.id]||[]).filter(u=>u.status===k).length;if(n!==p[k])out.push({sev:'warn',t:`${t.name}: unidades y movimientos difieren`,s:`${POOL[k]}: ${n} unidades contra ${p[k]} según movimientos.`})}}
   }
+  if(B.quarantined)out.push({sev:'warn',t:'Registros apartados al cargar',s:`${B.quarantined} registros con formato no válido quedaron apartados en este equipo (IndexedDB, clave quarantine) y no se muestran.`});
   for(const u of d.units){const c=(u.code||'').toLowerCase();if(codes[c])out.push({sev:'bad',t:'Código duplicado',s:u.code});codes[c]=1}
   for(const a of d.activeAsg){const t=S.techs[a.techId];if(!t)out.push({sev:'bad',t:'Asignación sin técnico',s:toolName(a.toolId)});else if(t.active===false)out.push({sev:'warn',t:`${t.name} está inactivo y tiene herramientas`,s:`${toolName(a.toolId)}: registrá la devolución o el retiro.`})}
   return out;
@@ -1420,7 +1438,7 @@ function authView(){
   const pinField=(id,key,label,ph)=>field(label,`<div class="pinw"><input id="${esc(id)}" type="${A.show?'text':'password'}" inputmode="numeric" autocomplete="${setup?'new-password':'current-password'}" maxlength="8" data-in="${esc(key)}" placeholder="${ph}" value=""><button type="button" class="icon-btn" data-act="authShow" aria-label="${A.show?'Ocultar PIN':'Mostrar PIN'}">${icon(A.show?'eyeoff':'eye',18)}</button></div>`,id);
   const install=B.installEvt?`<div class="hint">${icon('dl',16)}<span><b>Instalá la app.</b> Abrila desde la pantalla de inicio, como cualquier aplicación. <button class="btn sm" data-act="install" style="margin-top:8px">Instalar Pañol</button></span></div>`:'';
   const body=setup?`<div><h2 class="si">Configurá Pañol en este dispositivo</h2><p class="s" style="margin:4px 0 0">Creá el usuario administrador. Después podés sumar responsables y usuarios de consulta.</p></div>
-    <div class="authf">${field('Nombre y apellido',`<input id="a-name" type="text" autocomplete="name" data-in="authName" placeholder="Ej.: Laura Gómez">`,'a-name')}${pinField('a-pin','authPin','PIN de 4 a 8 números','••••')}${pinField('a-pin2','authPin2','Repetí el PIN','••••')}</div>
+    <div class="authf">${field('Nombre y apellido',`<input id="a-name" type="text" maxlength="120" autocomplete="name" data-in="authName" placeholder="Ej.: Laura Gómez">`,'a-name')}${pinField('a-pin','authPin','PIN de 4 a 8 números','••••')}${pinField('a-pin2','authPin2','Repetí el PIN','••••')}</div>
     <span class="aerr" id="a-err" role="alert"></span>
     <button class="btn pri lg block" data-act="authSetup">Crear administrador e ingresar</button>
     <div class="divider">¿Ya usás Pañol en otro equipo?</div>
@@ -1435,7 +1453,10 @@ IN.authName=v=>{UI.auth.name=v};IN.authPin=v=>{UI.auth.pin=v};IN.authPin2=v=>{UI
 CH.authUser=v=>{UI.auth.uid=v};CH.authKeep=(v,el)=>{UI.auth.keep=el.checked};
 ACT.authShow=()=>{UI.auth.show=!UI.auth.show;const keep={name:UI.auth.name};render();const n=$('#a-name');if(n)n.value=keep.name||'';UI.auth.pin='';UI.auth.pin2=''};
 const aErr=m=>{const e=$('#a-err');if(e)e.textContent=m};
-ACT.authLogin=async()=>{
+// Un solo intento a la vez: varios envíos simultáneos no pueden saltear el bloqueo.
+let loginBusy=false;
+ACT.authLogin=async()=>{if(loginBusy)return;loginBusy=true;const btn=$('[data-act="authLogin"]');if(btn)btn.disabled=true;try{await authLoginRun()}finally{loginBusy=false;const b=$('[data-act="authLogin"]');if(b)b.disabled=false}};
+async function authLoginRun(){
   const A=UI.auth;const u=S.users[A.uid];if(!u||u.active===false){aErr('Elegí un usuario.');return}
   const pin=(A.pin||'').trim();if(!pin){aErr('Ingresá tu PIN.');return}
   const clearPin=()=>{const p=$('#a-pin');if(p){p.value='';p.focus()}A.pin=''};
@@ -1446,10 +1467,11 @@ ACT.authLogin=async()=>{
   // PIN de 2.0.0 o con menos iteraciones: se guarda de nuevo con PBKDF2 sin cambiar la fecha del registro.
   if(r.upgrade){try{const salt=newSalt();await patch('users',A.uid,{salt,pinHash:await hashPin(pin,salt)},{keepStamp:true})}catch(e){console.warn(e)}}
   startSession(A.uid,A.keep);A.pin='';toast(`Hola, ${u.name.split(/\s+/)[0]}`);if(location.hash!=='#inicio')location.hash='#inicio';else render();
-};
+}
 ACT.authSetup=async()=>{
   const A=UI.auth;const name=(A.name||'').trim();const pin=(A.pin||'').trim();
   if(name.length<3){aErr('Ingresá nombre y apellido.');return}
+  if(name.length>LIM.name){aErr(`El nombre admite hasta ${LIM.name} caracteres.`);return}
   if(!/^\d{4,8}$/.test(pin)){aErr('El PIN tiene que tener entre 4 y 8 números.');return}
   if(pin!==(A.pin2||'').trim()){aErr('Los PIN no coinciden.');return}
   if(activeUsers().length){render();return}
@@ -1459,9 +1481,9 @@ ACT.authSetup=async()=>{
 ACT.logout=async()=>{if(await confirmBox('Cerrar sesión','Para volver a entrar vas a necesitar tu PIN. Los datos siguen guardados en este dispositivo.','Cerrar sesión','dark'))logout()};
 
 /* ---------- usuarios ---------- */
-function userForm(isNew){return st=>`${isNew?field('Nombre y apellido',`<input id="u-name" type="text" data-mi="name" value="${esc(st.name||'')}">`,'u-name')+field('Perfil',`<div class="opts">${['admin','responsable','consulta'].map(r=>`<button type="button" class="opt ${st.role===r?'on':''}" data-act="mset" data-k="role" data-v="${esc(r)}">${ROLES[r]}</button>`).join('')}</div>`):''}${field(isNew?'PIN inicial (4 a 8 números)':'PIN nuevo (4 a 8 números)',`<input id="u-pin" type="password" inputmode="numeric" maxlength="8" data-mi="pin" value="${esc(st.pin||'')}">`,'u-pin')}${field('Repetí el PIN',`<input id="u-pin2" type="password" inputmode="numeric" maxlength="8" data-mi="pin2" value="${esc(st.pin2||'')}">`,'u-pin2')}`}
+function userForm(isNew){return st=>`${isNew?field('Nombre y apellido',`<input id="u-name" type="text" maxlength="120" data-mi="name" value="${esc(st.name||'')}">`,'u-name')+field('Perfil',`<div class="opts">${['admin','responsable','consulta'].map(r=>`<button type="button" class="opt ${st.role===r?'on':''}" data-act="mset" data-k="role" data-v="${esc(r)}">${ROLES[r]}</button>`).join('')}</div>`):''}${field(isNew?'PIN inicial (4 a 8 números)':'PIN nuevo (4 a 8 números)',`<input id="u-pin" type="password" inputmode="numeric" maxlength="8" data-mi="pin" value="${esc(st.pin||'')}">`,'u-pin')}${field('Repetí el PIN',`<input id="u-pin2" type="password" inputmode="numeric" maxlength="8" data-mi="pin2" value="${esc(st.pin2||'')}">`,'u-pin2')}`}
 function validPin(st){const p=(st.pin||'').trim();if(!/^\d{4,8}$/.test(p))throw new UErr('El PIN tiene que tener entre 4 y 8 números.');if(p!==(st.pin2||'').trim())throw new UErr('Los PIN no coinciden.');return p}
-ACT.userNew=()=>{if(myRole()!=='admin')return;openModal({title:'Nuevo usuario',render:userForm(true),actions:[{label:'Cancelar',close:true},{label:'Crear usuario',kind:'pri',run:async st=>{if(myRole()!=='admin')throw new UErr('Solo un administrador puede crear usuarios.');const name=(st.name||'').trim();if(name.length<3)throw new UErr('Ingresá nombre y apellido.');if(activeUsers().some(u=>u.name.toLowerCase()===name.toLowerCase()))throw new UErr('Ya existe un usuario con ese nombre.');const pin=validPin(st);const id='u'+uid(),salt=newSalt();await put('users',id,{name,role:st.role||'responsable',active:true,salt,pinHash:await hashPin(pin,salt),createdAt:nowISO(),updatedAt:nowISO(),by:ME.id});await audit('user_create','users',id,`Alta de usuario ${name} (${ROLES[st.role||'responsable']})`);toast('Usuario creado')}}]});MOD.st.role='responsable';modalRerender()};
+ACT.userNew=()=>{if(myRole()!=='admin')return;openModal({title:'Nuevo usuario',render:userForm(true),actions:[{label:'Cancelar',close:true},{label:'Crear usuario',kind:'pri',run:async st=>{if(myRole()!=='admin')throw new UErr('Solo un administrador puede crear usuarios.');const name=(st.name||'').trim();if(name.length<3)throw new UErr('Ingresá nombre y apellido.');tooLong(name,LIM.name,'El nombre');if(activeUsers().some(u=>u.name.toLowerCase()===name.toLowerCase()))throw new UErr('Ya existe un usuario con ese nombre.');const pin=validPin(st);const id='u'+uid(),salt=newSalt();await put('users',id,{name,role:st.role||'responsable',active:true,salt,pinHash:await hashPin(pin,salt),createdAt:nowISO(),updatedAt:nowISO(),by:ME.id});await audit('user_create','users',id,`Alta de usuario ${name} (${ROLES[st.role||'responsable']})`);toast('Usuario creado')}}]});MOD.st.role='responsable';modalRerender()};
 function pinModal(uidv){const u=S.users[uidv];if(!u)return;openModal({title:uidv===ME.id?'Cambiar mi PIN':`PIN de ${u.name}`,render:userForm(false),actions:[{label:'Cancelar',close:true},{label:'Guardar PIN',kind:'pri',run:async st=>{if(uidv!==ME.id&&myRole()!=='admin')throw new UErr('Solo un administrador puede cambiar el PIN de otra persona.');const pin=validPin(st);const salt=newSalt();await patch('users',uidv,{salt,pinHash:await hashPin(pin,salt),updatedAt:nowISO()});await audit('user_pin','users',uidv,`Cambio de PIN de ${u.name}`);toast('PIN actualizado')}}]})}
 ACT.userPin=ds=>pinModal(ds.u);ACT.myPin=()=>pinModal(ME.id);
 ACT.userToggle=async ds=>{const u=S.users[ds.u];if(!u||myRole()!=='admin')return;if(ds.u===ME.id){toast('No podés desactivar tu propio usuario.','err');return}const on=u.active===false;if(!on&&u.role==='admin'&&activeUsers().filter(x=>x.role==='admin').length<2){toast('Tiene que quedar al menos un administrador activo.','err');return}if(!on&&!await confirmBox('Desactivar usuario',`${esc(u.name)} no va a poder ingresar. Su historial se conserva.`,'Desactivar','danger'))return;await act(async()=>{await patch('users',ds.u,{active:on,updatedAt:nowISO()});await audit('user_toggle','users',ds.u,`${on?'Reactivación':'Desactivación'} de usuario ${u.name}`)},on?'Usuario reactivado':'Usuario desactivado')};
@@ -1510,7 +1532,10 @@ function importText(txt,handle){
     const mode=empty?'replace':(st.mode||'merge');
     if(mode==='replace'){
       if(!hasAdmin(p.data.users))throw new UErr('El archivo no tiene un administrador activo. Reemplazar dejaría el equipo sin administrador.');
-      for(const c of COLS)S[c]=clone(p.data[c]);DEL=clone(p.deleted);
+      // Lo que el equipo tenía y el archivo no, queda marcado como borrado: así ni la copia de
+      // seguridad ni otra pestaña ni un Combinar posterior lo traen de vuelta.
+      const now=nowISO(),nd=clone(p.deleted);for(const c of COLS)for(const id of Object.keys(S[c]))if(!p.data[c][id]){const k=c+'/'+id;if(!(nd[k]>now))nd[k]=now}
+      for(const c of COLS)S[c]=clone(p.data[c]);DEL=nd;try{localStorage.removeItem(UNSAVED)}catch(e){}
     }else{
       const nd=Object.fromEntries(COLS.map(c=>[c,clone(S[c])])),ndel=clone(DEL);mergeInto(nd,ndel,p.data,p.deleted);
       if(hasAdmin(S.users)&&!hasAdmin(nd.users))throw new UErr('Combinar dejaría el equipo sin administrador activo. No se cargó nada.');
@@ -1565,11 +1590,11 @@ ACT.openPeriod=ds=>{
 /* técnicos */
 function techForm(t){
   const d=derive();
-  return st=>`${field('Nombre y apellido',`<input id="f-name" type="text" data-mi="name" value="${esc(st.name)}" autocomplete="off">`,'f-name')}${field('Legajo o identificador',`<input id="f-leg" type="text" data-mi="legajo" value="${esc(st.legajo)}" autocomplete="off">`,'f-leg')}${t?'':field('Turno',`<select id="f-shift" data-mi="shiftId">${optList(d.shifts.map(s=>[s.id,s.name]),st.shiftId)}</select>`,'f-shift')}${field('Fecha de alta',`<input id="f-alta" type="date" data-mi="alta" value="${esc(st.alta)}">`,'f-alta')}${t?`<p class="muted sm">Para cambiar el turno usá Cambiar turno, así queda registrado en el historial.</p>`:''}`;
+  return st=>`${field('Nombre y apellido',`<input id="f-name" type="text" maxlength="120" data-mi="name" value="${esc(st.name)}" autocomplete="off">`,'f-name')}${field('Legajo o identificador',`<input id="f-leg" type="text" maxlength="50" data-mi="legajo" value="${esc(st.legajo)}" autocomplete="off">`,'f-leg')}${t?'':field('Turno',`<select id="f-shift" data-mi="shiftId">${optList(d.shifts.map(s=>[s.id,s.name]),st.shiftId)}</select>`,'f-shift')}${field('Fecha de alta',`<input id="f-alta" type="date" data-mi="alta" value="${esc(st.alta)}">`,'f-alta')}${t?`<p class="muted sm">Para cambiar el turno usá Cambiar turno, así queda registrado en el historial.</p>`:''}`;
 }
 function validTech(st,exceptId){
   const name=(st.name||'').trim(),leg=(st.legajo||'').trim();
-  if(name.length<3)throw new UErr('Ingresá nombre y apellido.');if(!leg)throw new UErr('Ingresá el legajo.');
+  if(name.length<3)throw new UErr('Ingresá nombre y apellido.');if(!leg)throw new UErr('Ingresá el legajo.');tooLong(name,LIM.name,'El nombre');tooLong(leg,LIM.legajo,'El legajo');
   const dup=Object.entries(S.techs).find(([id,t])=>id!==exceptId&&String(t.legajo).trim().toLowerCase()===leg.toLowerCase());
   if(dup)throw new UErr(`El legajo ${leg} ya pertenece a ${dup[1].name}.`);
   return{name,leg};
@@ -1581,7 +1606,7 @@ ACT.techActive=async ds=>{const t=S.techs[ds.t];const n=(derive().asgByTech[ds.t
   await act(async()=>{gate('techs_edit');await patch('techs',ds.t,{active:on,updatedAt:nowISO()});await audit(on?'tech_activate':'tech_deactivate','techs',ds.t,`${on?'Reactivación':'Desactivación'} de técnico ${t.name}`)},on?'Técnico reactivado':'Técnico desactivado')};
 ACT.shiftChange=ds=>{const t=S.techs[ds.t];if(!t||!gateUI('shift_change'))return;const d=derive();
   const hist=Object.values(S.shiftChanges).filter(x=>x.techId===ds.t).sort((a,b)=>(b.at||'').localeCompare(a.at||'')).slice(0,3);
-  openModal({title:'Cambio de turno',render:st=>`<p class="muted" style="margin-top:0">${esc(t.name)} · Leg. ${esc(t.legajo)}</p>${field('Nuevo turno',`<div class="opts">${d.shifts.map((s,i)=>{const cur=s.id===t.shiftId;return`<button type="button" class="opt ${st.to===s.id?'on':''}" ${cur?'disabled aria-disabled="true" style="opacity:.55"':`data-act="mset" data-k="to" data-v="${esc(s.id)}"`}>${icon(SHIFT_IC(i),16)}${esc(s.name)}${cur?' (actual)':''}</button>`}).join('')}</div>`)}${field('Desde',`<input id="f-nd" type="date" data-mi="from" value="${esc(st.from||'')}">`,'f-nd')}${field('Motivo',`<input id="f-nn" type="text" data-mi="note" value="${esc(st.note||'')}" placeholder="Opcional">`,'f-nn')}<div class="hint ok">${icon('ok',16)}<span><b>Se conserva todo.</b> Las herramientas asignadas, los controles anteriores y el historial siguen con el técnico. Queda registrado el turno anterior, el nuevo, la fecha y el responsable.</span></div>${hist.length?`<div class="flabel" style="margin-bottom:6px">Historial de turnos</div><div class="list" style="margin-bottom:8px">${hist.map(x=>`<div class="row"><div class="grow"><div class="t">${esc(x.fromName||shiftName(x.from))} → ${esc(x.toName||shiftName(x.to))}</div><div class="s">${fdt(x.at)} · ${esc(who(x.by))}</div></div></div>`).join('')}</div>`:''}`,
+  openModal({title:'Cambio de turno',render:st=>`<p class="muted" style="margin-top:0">${esc(t.name)} · Leg. ${esc(t.legajo)}</p>${field('Nuevo turno',`<div class="opts">${d.shifts.map((s,i)=>{const cur=s.id===t.shiftId;return`<button type="button" class="opt ${st.to===s.id?'on':''}" ${cur?'disabled aria-disabled="true" style="opacity:.55"':`data-act="mset" data-k="to" data-v="${esc(s.id)}"`}>${icon(SHIFT_IC(i),16)}${esc(s.name)}${cur?' (actual)':''}</button>`}).join('')}</div>`)}${field('Desde',`<input id="f-nd" type="date" data-mi="from" value="${esc(st.from||'')}">`,'f-nd')}${field('Motivo',`<input id="f-nn" type="text" maxlength="2000" data-mi="note" value="${esc(st.note||'')}" placeholder="Opcional">`,'f-nn')}<div class="hint ok">${icon('ok',16)}<span><b>Se conserva todo.</b> Las herramientas asignadas, los controles anteriores y el historial siguen con el técnico. Queda registrado el turno anterior, el nuevo, la fecha y el responsable.</span></div>${hist.length?`<div class="flabel" style="margin-bottom:6px">Historial de turnos</div><div class="list" style="margin-bottom:8px">${hist.map(x=>`<div class="row"><div class="grow"><div class="t">${esc(x.fromName||shiftName(x.from))} → ${esc(x.toName||shiftName(x.to))}</div><div class="s">${fdt(x.at)} · ${esc(who(x.by))}</div></div></div>`).join('')}</div>`:''}`,
   actions:[{label:'Cancelar',close:true},{label:'Confirmar cambio',kind:'pri',run:async st=>{gate('shift_change');if(!st.to)throw new UErr('Elegí el turno nuevo.');const from=t.shiftId;await put('shiftChanges','s'+uid(),{techId:ds.t,from,to:st.to,fromName:shiftName(from),toName:shiftName(st.to),effectiveFrom:st.from||nowISO().slice(0,10),note:(st.note||'').trim(),at:nowISO(),by:ME.id});await patch('techs',ds.t,{shiftId:st.to,updatedAt:nowISO()});await audit('shift_change','techs',ds.t,`Cambio de turno de ${t.name}: ${shiftName(from)} a ${shiftName(st.to)}`);toast('Turno actualizado')}}]});MOD.st.from=nowISO().slice(0,10);modalRerender()};
 function gateUI(p){if(can(p))return true;toast('Tu perfil no tiene permiso para esta acción.','err');return false}
 
@@ -1678,7 +1703,7 @@ async function runMovement(m){
 }
 ACT.mvSubmit=async()=>{const m=clone(UI.mv);const ok=await act(()=>runMovement(m).then(()=>true),'Movimiento registrado');if(ok){UI.mv={type:m.type,returned:true,oldDest:'reparacion',cond:'disponible',qty:1,techId:m.techId};render()}};
 ACT.recvPending=ds=>{const mv=S.movements[ds.m];if(!mv||!gateUI('movements_do'))return;
-  openModal({title:'Recibir herramienta pendiente',render:st=>`<p class="muted" style="margin-top:0">${esc(toolName(mv.toolId))}${mv.oldUnitId&&S.units[mv.oldUnitId]?' '+esc(S.units[mv.oldUnitId].code):''}, de ${esc((S.techs[mv.techId]||{}).name||'')}.</p>${field('¿En qué condición vuelve?',`<div class="opts">${[['reparacion','Necesita reparación'],['disponible','Buen estado, vuelve a disponible'],['baja','Dar de baja (perdida o inservible)']].map(([v,l])=>`<button type="button" class="opt ${st.dest===v?'on':''}" data-act="mset" data-k="dest" data-v="${esc(v)}">${l}</button>`).join('')}</div>`)}${field('Observaciones',`<input id="f-rn" type="text" data-mi="notes" value="${esc(st.notes||'')}">`,'f-rn')}`,
+  openModal({title:'Recibir herramienta pendiente',render:st=>`<p class="muted" style="margin-top:0">${esc(toolName(mv.toolId))}${mv.oldUnitId&&S.units[mv.oldUnitId]?' '+esc(S.units[mv.oldUnitId].code):''}, de ${esc((S.techs[mv.techId]||{}).name||'')}.</p>${field('¿En qué condición vuelve?',`<div class="opts">${[['reparacion','Necesita reparación'],['disponible','Buen estado, vuelve a disponible'],['baja','Dar de baja (perdida o inservible)']].map(([v,l])=>`<button type="button" class="opt ${st.dest===v?'on':''}" data-act="mset" data-k="dest" data-v="${esc(v)}">${l}</button>`).join('')}</div>`)}${field('Observaciones',`<input id="f-rn" type="text" maxlength="2000" data-mi="notes" value="${esc(st.notes||'')}">`,'f-rn')}`,
   actions:[{label:'Cancelar',close:true},{label:'Registrar',kind:'pri',run:async st=>{gate('movements_do');if(derive().pendingReturns.every(x=>x.id!==ds.m))throw new UErr('Ya fue registrada.');const dest=st.dest||'reparacion';const mid='m'+uid(),at=nowISO();await put('movements',mid,{type:'recepcion',techId:mv.techId,toolId:mv.toolId,qty:mv.qty,unitId:mv.oldUnitId||null,resolvesMovementId:ds.m,condition:dest,transfers:[{toolId:mv.toolId,qty:mv.qty,from:'pendiente',to:dest,unitId:mv.oldUnitId||null}],notes:(st.notes||'').trim(),at,by:ME.id});if(mv.oldUnitId)await patch('units',mv.oldUnitId,{status:dest,techId:null,updatedAt:at});await audit('movement','movements',mid,`Devolución pendiente recibida: ${toolName(mv.toolId)}, a ${POOL[dest].toLowerCase()}`);toast('Devolución registrada')}}]});MOD.st.dest='reparacion';modalRerender()};
 ACT.mset=ds=>modalSet(ds.k,ds.v);
 
@@ -1693,7 +1718,7 @@ ACT.invAdjust=ds=>{if(!gateUI('inventory_edit'))return;
       if(st.op==='ingreso')h+=field('Códigos nuevos (uno por línea)',`<textarea id="f-codes" data-mi="codes" rows="4" placeholder="TAL-004&#10;TAL-005">${esc(st.codes||'')}</textarea>`,'f-codes');
       else{const from=st.op==='reparado'?'reparacion':st.op==='recupero'?'retirado':st.from;const us=(d.unitsByTool[tool.id]||[]).filter(u=>u.status===from);h+=us.length?field('Unidad',`<select id="f-u" data-mi="unitId">${optList(us.map(u=>[u.id,u.code]),st.unitId,'Elegí el código')}</select>`,'f-u'):'<p class="hint">No hay unidades en ese estado.</p>'}
     }else h+=field('Cantidad',`<input id="f-q" type="number" min="1" inputmode="numeric" data-mi="qty" value="${esc(st.qty||1)}">`,'f-q');
-    h+=field('Observaciones',`<input id="f-n" type="text" data-mi="notes" value="${esc(st.notes||'')}" placeholder="Proveedor, remito, motivo">`,'f-n');
+    h+=field('Observaciones',`<input id="f-n" type="text" maxlength="2000" data-mi="notes" value="${esc(st.notes||'')}" placeholder="Proveedor, remito, motivo">`,'f-n');
     return h;
   },actions:[{label:'Cancelar',close:true},{label:'Registrar',kind:'pri',run:st=>runInv(st).then(()=>toast('Inventario actualizado'))}]});
   MOD.st={toolId:ds.t||'',op:'ingreso',from:'disponible',qty:1};modalRerender()};
@@ -1714,7 +1739,7 @@ async function createUnits(tool,codesTxt,notes){
   const codes=String(codesTxt||'').split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);
   if(!codes.length)throw new UErr('Ingresá al menos un código.');
   const existing=new Set(Object.values(S.units).map(u=>(u.code||'').toLowerCase()));const seen=new Set();
-  for(const c of codes){const k=c.toLowerCase();if(existing.has(k))throw new UErr(`El código ${c} ya existe.`);if(seen.has(k))throw new UErr(`El código ${c} está repetido.`);seen.add(k)}
+  for(const c of codes){tooLong(c,LIM.code,'Cada código');const k=c.toLowerCase();if(existing.has(k))throw new UErr(`El código ${c} ya existe.`);if(seen.has(k))throw new UErr(`El código ${c} está repetido.`);seen.add(k)}
   const at=nowISO(),mid='m'+uid();const ids=codes.map(()=>'u'+uid());
   for(let i=0;i<codes.length;i++)await put('units',ids[i],{toolId:tool.id,code:codes[i],status:'disponible',techId:null,createdAt:at,by:ME.id});
   await put('movements',mid,{type:'ingreso',toolId:tool.id,qty:codes.length,transfers:ids.map(id=>({toolId:tool.id,qty:1,from:'externo',to:'disponible',unitId:id})),notes,at,by:ME.id});
@@ -1722,16 +1747,16 @@ async function createUnits(tool,codesTxt,notes){
 }
 
 /* herramientas y categorías */
-function catForm(st){return field('Nombre de la categoría',`<input id="f-cn" type="text" data-mi="name" value="${esc(st.name||'')}">`,'f-cn')}
-function validCat(st,except){const n=(st.name||'').trim();if(n.length<2)throw new UErr('Ingresá un nombre.');if(Object.entries(S.categories).some(([id,c])=>id!==except&&c.name.toLowerCase()===n.toLowerCase()))throw new UErr('Ya existe esa categoría.');return n}
+function catForm(st){return field('Nombre de la categoría',`<input id="f-cn" type="text" maxlength="120" data-mi="name" value="${esc(st.name||'')}">`,'f-cn')}
+function validCat(st,except){const n=(st.name||'').trim();if(n.length<2)throw new UErr('Ingresá un nombre.');tooLong(n,LIM.name,'El nombre');if(Object.entries(S.categories).some(([id,c])=>id!==except&&c.name.toLowerCase()===n.toLowerCase()))throw new UErr('Ya existe esa categoría.');return n}
 ACT.catNew=()=>{gateUI('tools_edit')&&openModal({title:'Nueva categoría',render:catForm,actions:[{label:'Cancelar',close:true},{label:'Crear',kind:'pri',run:async st=>{gate('tools_edit');const n=validCat(st);const id='g'+uid();await put('categories',id,{name:n,createdAt:nowISO(),by:ME.id});await audit('category_create','categories',id,`Alta de categoría ${n}`);toast('Categoría creada')}}]})};
 ACT.catEdit=ds=>{const c=S.categories[ds.c];if(!c||!gateUI('tools_edit'))return;openModal({title:'Editar categoría',render:catForm,actions:[{label:'Cancelar',close:true},{label:'Guardar',kind:'pri',run:async st=>{gate('tools_edit');const n=validCat(st,ds.c);await patch('categories',ds.c,{name:n});await audit('category_edit','categories',ds.c,`Categoría renombrada: ${c.name} a ${n}`);toast('Categoría actualizada')}}]});MOD.st={name:c.name};modalRerender()};
 ACT.catDel=async ds=>{const c=S.categories[ds.c];if(!c||!gateUI('tools_edit'))return;if(Object.values(S.tools).some(t=>t.categoryId===ds.c)){toast('La categoría tiene herramientas.','err');return}if(!await confirmBox('Eliminar categoría',`Se elimina ${esc(c.name)}.`,'Eliminar','danger'))return;await act(async()=>{await del('categories',ds.c);await audit('category_delete','categories',ds.c,`Baja de categoría ${c.name}`)},'Categoría eliminada')};
 function toolForm(t){const d=derive();const hasMov=t&&Object.values(S.movements).some(m=>m.toolId===t.id);
-  return st=>`${field('Nombre',`<input id="f-tn" type="text" data-mi="name" value="${esc(st.name||'')}" placeholder="Ej.: Taladro percutor">`,'f-tn')}${field('Descripción',`<input id="f-td" type="text" data-mi="description" value="${esc(st.description||'')}" placeholder="Marca, modelo, medida">`,'f-td')}${field('Categoría',`<select id="f-tc" data-mi="categoryId">${optList(d.cats.map(c=>[c.id,c.name]),st.categoryId,'Sin categoría')}</select>`,'f-tc')}
+  return st=>`${field('Nombre',`<input id="f-tn" type="text" maxlength="120" data-mi="name" value="${esc(st.name||'')}" placeholder="Ej.: Taladro percutor">`,'f-tn')}${field('Descripción',`<input id="f-td" type="text" maxlength="2000" data-mi="description" value="${esc(st.description||'')}" placeholder="Marca, modelo, medida">`,'f-td')}${field('Categoría',`<select id="f-tc" data-mi="categoryId">${optList(d.cats.map(c=>[c.id,c.name]),st.categoryId,'Sin categoría')}</select>`,'f-tc')}
   ${field('Seguimiento',hasMov?`<p class="muted" style="margin:0">${t.serialized?'Por código individual':'Por cantidad'}. No se puede cambiar porque ya tiene movimientos.</p>`:`<div class="opts">${[['1','Por código individual: cada unidad tiene su código o QR'],['0','Por cantidad: se controla el total, sin código']].map(([v,l])=>`<button type="button" class="opt ${st.serialized===v?'on':''}" data-act="mset" data-k="serialized" data-v="${esc(v)}">${l}</button>`).join('')}</div>`)}
   ${t?'':st.serialized==='1'?field('Códigos iniciales (uno por línea, opcional)',`<textarea id="f-tk" data-mi="codes" rows="3" placeholder="TAL-001&#10;TAL-002">${esc(st.codes||'')}</textarea>`,'f-tk'):field('Stock inicial disponible (opcional)',`<input id="f-ts" type="number" min="0" inputmode="numeric" data-mi="stock" value="${esc(st.stock||'')}">`,'f-ts')}`}
-function validTool(st,except){const n=(st.name||'').trim();if(n.length<2)throw new UErr('Ingresá el nombre.');if(Object.entries(S.tools).some(([id,t])=>id!==except&&t.name.toLowerCase()===n.toLowerCase()))throw new UErr('Ya existe una herramienta con ese nombre.');return n}
+function validTool(st,except){const n=(st.name||'').trim();if(n.length<2)throw new UErr('Ingresá el nombre.');tooLong(n,LIM.name,'El nombre');tooLong(st.description,LIM.text,'La descripción');if(Object.entries(S.tools).some(([id,t])=>id!==except&&t.name.toLowerCase()===n.toLowerCase()))throw new UErr('Ya existe una herramienta con ese nombre.');return n}
 ACT.toolNew=()=>{if(!gateUI('tools_edit'))return;openModal({title:'Nueva herramienta',render:toolForm(null),actions:[{label:'Cancelar',close:true},{label:'Crear herramienta',kind:'pri',run:async st=>{gate('tools_edit');const n=validTool(st);const ser=st.serialized==='1';
   if(ser&&st.codes&&st.codes.trim()){const codes=st.codes.split(/[\n,;]+/).map(s=>s.trim().toLowerCase()).filter(Boolean);const ex=new Set(Object.values(S.units).map(u=>(u.code||'').toLowerCase()));const dup=codes.find((c,i)=>ex.has(c)||codes.indexOf(c)!==i);if(dup)throw new UErr(`El código ${dup} ya existe o está repetido.`)}
   const id='h'+uid();const tool={name:n,description:(st.description||'').trim(),categoryId:st.categoryId||null,serialized:ser,active:true,createdAt:nowISO(),by:ME.id};await put('tools',id,tool);await audit('tool_create','tools',id,`Alta de herramienta ${n}`);
@@ -1743,7 +1768,7 @@ ACT.toolToggle=async ds=>{const t=S.tools[ds.t];if(!t||!gateUI('tools_edit'))ret
 
 /* alertas */
 ACT.resolveAlert=ds=>{const a=derive().alertsOpen.find(x=>x.key===ds.k);if(!a||!gateUI('alerts_resolve'))return;
-  openModal({title:'Resolver alerta',render:st=>`<p style="margin-top:0"><b>${esc(a.title)}</b><br><span class="muted">${esc(a.text)}</span></p>${a.type==='cambio'||a.type==='consecutiva'||a.type==='faltante'?'<p class="hint">Si la herramienta se reemplazó, registrá la reposición: la alerta se cierra sola. Resolverla acá solo la marca como atendida.</p>':''}${field('Nota de resolución',`<input id="f-an" type="text" data-mi="note" value="${esc(st.note||'')}" placeholder="Qué se hizo">`,'f-an')}`,
+  openModal({title:'Resolver alerta',render:st=>`<p style="margin-top:0"><b>${esc(a.title)}</b><br><span class="muted">${esc(a.text)}</span></p>${a.type==='cambio'||a.type==='consecutiva'||a.type==='faltante'?'<p class="hint">Si la herramienta se reemplazó, registrá la reposición: la alerta se cierra sola. Resolverla acá solo la marca como atendida.</p>':''}${field('Nota de resolución',`<input id="f-an" type="text" maxlength="2000" data-mi="note" value="${esc(st.note||'')}" placeholder="Qué se hizo">`,'f-an')}`,
   actions:[{label:'Cancelar',close:true},{label:'Marcar resuelta',kind:'pri',run:async st=>{gate('alerts_resolve');await put('alertRes',a.key,{type:a.type,title:a.title,text:a.text,techId:a.techId||null,note:(st.note||'').trim(),at:nowISO(),by:ME.id});await audit('alert_resolve','alertRes',a.key,`Alerta resuelta: ${a.title}, ${a.text}`);toast('Alerta resuelta')}}]})};
 
 /* reportes */
@@ -1781,8 +1806,8 @@ ACT.exportPdf=async()=>{if(!gateUI('reports_export'))return;await act(async()=>{
 /* administración */
 ACT.permToggle=async ds=>{if(myRole()!=='admin')return;const cur=clone(S.config.permisos||{});cur[ds.r]=cur[ds.r]||{};const def=!!(DEFAULT_PERMS[ds.r]&&DEFAULT_PERMS[ds.r][ds.k]);const v=ds.k in cur[ds.r]?!cur[ds.r][ds.k]:!def;cur[ds.r][ds.k]=v;await act(async()=>{await put('config','permisos',cur);await audit('perm_set','config','permisos',`Permiso ${PERMS.find(p=>p[0]===ds.k)[1].toLowerCase()} para ${ROLES[ds.r]}: ${v?'sí':'no'}`)})};
 function shiftsList(){return clone(derive().shifts)}
-ACT.shiftNew=()=>{gateUI('shifts_edit')&&openModal({title:'Nuevo turno',render:st=>field('Nombre',`<input id="f-sn" type="text" data-mi="name" value="${esc(st.name||'')}" placeholder="Ej.: Turno fin de semana">`,'f-sn'),actions:[{label:'Cancelar',close:true},{label:'Crear turno',kind:'pri',run:async st=>{gate('shifts_edit');const n=(st.name||'').trim();if(n.length<2)throw new UErr('Ingresá un nombre.');const list=shiftsList();if(list.some(s=>s.name.toLowerCase()===n.toLowerCase()))throw new UErr('Ya existe ese turno.');list.push({id:'r'+uid(),name:n,order:list.length+1});await put('config','turnos',{list});await audit('shift_create','config','turnos',`Alta de turno ${n}`);toast('Turno creado')}}]})};
-ACT.shiftRename=ds=>{const s=derive().shiftById[ds.s];if(!s||!gateUI('shifts_edit'))return;openModal({title:'Renombrar turno',render:st=>field('Nombre',`<input id="f-sr" type="text" data-mi="name" value="${esc(st.name||'')}">`,'f-sr'),actions:[{label:'Cancelar',close:true},{label:'Guardar',kind:'pri',run:async st=>{gate('shifts_edit');const n=(st.name||'').trim();if(n.length<2)throw new UErr('Ingresá un nombre.');const list=shiftsList().map(x=>x.id===ds.s?{...x,name:n}:x);await put('config','turnos',{list});await audit('shift_rename','config','turnos',`Turno renombrado: ${s.name} a ${n}`);toast('Turno actualizado')}}]});MOD.st={name:s.name};modalRerender()};
+ACT.shiftNew=()=>{gateUI('shifts_edit')&&openModal({title:'Nuevo turno',render:st=>field('Nombre',`<input id="f-sn" type="text" maxlength="120" data-mi="name" value="${esc(st.name||'')}" placeholder="Ej.: Turno fin de semana">`,'f-sn'),actions:[{label:'Cancelar',close:true},{label:'Crear turno',kind:'pri',run:async st=>{gate('shifts_edit');const n=(st.name||'').trim();if(n.length<2)throw new UErr('Ingresá un nombre.');tooLong(n,LIM.name,'El nombre');const list=shiftsList();if(list.some(s=>s.name.toLowerCase()===n.toLowerCase()))throw new UErr('Ya existe ese turno.');list.push({id:'r'+uid(),name:n,order:list.length+1});await put('config','turnos',{list});await audit('shift_create','config','turnos',`Alta de turno ${n}`);toast('Turno creado')}}]})};
+ACT.shiftRename=ds=>{const s=derive().shiftById[ds.s];if(!s||!gateUI('shifts_edit'))return;openModal({title:'Renombrar turno',render:st=>field('Nombre',`<input id="f-sr" type="text" maxlength="120" data-mi="name" value="${esc(st.name||'')}">`,'f-sr'),actions:[{label:'Cancelar',close:true},{label:'Guardar',kind:'pri',run:async st=>{gate('shifts_edit');const n=(st.name||'').trim();if(n.length<2)throw new UErr('Ingresá un nombre.');tooLong(n,LIM.name,'El nombre');const list=shiftsList().map(x=>x.id===ds.s?{...x,name:n}:x);await put('config','turnos',{list});await audit('shift_rename','config','turnos',`Turno renombrado: ${s.name} a ${n}`);toast('Turno actualizado')}}]});MOD.st={name:s.name};modalRerender()};
 ACT.shiftDel=async ds=>{const s=derive().shiftById[ds.s];if(!s||!gateUI('shifts_edit'))return;if(Object.values(S.techs).some(t=>t.shiftId===ds.s)){toast('El turno tiene técnicos.','err');return}if(!await confirmBox('Eliminar turno',`Se elimina ${esc(s.name)}.`,'Eliminar','danger'))return;await act(async()=>{await put('config','turnos',{list:shiftsList().filter(x=>x.id!==ds.s)});await audit('shift_delete','config','turnos',`Baja de turno ${s.name}`)},'Turno eliminado')};
 
 /* datos de demostración */
