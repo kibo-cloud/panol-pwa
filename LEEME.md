@@ -1,4 +1,4 @@
-# Pañol 2.0 — app instalable (PWA)
+# Pañol 2.1 — app instalable (PWA)
 
 Control de herramientas por técnico. Funciona sin conexión y guarda todo en el dispositivo.
 Los datos se comparten entre equipos con un archivo `.txt`.
@@ -61,3 +61,9 @@ Con la app instalada en PC, también podés abrir un `.txt` de Pañol con *Abrir
 - Los PIN creados con la versión 2.0 siguen funcionando y se protegen con el formato nuevo la primera vez que el usuario ingresa.
 - La exportación a Excel y PDF descarga sus librerías la primera vez que se usa. Después funciona sin conexión.
 - Para actualizar la app, reemplazá los archivos publicados y cambiá `VERSION` en `sw.js`.
+- Las librerías de Excel y PDF se descargan con verificación de integridad: si el archivo de internet no es exactamente el esperado, el navegador no lo usa.
+
+## 6. Para quien mantiene el código
+
+- La página tiene una política de seguridad (CSP) que solo deja correr el script de `index.html` si coincide con su huella. **Después de editar el `<script>` de `index.html`, ejecutá `node tests/csp-hash.mjs`**; si no, la app queda en blanco.
+- Pruebas de punta a punta, sin instalar nada (Node 22 o más nuevo, con Edge o Chrome): `node tests/e2e/run.mjs`. Las capturas quedan en `tests/e2e/out/`.

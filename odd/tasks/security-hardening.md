@@ -63,10 +63,15 @@ with their behavior. Single PR-sized branch requested by the user; chain decisio
       keeps a localStorage safety copy (`panol-unsaved`) that the next boot merges (newer wins)
       and deletes. The BroadcastChannel handler merges instead of reloading while a write is
       pending. Visible version "Pañol 2.1.0". GREEN: `t5` 5/5; full suite 23/23 before adding
-      the reload spec.
-- [ ] T6 Regression suite and docs: `tests/e2e/run.mjs` (no deps) covering audit flows and the
+      the reload spec. Commit `36e2dcf`.
+- [x] T6 Regression suite and docs: `tests/e2e/run.mjs` (no deps) covering audit flows and the
       failing cases (XSS via ids, `data:[]`, wrong-shape replace, logged-out import); project
       `CLAUDE.md`; `.gitattributes`; LEEME update.
+      Evidence: suite landed with each task (harness + T1 specs in `09a86d2`, `.gitattributes`
+      too); this unit adds the normal-use flows (routes at 1280/390 without overflow, CRUD +
+      entrega + control + reposicion persisted, consulta read-only), project `CLAUDE.md` and
+      LEEME 2.1. Final run: `node tests/e2e/run.mjs` 24 passed, 0 failed, 0 skipped (Excel/PDF
+      online); inline script `node --check` OK; `node tests/csp-hash.mjs --check` OK.
 - [ ] T7 Close: `versiones/panol v2.1.0`, workspace index update, GitHub repo (user-authorized).
 
 ## Route declaration
@@ -93,6 +98,7 @@ with their behavior. Single PR-sized branch requested by the user; chain decisio
 - 2026-11-06: T3 done.
 - 2026-11-06: T4 done.
 - 2026-11-06: T5 done.
+- 2026-11-06: T6 done. T1–T6 complete on `fix/security-hardening`.
 
 ## Next step
-T6.
+T7 (parent): `versiones/panol v2.1.0`, workspace index update, GitHub repo.
