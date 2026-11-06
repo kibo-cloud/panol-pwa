@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-csYKGQxwa+bE6ntKzKSz036ujO2lJJn2fqxPS2S89WY=' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Rvxz2jMv1lTJVqRMIu2mfZIrXJoUllbmh56lEmLbMaY=' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#101828">
 <link rel="manifest" href="manifest.webmanifest">
@@ -701,10 +701,19 @@ function who(id){if(!id)return'—';const u=S.users[id];if(!u)return id==='local
 
 async function retry(fn){return fn()}
 function tag(data){return DEMO_FLAG?{...data,demo:true}:data}
-async function put(col,id,data){data=tag(data);S[col][id]=clone(data);bump();schedulePersist()}
+// Cada escritura deja updatedAt: Combinar decide por fecha (gana la más nueva; si empatan, queda la local).
+async function put(col,id,data){data=tag(data);S[col][id]={...clone(data),updatedAt:nowISO()};delete DEL[col+'/'+id];bump();schedulePersist()}
 function deepMerge(a,b){for(const k of Object.keys(b)){if(b[k]&&typeof b[k]==='object'&&!Array.isArray(b[k])&&a[k]&&typeof a[k]==='object'&&!Array.isArray(a[k]))deepMerge(a[k],b[k]);else a[k]=b[k]}return a}
-async function patch(col,id,data){if(!S[col][id])throw new UErr('El registro no existe.');S[col][id]=deepMerge(clone(S[col][id]),clone(data));bump();schedulePersist()}
-async function del(col,id){delete S[col][id];bump();schedulePersist()}
+async function patch(col,id,data,o={}){if(!S[col][id])throw new UErr('El registro no existe.');const r=deepMerge(clone(S[col][id]),clone(data));if(!o.keepStamp)r.updatedAt=nowISO();S[col][id]=r;bump();schedulePersist()}
+// Borrar deja una marca (DEL) con la fecha, así Combinar no vuelve a traer el registro.
+async function del(col,id){delete S[col][id];DEL[col+'/'+id]=nowISO();bump();schedulePersist()}
+// Combina src en dst (colecciones y borrados) registro por registro: gana la fecha más nueva,
+// los empates quedan como están en dst, y un borrado más nuevo elimina el registro.
+function mergeInto(dst,dstDel,src,srcDel){
+  const localTime=(c,id)=>{const cur=dst[c][id];return cur?stamp(cur):(dstDel[c+'/'+id]||'')};
+  for(const c of COLS)for(const [id,r] of Object.entries(src[c]||{})){const k=c+'/'+id;const known=dst[c][id]||k in dstDel;if(!known||stamp(r)>localTime(c,id)){dst[c][id]=clone(r);delete dstDel[k]}}
+  for(const [k,at] of Object.entries(srcDel||{})){const i=k.indexOf('/'),c=k.slice(0,i),id=k.slice(i+1);if(!dst[c])continue;if(at>localTime(c,id)){delete dst[c][id];dstDel[k]=at}}
+}
 async function audit(action,entity,entityId,detail){try{await put('audit','l'+uid(),{action,entity,entityId,detail,at:nowISO(),by:ME.id})}catch(e){console.warn(e)}}
 function errMsg(e){
   if(e instanceof UErr)return e.message;
@@ -1316,7 +1325,7 @@ function integrity(){
   for(const t of d.tools){
     const p=d.pools[t.id];const asg=d.activeAsg.filter(a=>a.toolId===t.id).reduce((s,a)=>s+(a.qty||1),0);
     if(p.asignado!==asg)out.push({sev:'bad',t:`${t.name}: asignaciones no coinciden`,s:`Inventario indica ${p.asignado} asignadas y las fichas de técnicos suman ${asg}.`});
-    for(const k of['disponible','reparacion','retirado','pendiente','baja'])if(p[k]<0)out.push({sev:'bad',t:`${t.name}: saldo negativo`,s:`${POOL[k]}: ${p[k]}`});
+    for(const k of['disponible','asignado','reparacion','retirado','pendiente','baja'])if(p[k]<0)out.push({sev:'bad',t:`${t.name}: saldo negativo`,s:`${POOL[k]}: ${p[k]}`});
     if(t.serialized){for(const k of['disponible','asignado','reparacion','retirado','pendiente','baja']){const n=(d.unitsByTool[t.id]||[]).filter(u=>u.status===k).length;if(n!==p[k])out.push({sev:'warn',t:`${t.name}: unidades y movimientos difieren`,s:`${POOL[k]}: ${n} unidades contra ${p[k]} según movimientos.`})}}
   }
   for(const u of d.units){const c=(u.code||'').toLowerCase();if(codes[c])out.push({sev:'bad',t:'Código duplicado',s:u.code});codes[c]=1}
@@ -1436,7 +1445,7 @@ function importText(txt,handle){
   let p;try{p=parseDataText(txt)}catch(e){toast(errMsg(e),'err');return}
   const n=COLS.reduce((a,c)=>a+Object.keys(p.data[c]).length,0);const nu=Object.keys(p.data.users).length;
   const empty=!COLS.some(c=>Object.keys(S[c]).length);
-  openModal({title:'Abrir archivo de datos',render:st=>`<p class="muted" style="margin-top:0">Archivo guardado el ${fdt(p.savedAt||p.exportedAt)}, con ${nf(n)} registros${nu?` y ${nu} ${nu===1?'usuario':'usuarios'}`:''}.</p>${empty?'':field('¿Qué hacemos con los datos de este equipo?',`<div class="opts"><button type="button" class="opt ${st.mode==='merge'?'on':''}" data-act="mset" data-k="mode" data-v="merge"><span><b>Combinar</b><br><span class="s">Suma lo nuevo y actualiza lo que cambió. No borra nada.</span></span></button><button type="button" class="opt ${st.mode==='replace'?'on':''}" data-act="mset" data-k="mode" data-v="replace"><span><b>Reemplazar todo</b><br><span class="s">Este equipo queda igual al archivo.</span></span></button></div>`)}${handle&&CAN_LINK?field('',`<div class="opts"><button type="button" class="opt ${st.link==='1'?'on':''}" data-act="mset" data-k="link" data-v="${esc(st.link==='1'?'0':'1')}">Seguir guardando los cambios en este archivo</button></div>`):''}${nu&&!ME.id?'<p class="s">Después vas a ingresar con un usuario y PIN del archivo.</p>':''}`,
+  openModal({title:'Abrir archivo de datos',render:st=>`<p class="muted" style="margin-top:0">Archivo guardado el ${fdt(p.savedAt||p.exportedAt)}, con ${nf(n)} registros${nu?` y ${nu} ${nu===1?'usuario':'usuarios'}`:''}.</p>${empty?'':field('¿Qué hacemos con los datos de este equipo?',`<div class="opts"><button type="button" class="opt ${st.mode==='merge'?'on':''}" data-act="mset" data-k="mode" data-v="merge"><span><b>Combinar</b><br><span class="s">Suma lo nuevo y se queda con la versión más reciente de cada registro, también de los borrados.</span></span></button><button type="button" class="opt ${st.mode==='replace'?'on':''}" data-act="mset" data-k="mode" data-v="replace"><span><b>Reemplazar todo</b><br><span class="s">Este equipo queda igual al archivo.</span></span></button></div>`)}${handle&&CAN_LINK?field('',`<div class="opts"><button type="button" class="opt ${st.link==='1'?'on':''}" data-act="mset" data-k="link" data-v="${esc(st.link==='1'?'0':'1')}">Seguir guardando los cambios en este archivo</button></div>`):''}${nu&&!ME.id?'<p class="s">Después vas a ingresar con un usuario y PIN del archivo.</p>':''}`,
   actions:[{label:'Cancelar',close:true},{label:'Abrir datos',kind:'pri',run:async st=>{
     if(!canImport())throw new UErr(IMPORT_DENIED);
     const mode=empty?'replace':(st.mode||'merge');
@@ -1444,10 +1453,9 @@ function importText(txt,handle){
       if(!hasAdmin(p.data.users))throw new UErr('El archivo no tiene un administrador activo. Reemplazar dejaría el equipo sin administrador.');
       for(const c of COLS)S[c]=clone(p.data[c]);DEL=clone(p.deleted);
     }else{
-      const nd=Object.fromEntries(COLS.map(c=>[c,clone(S[c])]));
-      for(const c of COLS)for(const [id,d] of Object.entries(p.data[c])){const cur=nd[c][id];if(!cur||stamp(d)>=stamp(cur))nd[c][id]=clone(d)}
+      const nd=Object.fromEntries(COLS.map(c=>[c,clone(S[c])])),ndel=clone(DEL);mergeInto(nd,ndel,p.data,p.deleted);
       if(hasAdmin(S.users)&&!hasAdmin(nd.users))throw new UErr('Combinar dejaría el equipo sin administrador activo. No se cargó nada.');
-      for(const c of COLS)S[c]=nd[c];
+      for(const c of COLS)S[c]=nd[c];DEL=ndel;
     }
     version++;schedulePersist();
     if(ME.id&&(!S.users[ME.id]||S.users[ME.id].active===false))logout(true);

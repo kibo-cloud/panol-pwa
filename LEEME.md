@@ -47,11 +47,11 @@ La app también muestra un botón *Instalar* en Inicio y en *Más* cuando el nav
 | **Vincular archivo .txt** | Elegís dónde guardarlo y cada cambio se escribe solo en ese archivo. Si está en una carpeta de Drive, OneDrive o Dropbox, se sincroniza. | Chrome y Edge en PC |
 | **Compartir .txt** | Lo manda por WhatsApp, correo, Drive o cualquier app del menú compartir. | Android, iPhone y algunas PC |
 | **Descargar .txt** | Guarda una copia en Descargas. | Todos |
-| **Abrir archivo .txt** | Trae los datos de otro equipo. Podés **Combinar** (suma lo nuevo y actualiza lo que cambió, sin borrar nada) o **Reemplazar todo** (el equipo queda igual al archivo). | Todos |
+| **Abrir archivo .txt** | Trae los datos de otro equipo. Podés **Combinar** (suma lo nuevo y se queda con la versión más reciente de cada registro) o **Reemplazar todo** (el equipo queda igual al archivo). Solo lo puede hacer un administrador con la sesión iniciada, salvo en un equipo nuevo sin usuarios. | Todos |
 
 Con la app instalada en PC, también podés abrir un `.txt` de Pañol con *Abrir con › Pañol*.
 
-**Para trabajar entre varios equipos:** un equipo comparte su `.txt` y el otro lo abre con *Combinar*. Si trabajan en paralelo sobre los mismos datos, combinen seguido. Combinar no propaga borrados: para que un equipo quede idéntico a otro, usá *Reemplazar todo*.
+**Para trabajar entre varios equipos:** un equipo comparte su `.txt` y el otro lo abre con *Combinar*. Si trabajan en paralelo sobre los mismos datos, combinen seguido. Combinar compara la fecha de cada registro: gana el cambio más reciente y, si las fechas son iguales, queda lo del equipo. Lo que se borró en un equipo también se borra al combinar en el otro (si nadie lo modificó después). Para que un equipo quede idéntico a otro, usá *Reemplazar todo*.
 
 ## 5. Cosas a tener en cuenta
 

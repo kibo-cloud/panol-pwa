@@ -39,9 +39,13 @@ with their behavior. Single PR-sized branch requested by the user; chain decisio
       Evidence: 102 attribute interpolations wrapped in `esc()`; CSP uses the inline script
       sha256 (kept in sync by `node tests/csp-hash.mjs`, no 'unsafe-inline' for scripts); SRI
       sha512 computed from the downloaded cdnjs files. RED on baseline (`t2`: CSP and SRI specs
-      failed); GREEN 3/3 with no CSP violations (Excel/PDF exports run); `t1` 5/5, `t6` 4/4.
-- [ ] T3 Merge semantics: `put`/`patch` stamp `updatedAt`; strict newer-wins; tombstones for
+      failed); GREEN 3/3 with no CSP violations (Excel/PDF exports run); `t1` 5/5, `t6` 4/4. Commit `e2fb7fd`.
+- [x] T3 Merge semantics: `put`/`patch` stamp `updatedAt`; strict newer-wins; tombstones for
       deletions so merge does not resurrect; flag negative pools in `integrity()`.
+      Evidence: tombstones live in `data.deleted` (`'col/id' -> ISO`), outside the collections, so
+      views need no filtering and 2.0.0 ignores them. RED on baseline (`t3`: 3 of 4 failed);
+      GREEN 4/4 (newer wins, tie keeps local, file tombstone deletes, local deletion not
+      resurrected, persisted after reload). LEEME updated.
 - [ ] T4 PIN hardening: PBKDF2-SHA-256 (high iterations) with transparent upgrade of legacy
       hashes on successful login; progressive lockout after failed attempts; LEEME note.
 - [ ] T5 Robustness and PWA: SW caches navigations only when `r.ok && !r.redirected` inside
@@ -73,6 +77,7 @@ with their behavior. Single PR-sized branch requested by the user; chain decisio
 - 2026-11-06: regression suite written first (`tests/e2e`, raw CDP, no deps); baseline RED:
   16 of 23 specs failed. T1 done.
 - 2026-11-06: T2 done.
+- 2026-11-06: T3 done.
 
 ## Next step
-T3.
+T4.
