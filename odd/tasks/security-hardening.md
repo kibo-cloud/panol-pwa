@@ -72,7 +72,12 @@ with their behavior. Single PR-sized branch requested by the user; chain decisio
       entrega + control + reposicion persisted, consulta read-only), project `CLAUDE.md` and
       LEEME 2.1. Final run: `node tests/e2e/run.mjs` 24 passed, 0 failed, 0 skipped (Excel/PDF
       online); inline script `node --check` OK; `node tests/csp-hash.mjs --check` OK. Commit `2fcb173`.
-- [ ] T7 Close: `versiones/panol v2.1.0`, workspace index update, GitHub repo (user-authorized).
+- [x] T7 Close: `versiones/panol v2.1.0`, workspace index update, GitHub repo (user-authorized).
+      Evidence: main fast-forwarded to dbd1cb0; `versiones/panol v2.1.0` (sw.js panol-v2.1.0);
+      public repo https://github.com/kibo-cloud/panol-pwa; Pages https://kibo-cloud.github.io/panol-pwa/
+      returns 200 and serves panol-v2.1.0; suite 30/30. RDD: risk high, native review refused with
+      `lens_context_budget_exceeded`; independent verifier PASS with minor issues, one scoped
+      correction applied (dbd1cb0). Route: parent inline.
 
 ## Verifier correction
 - [x] V1 Independent verifier (PASS with minor issues) — one scoped correction, test-first
@@ -116,4 +121,7 @@ with their behavior. Single PR-sized branch requested by the user; chain decisio
 - 2026-11-06: T6 done. T1–T6 complete on `fix/security-hardening`.
 
 ## Next step
-T7 (parent): `versiones/panol v2.1.0`, workspace index update, GitHub repo.
+- 2026-11-06: T7 done. Released 2.1.0 to GitHub and Pages.
+
+## Next step (after release)
+None. Feature complete. Open decision: strict import accepts empty dates ("").
