@@ -52,10 +52,18 @@ with their behavior. Single PR-sized branch requested by the user; chain decisio
       re-hashed on login (`patch(..., {keepStamp:true})` so the upgrade does not win merges);
       lockout state per device in IDB `pinLocks` (not synced, so failed logins never overwrite a
       newer PIN through Combine): 5 failures -> 30 s, doubling, max 15 min. RED on baseline (3/3
-      failed); GREEN 3/3 including the 2.0.0 fixture (sha256 and fnv users log in and upgrade).
-- [ ] T5 Robustness and PWA: SW caches navigations only when `r.ok && !r.redirected` inside
+      failed); GREEN 3/3 including the 2.0.0 fixture (sha256 and fnv users log in and upgrade). Commit `9571a78`.
+- [x] T5 Robustness and PWA: SW caches navigations only when `r.ok && !r.redirected` inside
       `waitUntil`; flush pending writes on `pagehide`/`visibilitychange`; protect pending writes
       from BroadcastChannel reload; catch handler rejections; bump `VERSION` to `panol-v2.1.0`.
+      Evidence: RED on baseline (`t5` 4/4 failed, plus the new immediate-reload spec on T4).
+      Found while making it green: Chrome can drop an IndexedDB write that is in flight when the
+      page reloads, so (accepted change) the persist debounce went from 250 ms to the next task,
+      the IDB transaction starts synchronously on an already open connection, and `pagehide`
+      keeps a localStorage safety copy (`panol-unsaved`) that the next boot merges (newer wins)
+      and deletes. The BroadcastChannel handler merges instead of reloading while a write is
+      pending. Visible version "Pañol 2.1.0". GREEN: `t5` 5/5; full suite 23/23 before adding
+      the reload spec.
 - [ ] T6 Regression suite and docs: `tests/e2e/run.mjs` (no deps) covering audit flows and the
       failing cases (XSS via ids, `data:[]`, wrong-shape replace, logged-out import); project
       `CLAUDE.md`; `.gitattributes`; LEEME update.
@@ -84,6 +92,7 @@ with their behavior. Single PR-sized branch requested by the user; chain decisio
 - 2026-11-06: T2 done.
 - 2026-11-06: T3 done.
 - 2026-11-06: T4 done.
+- 2026-11-06: T5 done.
 
 ## Next step
-T5.
+T6.

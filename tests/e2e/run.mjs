@@ -4,11 +4,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { E2E, startServer, launchBrowser, openPage } from './harness.mjs';
+import { E2E, OUT, startServer, launchBrowser, openPage } from './harness.mjs';
 
 const filter = process.argv[2] || '';
 let stray = 0;
 process.on('unhandledRejection', (e) => { stray++; console.log('  UNHANDLED ' + (e && e.stack || e)); });
+
+// Screenshots of failures from earlier runs would be misleading.
+if (fs.existsSync(OUT)) for (const f of fs.readdirSync(OUT)) if (f.startsWith('FAIL-')) fs.rmSync(path.join(OUT, f));
 
 const specDir = path.join(E2E, 'specs');
 const tests = [];

@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-kuxmB3C7YVa2w7tEmlkW6apgwPkED+USWanxKyPa6zw=' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-FIOudZ8OauTY3hdFL455Ycj2JBoAQtNk9/HSnMFfC8g=' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#101828">
 <link rel="manifest" href="manifest.webmanifest">
@@ -582,7 +582,9 @@ const UI={ctlShift:'all',techQ:'',techShift:'all',techInactive:false,techTab:'to
 
 /* ---------- almacenamiento en el dispositivo ---------- */
 const IDB_STORE='kv';let _idb=null;
-function idb(){if(_idb)return _idb;_idb=new Promise((res,rej)=>{const r=indexedDB.open('panol',1);r.onupgradeneeded=()=>r.result.createObjectStore(IDB_STORE);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});return _idb}
+let _dbh=null;// base ya abierta: permite empezar a guardar sin esperar (al cerrar la página)
+function idb(){if(_idb)return _idb;_idb=new Promise((res,rej)=>{const r=indexedDB.open('panol',1);r.onupgradeneeded=()=>r.result.createObjectStore(IDB_STORE);r.onsuccess=()=>{_dbh=r.result;res(r.result)};r.onerror=()=>rej(r.error)});return _idb}
+function idbPutNow(k,v){if(!_dbh)return idbSet(k,v);return new Promise((res,rej)=>{const tx=_dbh.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).put(v,k);tx.oncomplete=()=>res();tx.onerror=tx.onabort=()=>rej(tx.error);if(tx.commit)tx.commit()})}
 async function idbGet(k){const db=await idb();return new Promise((res,rej)=>{const q=db.transaction(IDB_STORE).objectStore(IDB_STORE).get(k);q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error)})}
 async function idbSet(k,v){const db=await idb();return new Promise((res,rej)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).put(v,k);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error)})}
 async function idbDel(k){const db=await idb();return new Promise((res,rej)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).delete(k);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error)})}
@@ -665,22 +667,43 @@ function parseDataText(txt){
 function loadPayload(p,strict){const {data,deleted}=checkData(p.data,!!strict);for(const c of COLS)S[c]=data[c];DEL=deleted}
 async function initBackend(){
   try{const p=await idbGet('data');if(p&&p.app==='panol'&&isObj(p.data))loadPayload(p)}catch(e){console.warn(e);B.storageError=true}
+  recoverUnsaved();
   try{FILE.savedAt=(await idbGet('fileSavedAt'))||null;const h=await idbGet('fileHandle');if(h){FILE.handle=h;FILE.name=h.name;FILE.perm=h.queryPermission?await h.queryPermission({mode:'readwrite'}):'prompt'}}catch(e){}
   try{if(navigator.storage&&navigator.storage.persist)B.persisted=await navigator.storage.persist()}catch(e){}
   await loadLocks();
   restoreSession();
   B.mode='local';COLS.forEach(c=>loaded.add(c));version++;scheduleRender();
 }
-if(chan)chan.onmessage=async ev=>{if(ev.data!=='saved')return;try{const p=await idbGet('data');if(p&&p.app==='panol'){loadPayload(p);if(ME.id&&!S.users[ME.id])logout(true);version++;scheduleRender()}}catch(e){}};
-let idbTimer=null,fileTimer=null;
+// Otra pestaña guardó. Si esta tiene cambios todavía sin escribir, se combinan (gana lo más
+// nuevo) en lugar de recargar, para no perderlos; si no, se recarga lo guardado.
+if(chan)chan.onmessage=async ev=>{if(ev.data!=='saved')return;try{const p=await idbGet('data');if(!p||p.app!=='panol'||!isObj(p.data))return;
+  if(idbTimer||writing){const o=checkData(p.data,false);mergeInto(S,DEL,o.data,o.deleted);schedulePersist()}else loadPayload(p);
+  if(ME.id&&!S.users[ME.id])logout(true);version++;scheduleRender()}catch(e){console.warn(e)}};
+let idbTimer=null,fileTimer=null,writing=0;
+async function writeIdb(){writing++;try{await idbPutNow('data',payload());B.storageError=false;if(chan)chan.postMessage('saved')}catch(e){console.warn(e);B.storageError=true;toast('No se pudo guardar en este dispositivo. Descargá el archivo .txt como resguardo.','err')}finally{writing--}}
+// Se guarda en la tarea siguiente: junta las escrituras seguidas (p. ej. los datos de demostración)
+// sin dejar una ventana en la que recargar la página pierda el último cambio.
 function schedulePersist(){
-  clearTimeout(idbTimer);idbTimer=setTimeout(async()=>{try{await idbSet('data',payload());B.storageError=false;if(chan)chan.postMessage('saved')}catch(e){console.warn(e);B.storageError=true;toast('No se pudo guardar en este dispositivo. Descargá el archivo .txt como resguardo.','err')}},250);
-  if(FILE.handle&&FILE.perm==='granted'){clearTimeout(fileTimer);fileTimer=setTimeout(writeLinkedFile,1200)}
+  clearTimeout(idbTimer);idbTimer=setTimeout(()=>{idbTimer=null;writeIdb()},0);
+  if(FILE.handle&&FILE.perm==='granted'){clearTimeout(fileTimer);fileTimer=setTimeout(()=>{fileTimer=null;writeLinkedFile()},1200)}
 }
+// Al cerrar u ocultar la página se escribe enseguida lo pendiente. Como el navegador puede cortar
+// una escritura de IndexedDB a medio hacer al recargar, queda además una copia en localStorage que
+// el próximo arranque combina (gana lo más nuevo) y borra.
+const UNSAVED='panol-unsaved';
+function flushPersist(){
+  const pending=!!idbTimer||writing>0;
+  if(idbTimer){clearTimeout(idbTimer);idbTimer=null;writeIdb()}
+  if(fileTimer){clearTimeout(fileTimer);fileTimer=null;writeLinkedFile()}
+  if(pending)try{localStorage.setItem(UNSAVED,JSON.stringify(payload()))}catch(e){}
+}
+function recoverUnsaved(){try{const u=localStorage.getItem(UNSAVED);if(!u)return;localStorage.removeItem(UNSAVED);const p=JSON.parse(u);if(isObj(p)&&isObj(p.data)){const o=checkData(p.data,false);mergeInto(S,DEL,o.data,o.deleted);schedulePersist()}}catch(e){console.warn(e)}}
+window.addEventListener('pagehide',flushPersist);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')flushPersist()});
 async function writeLinkedFile(){
   if(!FILE.handle)return false;
   try{const w=await FILE.handle.createWritable();await w.write(serialize());await w.close();FILE.savedAt=nowISO();FILE.error='';await idbSet('fileSavedAt',FILE.savedAt);scheduleRender();return true}
-  catch(e){console.warn(e);FILE.error='No se pudo escribir el archivo vinculado.';FILE.perm=FILE.handle.queryPermission?await FILE.handle.queryPermission({mode:'readwrite'}):'prompt';scheduleRender();return false}
+  catch(e){console.warn(e);FILE.error='No se pudo escribir el archivo vinculado.';try{FILE.perm=FILE.handle&&FILE.handle.queryPermission?await FILE.handle.queryPermission({mode:'readwrite'}):'prompt'}catch(x){FILE.perm='prompt'}scheduleRender();return false}
 }
 async function linkHandle(h){
   let perm='granted';if(h.requestPermission){perm=await h.requestPermission({mode:'readwrite'})}
@@ -1362,9 +1385,12 @@ function integrity(){
 
 /* ================= acciones ================= */
 const ACT={},IN={},CH={};
-document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el)return;const fn=ACT[el.dataset.act];if(!fn)return;if(el.tagName!=='A')e.preventDefault();fn(el.dataset,el,e)});
-document.addEventListener('input',e=>{const el=e.target;if(el.dataset&&el.dataset.mi!==undefined&&MOD){MOD.st[el.dataset.mi]=el.value;if(el.dataset.mr!==undefined)modalRerender();return}if(el.dataset&&el.dataset.in&&IN[el.dataset.in])IN[el.dataset.in](el.value,el)});
-document.addEventListener('change',e=>{const el=e.target;if(el.dataset&&el.dataset.mi!==undefined&&MOD){MOD.st[el.dataset.mi]=el.value;if(el.dataset.mr!==undefined)modalRerender();return}if(el.dataset&&el.dataset.ch&&CH[el.dataset.ch])CH[el.dataset.ch](el.value,el)});
+// Un error en un manejador (también async) se muestra como aviso, nunca queda sin atender.
+function handlerFailed(e){console.warn(e);document.body.classList.remove('busy');toast(errMsg(e),'err')}
+function runHandler(fn,...args){try{const r=fn(...args);if(r&&typeof r.catch==='function')r.catch(handlerFailed)}catch(e){handlerFailed(e)}}
+document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el)return;const fn=ACT[el.dataset.act];if(!fn)return;if(el.tagName!=='A')e.preventDefault();runHandler(fn,el.dataset,el,e)});
+document.addEventListener('input',e=>{const el=e.target;if(el.dataset&&el.dataset.mi!==undefined&&MOD){MOD.st[el.dataset.mi]=el.value;if(el.dataset.mr!==undefined)modalRerender();return}if(el.dataset&&el.dataset.in&&IN[el.dataset.in])runHandler(IN[el.dataset.in],el.value,el)});
+document.addEventListener('change',e=>{const el=e.target;if(el.dataset&&el.dataset.mi!==undefined&&MOD){MOD.st[el.dataset.mi]=el.value;if(el.dataset.mr!==undefined)modalRerender();return}if(el.dataset&&el.dataset.ch&&CH[el.dataset.ch])runHandler(CH[el.dataset.ch],el.value,el)});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&MOD)closeModal()});
 
 ACT.modalClose=()=>{const m=MOD;closeModal();if(m&&m.onClose)m.onClose()};
@@ -1383,7 +1409,7 @@ VIEWS.mas=()=>{
   ${groups.map(([g,items])=>`<section class="grp"><h2>${g}</h2><div class="list">${items.map(row).join('')}</div></section>`).join('')}
   <section class="grp"><h2>Datos y app</h2><div class="list"><button class="mrow" data-act="backup"><span class="mi">${icon('db',18)}</span><span class="grow"><span class="t">Archivo de datos (.txt)</span><span class="s">${FILE.handle&&FILE.perm==='granted'?'Guardando en '+esc(FILE.name):'Compartí, descargá o abrí el archivo'}</span></span>${FILE.handle&&FILE.perm!=='granted'?'<span class="badge">!</span>':''}${icon('right',18)}</button>${B.installEvt?`<button class="mrow" data-act="install"><span class="mi">${icon('dl',18)}</span><span class="grow"><span class="t">Instalar Pañol</span><span class="s">Usala como app, a pantalla completa</span></span>${icon('right',18)}</button>`:''}<button class="mrow" data-act="myPin"><span class="mi">${icon('pencil',18)}</span><span class="grow"><span class="t">Cambiar mi PIN</span><span class="s">El PIN con el que ingresás</span></span>${icon('right',18)}</button></div></section>
   <button class="btn danger lg block" style="margin-top:18px" data-act="logout">Cerrar sesión</button>
-  <p class="s" style="text-align:center;margin-top:12px">Pañol 2.0 · Datos guardados en este dispositivo</p>`;
+  <p class="s" style="text-align:center;margin-top:12px">Pañol 2.1.0 · Datos guardados en este dispositivo</p>`;
 };
 /* ---------- ingreso ---------- */
 UI.auth={uid:'',pin:'',pin2:'',name:'',keep:true,show:false};
