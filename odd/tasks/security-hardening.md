@@ -32,10 +32,14 @@ with their behavior. Single PR-sized branch requested by the user; chain decisio
       never leaves zero admins.
       Evidence: RED on baseline (`node tests/e2e/run.mjs t1`: 4 of 5 failed — xss `__xss=1` on
       `#tecnicos`, `data:{}` wipe, logged-out button present); GREEN after fix (5/5). Also
-      `t6` 4/4 and legacy 2.0.0 fixture imports under strict validation. Route: delegated writer.
-- [ ] T2 Output hardening: escape every interpolated id/number in HTML and attributes; coerce
+      `t6` 4/4 and legacy 2.0.0 fixture imports under strict validation. Route: delegated writer. Commit `09a86d2`.
+- [x] T2 Output hardening: escape every interpolated id/number in HTML and attributes; coerce
       `qty` with `Number()` in `derive`; CSP meta in `index.html`; SRI + `crossOrigin` on cdnjs
       xlsx/jspdf.
+      Evidence: 102 attribute interpolations wrapped in `esc()`; CSP uses the inline script
+      sha256 (kept in sync by `node tests/csp-hash.mjs`, no 'unsafe-inline' for scripts); SRI
+      sha512 computed from the downloaded cdnjs files. RED on baseline (`t2`: CSP and SRI specs
+      failed); GREEN 3/3 with no CSP violations (Excel/PDF exports run); `t1` 5/5, `t6` 4/4.
 - [ ] T3 Merge semantics: `put`/`patch` stamp `updatedAt`; strict newer-wins; tombstones for
       deletions so merge does not resurrect; flag negative pools in `integrity()`.
 - [ ] T4 PIN hardening: PBKDF2-SHA-256 (high iterations) with transparent upgrade of legacy
@@ -68,6 +72,7 @@ with their behavior. Single PR-sized branch requested by the user; chain decisio
 
 - 2026-11-06: regression suite written first (`tests/e2e`, raw CDP, no deps); baseline RED:
   16 of 23 specs failed. T1 done.
+- 2026-11-06: T2 done.
 
 ## Next step
-T2.
+T3.
