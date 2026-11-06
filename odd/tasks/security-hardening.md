@@ -71,7 +71,7 @@ with their behavior. Single PR-sized branch requested by the user; chain decisio
       too); this unit adds the normal-use flows (routes at 1280/390 without overflow, CRUD +
       entrega + control + reposicion persisted, consulta read-only), project `CLAUDE.md` and
       LEEME 2.1. Final run: `node tests/e2e/run.mjs` 24 passed, 0 failed, 0 skipped (Excel/PDF
-      online); inline script `node --check` OK; `node tests/csp-hash.mjs --check` OK.
+      online); inline script `node --check` OK; `node tests/csp-hash.mjs --check` OK. Commit `2fcb173`.
 - [ ] T7 Close: `versiones/panol v2.1.0`, workspace index update, GitHub repo (user-authorized).
 
 ## Route declaration
