@@ -13,6 +13,9 @@ export const REASONS = { entrega_inicial: ['Ingreso del técnico', 'Nueva asigna
 export const ROLES = { admin: 'Administrador', gerencia: 'Gerencia', supervisor: 'Supervisor', responsable: 'Responsable de control', consulta: 'Consulta' };
 export const ROLE_KEYS = Object.keys(ROLES);
 export const ROLE_SHORT = { admin: 'Admin', gerencia: 'Gerencia', supervisor: 'Supervisor', responsable: 'Control', consulta: 'Consulta' };
-export const PERMS = [['controls_do', 'Realizar controles'], ['movements_do', 'Registrar entregas, devoluciones y reposiciones'], ['techs_edit', 'Crear, editar y desactivar técnicos'], ['shift_change', 'Cambiar técnicos de turno'], ['tools_edit', 'Crear y editar herramientas y categorías'], ['inventory_edit', 'Ajustar inventario: ingresos, reparaciones y bajas'], ['alerts_resolve', 'Marcar alertas como resueltas'], ['shifts_edit', 'Administrar turnos'], ['reports_export', 'Exportar informes'], ['demo_manage', 'Cargar o borrar datos de demostración']];
+export const PERMS = [['controls_do', 'Realizar controles'], ['movements_do', 'Registrar entregas, devoluciones y reposiciones'], ['techs_edit', 'Crear, editar y desactivar técnicos'], ['shift_change', 'Mover técnicos de plantilla'], ['tools_edit', 'Crear y editar herramientas y categorías'], ['inventory_edit', 'Ajustar inventario: ingresos, reparaciones y bajas'], ['alerts_resolve', 'Marcar alertas como resueltas'], ['shifts_edit', 'Administrar turnos'], ['reports_export', 'Exportar informes'], ['demo_manage', 'Cargar o borrar datos de demostración'], ['plantillas_edit', 'Administrar plantillas: crear, renombrar, cambiar el supervisor y archivar'], ['plantilla_rotate', 'Cambiar el turno de cualquier plantilla (el supervisor siempre puede cambiar el de la suya)'], ['lineas_edit', 'Administrar líneas, sectores y cajas compartidas']];
+// Permisos que quedan solo por compatibilidad (no se muestran en la matriz).
+export const PERMS_HIDDEN = ['shifts_edit'];
+export const LINEA_KIND = { linea: 'Línea', sector: 'Sector' };
 export const LIM = { name: 120, legajo: 50, code: 60, text: 2000 };
 export const PASSWORD_MIN = 10;

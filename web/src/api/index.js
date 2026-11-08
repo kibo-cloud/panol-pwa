@@ -44,6 +44,26 @@ export const api = {
   createShift: (body) => http.post('/api/shifts', body),
   updateShift: (id, body, version) => http.patch(`/api/shifts/${enc(id)}`, body, { version }),
   deleteShift: (id, version) => http.del(`/api/shifts/${enc(id)}`, { version }),
+  // plantillas (etapa 2)
+  createPlantilla: (body) => http.post('/api/plantillas', body),
+  updatePlantilla: (id, body, version) => http.patch(`/api/plantillas/${enc(id)}`, body, { version }),
+  archivePlantilla: (id, version) => http.post(`/api/plantillas/${enc(id)}/archive`, undefined, { version }),
+  rotatePlantilla: (id, body, version) => http.post(`/api/plantillas/${enc(id)}/rotate`, body, { version }),
+  setSupervisor: (id, body, version) => http.post(`/api/plantillas/${enc(id)}/supervisor`, body, { version }),
+  moveTech: (id, body, version, o) => http.post(`/api/techs/${enc(id)}/move`, body, idem({ ...o, version })),
+  moveSelected: (id, body, o) => http.post(`/api/plantillas/${enc(id)}/move-selected`, body, idem(o)),
+  shiftLabels: () => http.get('/api/settings/shift-labels'),
+  setShiftLabels: (labels, version) => http.put('/api/settings/shift-labels', { labels }, { version }),
+
+  // líneas, sectores y cajas (etapa 2)
+  createLinea: (body) => http.post('/api/lineas', body),
+  updateLinea: (id, body, version) => http.patch(`/api/lineas/${enc(id)}`, body, { version }),
+  archiveLinea: (id, version) => http.post(`/api/lineas/${enc(id)}/archive`, undefined, { version }),
+  createCaja: (body) => http.post('/api/cajas', body),
+  updateCaja: (id, body, version) => http.patch(`/api/cajas/${enc(id)}`, body, { version }),
+  archiveCaja: (id, version) => http.post(`/api/cajas/${enc(id)}/archive`, undefined, { version }),
+  assign: (body, o) => http.post('/api/assignments', body, idem(o)),
+
   createCategory: (body) => http.post('/api/categories', body),
   updateCategory: (id, body, version) => http.patch(`/api/categories/${enc(id)}`, body, { version }),
   deleteCategory: (id, version) => http.del(`/api/categories/${enc(id)}`, { version }),

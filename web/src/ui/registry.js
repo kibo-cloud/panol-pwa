@@ -6,6 +6,8 @@ export const UI = {
   ctlShift: 'all', techQ: '', techShift: 'all', techInactive: false, techTab: 'tools', techMonth: null,
   histMonth: null, histShift: 'all', invQ: '', invCat: 'all', mv: freshMv(), mvFilter: 'all', alertTab: 'open',
   rep: null, ck: null, pendingCk: null, adminTab: 'users', forceCk: false, turnoQ: '', turnoF: 'all',
+  // etapa 2: selección en la vista de una plantilla, filtro de alertas, líneas y cajas
+  plSel: [], plSelFor: null, alertPl: null, lineasArch: false, cajaTab: 'tools', cfgLabels: null,
 };
 
 let renderFn = () => {};

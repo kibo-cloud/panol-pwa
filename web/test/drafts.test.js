@@ -27,6 +27,10 @@ test('mismo contenido conserva la clave de idempotencia; contenido nuevo usa otr
 test('sin control en el servidor se crea; con control se guarda con su versión', () => {
   assert.deepEqual(requestFor(nextDraft(null, base, 'k1')), { kind: 'create', body: { techId: 't-ana', period: P, items: base.items }, idempotencyKey: 'k1' });
   assert.deepEqual(requestFor(nextDraft(null, { ...base, correctionOf: 'c-0' }, 'k2')).body, { correctionOf: 'c-0', items: base.items });
+  // Caja compartida: la clave del poseedor es caja:<id> y el pedido manda cajaId.
+  const caja = nextDraft(null, { ...base, techId: 'caja:k-1' }, 'k3');
+  assert.equal(caja.key, 'caja:k-1|' + caja.pkey);
+  assert.deepEqual(requestFor(caja).body, { cajaId: 'k-1', period: P, items: base.items });
   assert.deepEqual(requestFor(nextDraft(null, { ...base, controlId: 'c1', version: 4 }, 'k3')), { kind: 'save', id: 'c1', items: base.items, version: 4, idempotencyKey: 'k3' });
 });
 
