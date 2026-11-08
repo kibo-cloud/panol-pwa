@@ -270,11 +270,53 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       Root `manifest.webmanifest` and `icons/*` removed after checking identical git blob hashes
       with `web/public/`; `tests/e2e/fixtures/` kept (`make-fixtures.mjs` now uses
       `startStaticServer` for the 2.0.0 baseline).
-- [ ] E1.T8 Deploy and CI: `Dockerfile`, `docker-compose.yml` (app, `postgres:16.x`, caddy
+- [x] E1.T8 Deploy and CI: `Dockerfile`, `docker-compose.yml` (app, `postgres:16.x`, caddy
       with automatic HTTPS, backup with rotation + optional rclone off-VPS copy),
       restore script tested in CI, `LEEME.md` install/update/restore; GitHub Actions on push
       and PR to `v3-servidor` and `v3/**`: unit, integration (`postgres:16`), compose build +
       up + `/api/health` smoke + down, E2E.
+      Commits `b0de8fe` (`npm run admin:create`), `5fd23b0` (image, Compose, Caddy, backups),
+      `95f8a2f` (CI workflow), `51457a9` (LEEME v3). Route: delegated writer.
+      Image `node:22.22-alpine` (Docker Hub tag checked; 22.23 is newer), multi-stage, `npm ci`,
+      `vite build`, `npm prune --omit=dev`, user `node`, healthcheck on `/api/health`. Compose:
+      `postgres:16.14` (= `server/pg-version.json`, enforced by `server/test/unit/
+      deploy-versions.test.js` together with the backup image `postgres:16.14-alpine`, the CI
+      services and `embedded-postgres`), TZ/PGTZ Buenos Aires; app with two credentials
+      (`DATABASE_URL` = `panol_app`/`APP_DB_PASSWORD`, `MIGRATION_DATABASE_URL` = owner
+      `POSTGRES_USER`/`POSTGRES_PASSWORD`), `TRUST_PROXY=true`, `APP_ORIGIN=https://${DOMAIN}`;
+      `caddy:2.11.8-alpine` (`Caddyfile`: automatic HTTPS, HSTS, `flush_interval -1`, no
+      compression on `/api/events`); `backup` image (pg 16.14 tools + rclone): daily at
+      `BACKUP_HOUR`, `pg_dump -Fc` verified with `pg_restore --list`, rotation 7 daily / 4 weekly
+      (Sunday) / 6 monthly (day 1), first run seeds weekly/monthly; off-VPS `rclone copy` when
+      `.env.offsite` defines `BACKUP_REMOTE` + `RCLONE_CONFIG_OFFSITE_*` (R2 and B2 examples in
+      LEEME), disabled without that file. `scripts/backup/restore.sh [--yes] <dump>` (volume path
+      or local file; without `--yes` only explains): stop app, drop/recreate DB, `pg_restore`,
+      start app (migrates + provisions `panol_app`), wait for health. `scripts/backup/
+      ci-test.sh`: insert row -> backup -> delete -> restore refused without `--yes` -> restore ->
+      row back, readable as `panol_app`, migrations present. `docker-compose.ci.yml` publishes
+      the app on 127.0.0.1:3000 (Caddy serves `localhost` with its internal CA).
+      CI (`.github/workflows/ci.yml`, `contents: read`, actions checkout/setup-node/
+      upload-artifact @v4, Node 22): unit (+ build), integration (service `postgres:16.14`,
+      `TEST_DATABASE_URL`), compose (CI `.env` with random hex passwords, build, up, health direct
+      and via Caddy HTTPS, HSTS + CSP headers, HTTP -> HTTPS 308, credentials check,
+      `admin:create`, backup/restore test, logs on failure, `down -v` always), e2e (runner Chrome
+      `/usr/bin/google-chrome`, `PANOL_BROWSER_ARGS=--no-sandbox`, artifact `tests/e2e/out/` on
+      failure). `npm run admin:create -- <user> "<name>"` (`server/scripts/admin-create.js`):
+      admin with one-time temporary password, forced change, audited; integration test (2).
+      Evidence: `npm test` 96/96 (new deploy-versions 5; drift check RED with the compose tag set
+      to 16.13, then GREEN); `npm run test:db` 91/91 locally and 91/91 with `TEST_DATABASE_URL`
+      on a separate cluster (CI path); `npm run test:e2e` 35/35 locally (embedded) and 35/35 via
+      `TEST_DATABASE_URL` (242 s); `sh -n` OK on the 5 shell scripts (LF, mode 100755);
+      `node --check` OK; compose + workflow YAML parsed and checked structurally by a throwaway
+      Node script (services, images, two credentials, triggers, permissions, steps uses xor run,
+      pinned actions; negative check fails on a broken indent). Docker is not available on the
+      dev machine: the image build, Compose, Caddy, backup/restore and the CI workflow are
+      validated only syntactically until the first CI run (pending).
+      `.env.example` could not be read in this session (deny rule), so it was not updated: the
+      deploy variables are documented in `docker-compose.yml` comments and `LEEME.md` §2.3/§4.4
+      (`DOMAIN`, `ACME_EMAIL`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
+      `APP_DB_PASSWORD`, `BACKUP_HOUR`, `KEEP_DAILY`, `KEEP_WEEKLY`, `KEEP_MONTHLY`; `.env.offsite`:
+      `BACKUP_REMOTE`, `RCLONE_CONFIG_OFFSITE_*`).
 - [ ] E1.T9 Close stage 1: CI green, PR `v3/etapa-1-servidor` -> `v3-servidor` with what was
       done, how to test and test results.
 
@@ -293,6 +335,8 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 - 2026-11-07: E1.T4 done (API for every 2.1 operation, SSE, idempotency, demo data).
 - 2026-11-08: E1.V1 done (security corrections) and E1.T5 done (`.txt` v2 import/export).
 - 2026-11-08: E1.T6 done (Vite frontend over the API).
+- 2026-11-08: E1.T7 done (E2E on the v3 server, 35 specs) and E1.T8 done (Docker, Compose,
+  backups, CI workflow, LEEME); first CI run pending.
 
 ## Stage 1 implementation notes (E1.T1-E1.T3)
 - Embedded PG runs through the bundled `initdb`/`pg_ctl` of `embedded-postgres`
@@ -368,8 +412,10 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   quoting (no spreadsheet-formula guard).
 
 ## Next step
-- E1.T7 E2E on the server.
+- E1.T9: push the stage branch (user decision), first CI run, fix what only Docker/CI can show,
+  then the stage 1 PR.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);
   `/api/state` and movement planning load the full ledger (fine for stage 1 volumes);
-  generate the Compose `postgres` tag from `server/pg-version.json` in E1.T8.
+  `.env.example` still lacks the deploy variables (documented in LEEME); remote retention of
+  off-VPS copies is a bucket lifecycle rule (rclone copy, not sync).
