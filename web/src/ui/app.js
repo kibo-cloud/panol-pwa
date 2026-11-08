@@ -128,7 +128,11 @@ export function boot() {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#modal-root') && !$('#modal-root').hidden) ACT.modalClose(); });
   window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); B.installEvt = e; scheduleRender(); });
   window.addEventListener('appinstalled', () => { B.installEvt = null; toast('Pañol quedó instalada'); scheduleRender(); });
-  if ('serviceWorker' in navigator && import.meta.env && import.meta.env.PROD) window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch((e) => console.warn(e)); });
+  if ('serviceWorker' in navigator && import.meta.env && import.meta.env.PROD) {
+    const registerSw = () => { navigator.serviceWorker.register('/sw.js').catch((e) => console.warn(e)); };
+    // Si `load` ya ocurrió, el listener nunca se dispararía: se registra en el momento.
+    if (document.readyState === 'complete') registerSw(); else window.addEventListener('load', registerSw);
+  }
   render();
   start();
 }

@@ -40,7 +40,11 @@ export function ensureWebBuild(log = console.log) {
   const src = Math.max(...['web/src', 'web/public', 'web/index.html', 'web/scripts', 'vite.config.js'].map((p) => newest(path.join(ROOT, p))));
   if (process.env.PANOL_E2E_BUILD !== '1' && fs.existsSync(index) && fs.statSync(index).mtimeMs >= src) return false;
   log('  compilando web/ (vite build)…');
-  const r = spawnSync(process.execPath, [path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js'), 'build', '--logLevel', 'warn'], { cwd: ROOT, stdio: 'inherit' });
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js'), 'build', '--logLevel', 'warn'], {
+    cwd: ROOT, stdio: 'inherit',
+    // El runner corre con NODE_ENV=test: sin forzarlo, Vite compila con PROD=false y la app no registra el SW.
+    env: { ...process.env, NODE_ENV: 'production' }
+  });
   if (r.status !== 0) throw new Error('vite build falló');
   return true;
 }
