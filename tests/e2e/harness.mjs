@@ -111,10 +111,18 @@ export async function launchBrowser() {
     '--disable-background-networking', '--disable-sync',
     // PANOL_BROWSER_ARGS: opciones extra (p. ej. --no-sandbox en el runner de CI).
     ...(process.env.PANOL_BROWSER_ARGS || '').split(/\s+/).filter(Boolean), 'about:blank'
-  ], { stdio: 'ignore' });
+  ], { stdio: ['ignore', 'ignore', 'pipe'] });
+  // Se guarda la cola de stderr para explicar un arranque fallido; se consume siempre para no trabar el pipe.
+  let stderrTail = '';
+  let exited = null;
+  proc.stderr.on('data', (d) => { stderrTail = (stderrTail + d).slice(-3000); });
+  proc.on('exit', (code, signal) => { exited = code ?? signal; });
   const portFile = path.join(dir, 'DevToolsActivePort');
-  for (let i = 0; i < 150 && !fs.existsSync(portFile); i++) await sleep(100);
-  if (!fs.existsSync(portFile)) throw new Error('browser did not start (no DevToolsActivePort)');
+  for (let i = 0; i < 300 && !fs.existsSync(portFile) && exited === null; i++) await sleep(100);
+  if (!fs.existsSync(portFile)) {
+    try { proc.kill(); } catch { /* ignore */ }
+    throw new Error('browser did not start (no DevToolsActivePort)' + (exited !== null ? ', exit ' + exited : ', timeout 30 s') + '\n' + stderrTail);
+  }
   let port = '';
   for (let i = 0; i < 20 && !port; i++) { try { port = fs.readFileSync(portFile, 'utf8').split('\n')[0].trim(); } catch { await sleep(100); } }
   const v = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
