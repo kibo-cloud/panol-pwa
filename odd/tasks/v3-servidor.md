@@ -456,12 +456,37 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 - Line on missing/broken tools stays in stage 4 (optional, never blocks).
 
 ## Stage 2 tasks (branch `v3/etapa-2-plantillas`)
-- [ ] E2.T1 Backend plantillas: migration (plantillas, history tables with exclusion
+- [x] E2.T1 Backend plantillas: migration (plantillas, history tables with exclusion
       constraint, rotations, supervisor history, shift labels setting, control
       `plantilla_id_snapshot`), data migration from shifts, domain (effective plantilla by
       date, coverage return), API (CRUD, rotate, change supervisor, move one tech, move
       selected techs in one transaction, coverage with return date, history), permissions,
       SSE, audit, `.txt` import/export mapping; unit + integration tests.
+      Route: delegated writer. Code: migration `005_plantillas.sql`, `domain/plantillas.js`,
+      `adapters/pg/plantilla-repo.js`, `application/plantillas.js`, `adapters/http/plantilla-routes.js`;
+      catalog (techs, legacy turnos and shift change delegate to plantillas), controls (snapshot),
+      state, report, seed, demo, `.txt` repo. Test-first: `unit/plantillas.test.js` RED (missing
+      module) then GREEN; permissions unit test RED (2 failing on the new keys) then GREEN;
+      `plantillas-migration.test.js` found a real bug RED (`by` is a reserved alias in the
+      PL/pgSQL record) then GREEN; the other integration tests were written with the code.
+      Evidence: `npm test` 109 pass + 1 expected failure (`web/test/constants.test.js`: the
+      web PERMS list lacks the 3 new keys; `web/` is the frontend writer's surface);
+      `npm run test:db` 112/112 (new `plantillas-api` 15: exclusion 23P01, append-only trigger
+      (only closing an open range), app role cannot TRUNCATE/UPDATE/DELETE the append-only
+      tables, create with default name "Plantilla de <supervisor>", supervisor must have role
+      supervisor, If-Match 428/409, archive only without members, move one (version bump, ETag,
+      audit, NOTIFY, same-day re-move voids the range, no move before the last change),
+      move-selected atomic rollback + idempotent replay, coverage with automatic return by date,
+      rotation (supervisor own only, consulta/gerencia/responsable 403), supervisor history,
+      snapshot on create and on finalize, report keeps the control snapshot after a move,
+      "Mi plantilla", shift labels; `plantillas-migration` 3: shifts -> plantillas, shift
+      changes -> ranges (same day keeps the last, missing source shift = gap, local date of
+      `at` when no effective date), snapshot backfill on finalized controls that stay immutable;
+      `plantillas-txt` 3: export turnos/shiftId/shiftChanges from plantillas and history,
+      import of a new turno + shift change -> plantilla + range, deleted turno -> archived
+      plantilla, export -> dry-run = 0 changes; adapted: catalog (shift change and turnos now
+      on plantillas), txt-import (membership and plantillas instead of `techs.shift_id`/`shifts`),
+      auth (permission map has the 3 new keys)).
 - [ ] E2.T2 Backend líneas, sectores y cajas: catalog, cajas with referente, holder
       generalisation for assignments, movements and controls, single-form "alta" of an
       assignment to a tech or a caja; tests.
@@ -474,8 +499,82 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       caja assignment + control, `.txt` migration of turnos to plantillas; existing specs
       adapted; CI green; PR.
 
+## Stage 2 implementation notes (E2.T1)
+- Membership: `tech_plantilla_history` ranges `[valid_from, valid_to)` with
+  `EXCLUDE USING gist (tech_id WITH =, daterange(...) WITH &&)` (`btree_gist`). `valid_from`
+  NULL = "since always" (the first range of every tech, so old controls also find a
+  plantilla); `valid_to` NULL = open. A range with `valid_from = valid_to` is void (a second
+  move on the same day closes the first one at its own start; nothing is deleted). The only
+  UPDATE allowed is closing an open range; DELETE only for demo rows during demo clear.
+  SQL helpers: `plantilla_on(tech, day)`, `period_end(y, m, w)`,
+  `plantilla_ranges_from_changes(current, changes jsonb)` (used by migration 005 and by the
+  `.txt` importer).
+- Move rules: from-date must not be before the start of the tech's last range; target must be
+  an active plantilla different from the current one; reason required; coverage = `until`
+  (exclusive return date: the tech is back in the base plantilla on `until`), stored as a
+  temporary range plus a re-opened base range, so "effective plantilla on D" is one lookup and
+  no job is needed. A move bumps the tech `version` (open edit forms see the change).
+- Control snapshot (`controls.plantilla_id_snapshot`, also mirrored in `shift_id` for 2.1):
+  plantilla on min(today, last day of the control's week), taken on create, on each draft
+  save and on finalize. Migration backfill used min(finished/updated date, week end), falling
+  back to the control's old `shift_id`.
+- Rotation: label must be in the configurable list (`app_settings` key
+  `plantillas.shift_labels`, default Mañana/Tarde/Noche); migrated plantillas keep their shift
+  name as current label; rotation date cannot be in the future. Supervisor change: role
+  supervisor and active (or null to remove), date not in the future.
+- Legacy routes kept and delegating (so the 2.1 UI keeps working until E2.T3): `/api/shifts`
+  POST/PATCH/DELETE = create/rename/archive plantilla (permission now `plantillas_edit`;
+  `shifts_edit` stays in the list only for stored overrides and is no longer checked);
+  `POST /api/techs/:id/shift-change` = move from `effectiveFrom` (today if empty), reason =
+  note or "Cambio de turno". `shifts` and `shift_changes` are no longer written (readable);
+  `techs.shift_id` is no longer written either.
+- `.txt` v2: export `config.turnos` = active plantillas, `techs.shiftId` = membership today,
+  `shiftChanges` = one per history range with a from-date (id = range id, names = current
+  plantilla names, temporary flag not represented). Import: new turno -> plantilla (an
+  archived one with the same id is re-activated), removed turno -> plantilla archived and its
+  members' open ranges closed today; techs without history get ranges from the file's shift
+  changes + shiftId; techs with history get new shift changes as moves (those dated before the
+  last range are skipped and counted in the import audit) and a move from today if the
+  file's shiftId differs. History is never deleted or edited by an import.
+
+## Stage 2 API notes (for the frontend writer)
+- `GET /api/state` (backward compatible, new keys): `plantillas` (by id, incl. archived:
+  name, supervisorUserId, currentShiftLabel, order, archivedAt, version), `plantillaHistory`
+  ({techId: ranges[]}: id, plantillaId, validFrom, validTo, temporary, reason, createdAt, by),
+  `plantillaRotations` (list: plantillaId, fromLabel, label, from, by), `plantillaSupervisors`
+  (list: plantillaId, fromUserId, supervisorUserId, from, by), `shiftLabels` and
+  `config.shiftLabels`, `techs[id].plantillaId` (= `shiftId`, membership today),
+  `derived.myPlantilla` = { plantillaIds (active plantillas supervised by the caller), techIds
+  (their active members today), alertKeys (open alerts of those techs) }. Unchanged shapes:
+  `shifts` (active plantillas as {id, name, order, version}), `config.turnos`, `shiftChanges`
+  (now derived from history; ids are range ids), `derived.shiftInfo` (per active plantilla).
+- Controls: new field `plantillaId` (snapshot); `GET /api/controls?plantillaId=` filters by it.
+- `GET /api/reports`: rows `shiftId`/`plantillaId` = plantilla of the period (control snapshot,
+  else history at period end, else current); new `plantillas` (same as `shifts`, may include
+  archived plantillas present in the period); `plantilla=` query alias of `shift=`.
+- Plantillas: `GET /api/plantillas` (with `members` count), `POST /api/plantillas` {name?,
+  supervisorUserId?, shiftLabel?, order?} (201 `{plantilla}`), `PATCH /api/plantillas/:id`
+  {name?, order?} + If-Match, `POST /api/plantillas/:id/archive` + If-Match (409 with members,
+  409 last one), `POST /api/plantillas/:id/rotate` {label, from?} + If-Match -> {plantilla,
+  rotation}, `POST /api/plantillas/:id/supervisor` {supervisorUserId|null, from?} + If-Match ->
+  {plantilla, change}, `GET /api/plantillas/:id/history` -> {plantilla, members (ranges),
+  rotations, supervisors}.
+- Moves (`shift_change`, Idempotency-Key accepted): `POST /api/techs/:id/move` {plantillaId,
+  from, reason, until?} (optional If-Match = tech version) -> {tech, ranges}; `POST
+  /api/plantillas/:id/move-selected` {techIds[1..200], targetPlantillaId, from, reason,
+  until?} -> {moved: [{techId, version, ranges}]}, all or nothing; a 422 names the tech
+  (`techId` in the body). `GET /api/techs/:id/plantilla-history` -> {techId, current, ranges}.
+- `POST /api/techs` accepts `plantillaId` (or the 2.1 `shiftId`); tech responses carry
+  `plantillaId`/`shiftId`. Shift change response adds `range`.
+- Shift labels: `GET /api/settings/shift-labels` -> {labels, version} + ETag; `PUT` {labels}
+  + If-Match (`plantillas_edit`).
+- Permissions: new keys `plantillas_edit`, `plantilla_rotate`, `lineas_edit` (admin only by
+  default); `shift_change` label is now "Mover técnicos de plantilla". The web PERMS list
+  (`web/src/state/constants.js`) must add the 3 keys (parity test).
+- SSE events: `plantillas` (create/update/delete/move) and `techs` (update on every move).
+
 ## Next step
-- E2.T1 + E2.T2 (delegated backend writer). PR #1 awaits user review.
+- E2.T2 (delegated backend writer), then E2.T3 frontend. PR #1 awaits user review.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);
   `/api/state` and movement planning load the full ledger (fine for stage 1 volumes);

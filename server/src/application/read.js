@@ -18,17 +18,27 @@ function derived(S, now) {
   return { d, alerts };
 }
 
-export async function getState(db, { now = new Date() } = {}) {
+// "Mi plantilla" de un supervisor: sus plantillas activas, su gente (hoy) y las alertas de su gente.
+function myPlantilla(S, user, alerts) {
+  const ids = user ? Object.entries(S.plantillas).filter(([, p]) => !p.archivedAt && p.supervisorUserId === user.id).map(([id]) => id) : [];
+  const set = new Set(ids);
+  const techIds = Object.entries(S.techs).filter(([, t]) => t.active !== false && set.has(t.plantillaId)).map(([id]) => id);
+  const techSet = new Set(techIds);
+  return { plantillaIds: ids, techIds, alertKeys: alerts.filter((a) => a.techId && techSet.has(a.techId)).map((a) => a.key) };
+}
+
+export async function getState(db, { now = new Date(), user = null } = {}) {
   const S = await withSnapshot(db, readState);
   const { d, alerts } = derived(S, now);
   return {
     now: now.toISOString(),
     ...S,
-    config: { turnos: { list: S.shifts.map((s) => ({ id: s.id, name: s.name, order: s.order })) } },
+    config: { turnos: { list: S.shifts.map((s) => ({ id: s.id, name: s.name, order: s.order })) }, shiftLabels: S.shiftLabels },
     derived: {
       cur: d.cur, curKey: d.curKey, pools: d.pools, stateOf: d.stateOf, effective: ids(d.eff), drafts: ids(d.drafts), supersededBy: d.supersededBy,
       pendingReturns: d.pendingReturns.map((m) => m.id), techInfo: d.techInfo, shiftInfo: d.shiftInfo, kpi: d.kpi, alerts,
       hasDemo: DEMO_COLS.some((c) => Object.values(S[c]).some((x) => x.demo)),
+      myPlantilla: myPlantilla(S, user, alerts),
     },
   };
 }
@@ -57,11 +67,13 @@ export async function getReport(db, filters, { now = new Date() } = {}) {
 }
 
 // Historial de controles (opcionalmente de un técnico), del más nuevo al más viejo.
-export async function listControls(db, { techId, status } = {}) {
+export async function listControls(db, { techId, status, plantillaId } = {}) {
   let list = await loadControls(db, status ? { status } : {});
   const { supersededBy, eff } = effectiveControls(list);
   const effIds = new Set(Object.values(eff).map((c) => c.id));
   if (techId) list = list.filter((c) => c.techId === techId);
+  // Por plantilla: la foto que guardó cada control (no la plantilla actual del técnico).
+  if (plantillaId) list = list.filter((c) => c.plantillaId === plantillaId);
   list.sort((a, b) => b.pnum - a.pnum || (b.finishedAt || b.updatedAt || '').localeCompare(a.finishedAt || a.updatedAt || ''));
   return list.map((c) => ({ ...c, supersededBy: supersededBy[c.id] || null, effective: effIds.has(c.id) }));
 }

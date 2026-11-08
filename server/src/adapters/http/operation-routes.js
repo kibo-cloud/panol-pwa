@@ -11,16 +11,16 @@ import { S, obj, idParams, requireVersion, sendRow, actorOf, etag } from './rest
 import { badRequest } from './errors.js';
 import { MV_TYPES, ITEM_STATES, SCHEMA_LIM, LIM } from '../../domain/constants.js';
 
-function idempotencyKey(req) {
+export function idempotencyKey(req) {
   const k = req.headers['idempotency-key'];
   if (k === undefined) return undefined;
   if (!IDEMPOTENCY_KEY_RE.test(String(k))) throw badRequest('Idempotency-Key inválida (8 a 200 caracteres: letras, números, punto, guion, dos puntos o guion bajo).', 'invalid_idempotency_key');
   return String(k);
 }
 
-function sendResult(reply, r) {
+export function sendResult(reply, r) {
   if (r.replayed) reply.header('Idempotent-Replayed', 'true');
-  const row = r.body && r.body.control;
+  const row = r.body && (r.body.control || r.body.tech);
   if (row && row.version != null) reply.header('ETag', etag(row));
   return reply.code(r.status).send(r.body);
 }

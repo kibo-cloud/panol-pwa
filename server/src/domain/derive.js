@@ -1,7 +1,7 @@
 // Datos derivados del estado (portado de derive() de 2.1). Recibe las colecciones con la misma
 // forma que `S` de 2.1 (objetos por id) y devuelve listas ordenadas, controles efectivos,
 // historial, inventario y resúmenes por técnico y por turno.
-import { periodOf, pkeyOf, pnumOf } from './period.js';
+import { periodOf, pkeyOf, pnumOf, localDateISO } from './period.js';
 import { effectiveControls, controlHistory } from './controls.js';
 import { pendingReturns } from './alerts.js';
 import { poolsFromTransfers, emptyPool } from './pools.js';
@@ -26,6 +26,9 @@ export function deriveState(S, { now = new Date() } = {}) {
   const curNum = pnumOf(cur);
   const shifts = (S.shifts && S.shifts.length ? S.shifts : DEFAULT_SHIFTS).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
   const shiftById = Object.fromEntries(shifts.map((s) => [s.id, s]));
+  // Plantillas (también las archivadas, para informes históricos) e historial de pertenencia.
+  const plantillaById = { ...Object.fromEntries(Object.entries(S.plantillas || {}).map(([id, p]) => [id, { id, ...p }])), ...shiftById };
+  const plantillaHist = S.plantillaHistory || {};
   const techs = toList(S.techs).sort(byName);
   const activeTechs = techs.filter((t) => t.active !== false);
   const tools = toList(S.tools).sort(byName);
@@ -86,7 +89,7 @@ export function deriveState(S, { now = new Date() } = {}) {
     ctlMonth: effList.filter((c) => c.period && c.period.y === cur.y && c.period.m === cur.m).length,
   };
   return {
-    cur, curKey, curNum, shifts, shiftById, techs, activeTechs, tools, units, unitsByTool, asgs, activeAsg, asgByTech,
+    cur, curKey, curNum, today: localDateISO(now), shifts, shiftById, plantillaById, plantillaHist, techs, activeTechs, tools, units, unitsByTool, asgs, activeAsg, asgByTech,
     ctls, eff, effList, effByTech, drafts, supersededBy, stateOf, hist, transitions, movs, pools, pendingReturns: pend,
     techInfo, shiftInfo, kpi,
   };

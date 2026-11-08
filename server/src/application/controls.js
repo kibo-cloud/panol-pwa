@@ -4,7 +4,9 @@
 import { loadControls, saveControl, rewriteControl } from '../adapters/pg/inventory-repo.js';
 import { buildControlDoc, validateFinalize } from '../domain/controls.js';
 import { DomainError, notFoundError } from '../domain/errors.js';
-import { periodOf, pnumOf, pkeyOf, plabel } from '../domain/period.js';
+import { periodOf, pnumOf, pkeyOf, plabel, localDateISO } from '../domain/period.js';
+import { controlRefDate } from '../domain/plantillas.js';
+import { plantillaOn } from '../adapters/pg/plantilla-repo.js';
 import { validId } from '../domain/constants.js';
 import { newId } from './ids.js';
 import { checkVersion, record, notifyChange } from './common.js';
@@ -15,14 +17,16 @@ const getOne = async (c, id, lock = false) => (await loadControls(c, { id, lock 
 const finalizedError = (cur) => rule('El control ya está finalizado: se corrige con un registro nuevo.', 'control_finalized', 409, { current: cur });
 
 // Técnico, asignaciones activas (bloqueadas en modo compartido) y catálogos para armar el documento.
-async function controlContext(c, techId) {
-  const t = (await c.query('SELECT id, name, shift_id, active FROM techs WHERE id = $1', [techId])).rows[0];
+// La plantilla es la del técnico el día del control (o el último día de un período ya pasado).
+async function controlContext(c, techId, period, now = new Date()) {
+  const t = (await c.query('SELECT id, name, active FROM techs WHERE id = $1', [techId])).rows[0];
+  const plantillaId = t && period ? await plantillaOn(c, techId, controlRefDate(period, localDateISO(now))) : null;
   const asgs = (await c.query('SELECT id, tool_id, unit_id, qty FROM assignments WHERE tech_id = $1 AND active ORDER BY id FOR SHARE', [techId])).rows
     .map((r) => ({ id: r.id, techId, toolId: r.tool_id, unitId: r.unit_id, qty: r.qty }));
   const tools = Object.fromEntries((await c.query('SELECT id, name, category_id FROM tools WHERE id = ANY($1)', [asgs.map((a) => a.toolId)])).rows.map((r) => [r.id, { name: r.name, categoryId: r.category_id }]));
   const units = Object.fromEntries((await c.query('SELECT id, code FROM units WHERE id = ANY($1)', [asgs.map((a) => a.unitId).filter(Boolean)])).rows.map((r) => [r.id, { code: r.code }]));
   const categories = Object.fromEntries((await c.query('SELECT id, name FROM categories')).rows.map((r) => [r.id, { name: r.name }]));
-  return { tech: t ? { id: t.id, name: t.name, shiftId: t.shift_id, active: t.active } : null, assignments: asgs, tools, units, categories };
+  return { tech: t ? { id: t.id, name: t.name, plantillaId, active: t.active } : null, assignments: asgs, tools, units, categories };
 }
 
 const docOf = (ctx, period, items, status, correctionOf) =>
@@ -73,7 +77,7 @@ export async function createControl(db, actor, input, { idempotencyKey, path, no
       const det = `c-${techId}-${pkeyOf(period)}`;
       id = validId(det) ? det : newId('c');
     }
-    const ctx = await controlContext(c, techId);
+    const ctx = await controlContext(c, techId, period, now);
     if (!ctx.tech || (!correctionOf && ctx.tech.active === false)) throw rule('Elegí un técnico activo.', 'inactive_tech');
     const doc = docOf(ctx, period, items, 'borrador', correctionOf);
     await saveControl(c, id, doc, { actorId: actor.id, startedAt: now, demo }).catch((e) => {
@@ -95,7 +99,7 @@ export async function saveDraft(db, actor, id, input, version, { idempotencyKey,
     const cur = await getOne(c, id, true);
     if (cur && cur.status === 'finalizado') throw finalizedError(cur);
     checkVersion(cur, version, 'No se encontró el control.');
-    const ctx = await controlContext(c, cur.techId);
+    const ctx = await controlContext(c, cur.techId, cur.period);
     const doc = docOf(ctx, cur.period, mergeItems(plainItems(cur.items), input.items), 'borrador', cur.supersedes);
     await rewriteControl(c, id, doc);
     const r = await response(c, id, 200);
@@ -116,7 +120,7 @@ export async function finalizeControl(db, actor, id, version, { idempotencyKey, 
     const cur = await getOne(c, id, true);
     if (cur && cur.status === 'finalizado') throw finalizedError(cur);
     checkVersion(cur, version, 'No se encontró el control.');
-    const ctx = await controlContext(c, cur.techId);
+    const ctx = await controlContext(c, cur.techId, cur.period, now);
     if (!ctx.assignments.length) throw rule('Este técnico no tiene herramientas asignadas.', 'no_assignments');
     const v = validateFinalize(ctx.assignments, cur.items);
     if (!v.ok) throw rule(why(v), 'control_incomplete', 422, { pending: v.pending, missingNote: v.missingNote });

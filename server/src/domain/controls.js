@@ -54,7 +54,9 @@ export function validateFinalize(activeAssignments, items) {
 }
 
 // Documento del control: copia nombre, categoría y código al momento del control, y cuenta
-// por cantidad. Solo entran las asignaciones activas que tienen estado.
+// por cantidad. Solo entran las asignaciones activas que tienen estado. `plantillaId` es la
+// plantilla del técnico al hacerse el control (foto para los informes); `shiftId` la repite
+// por compatibilidad con 2.1.
 export function buildControlDoc({ tech, period, assignments, items, tools, units, categories, status, correctionOf = null }) {
   const out = {};
   const counts = { bueno: 0, cambio: 0, faltante: 0 };
@@ -79,7 +81,8 @@ export function buildControlDoc({ tech, period, assignments, items, tools, units
   return {
     techId: tech.id,
     techName: tech.name || '',
-    shiftId: tech.shiftId || null,
+    shiftId: tech.plantillaId ?? tech.shiftId ?? null,
+    plantillaId: tech.plantillaId ?? tech.shiftId ?? null,
     period: { y: period.y, m: period.m, w: period.w },
     pkey: pkeyOf(period),
     pnum: pnumOf(period),

@@ -1,10 +1,21 @@
 // SQL del .txt v2: lee todo el estado con la forma de 2.1 (para exportar y para planear una
 // importación) y aplica un plan de importación (llamar dentro de una transacción).
+// Plantillas <-> turnos de 2.1: `config.turnos` son las plantillas activas, `techs.shiftId` la
+// plantilla actual de cada técnico y `shiftChanges` los cambios del historial de pertenencia.
+// Al importar, los turnos crean o actualizan plantillas (un turno borrado archiva la
+// plantilla) y los cambios de turno pasan al historial con la misma función que usó la
+// migración 005 (plantilla_ranges_from_changes).
 import { listRows, TABLES } from './catalog-repo.js';
 import { loadControls } from './inventory-repo.js';
 import { loadMovementsFull } from './state-repo.js';
 import { replaceOverrides, deleteUserSessions } from './auth-repo.js';
 import { stamp } from '../../importers/txt-v2/plan.js';
+import { readPlantillas } from './state-repo.js';
+import { loadHistory, insertRange, closeRange, rangesFromChanges } from './plantilla-repo.js';
+import { planMove, effectiveRange } from '../../domain/plantillas.js';
+import { DomainError } from '../../domain/errors.js';
+import { localDateISO } from '../../domain/period.js';
+import { newId } from '../../application/ids.js';
 
 const iso = (d) => (d instanceof Date ? d.toISOString() : d ?? null);
 const strip = (list) => Object.fromEntries(list.map(({ id, version, ...r }) => [id, r]));
@@ -14,7 +25,10 @@ const maxIso = (rows) => rows.reduce((m, r) => (r.updated_at && (!m || r.updated
 // credenciales; `creds` las resume aparte (nunca salen del servidor).
 export async function loadTxtState(q) {
   const data = {};
-  for (const c of ['techs', 'shiftChanges', 'categories', 'tools', 'units', 'assignments', 'alertRes']) data[c] = strip(await listRows(q, c, `ORDER BY ${TABLES[c].key}`));
+  const P = await readPlantillas(q);
+  data.techs = strip(P.techs.map(({ plantillaId, ...t }) => t));
+  data.shiftChanges = Object.fromEntries(Object.entries(P.shiftChanges).sort(([a], [b]) => (a < b ? -1 : 1)));
+  for (const c of ['categories', 'tools', 'units', 'assignments', 'alertRes']) data[c] = strip(await listRows(q, c, `ORDER BY ${TABLES[c].key}`));
   data.controls = strip((await loadControls(q)).sort((a, b) => (a.id < b.id ? -1 : 1)));
   data.movements = strip(await loadMovementsFull(q));
   data.audit = Object.fromEntries((await q.query('SELECT id, action, entity, entity_id, detail, at, actor_id FROM audit_log ORDER BY at, id')).rows.map((r) => [
@@ -25,7 +39,7 @@ export async function loadTxtState(q) {
     name: u.name, role: u.role, active: u.active, username: u.username, createdAt: iso(u.created_at), updatedAt: iso(u.updated_at), by: u.created_by,
   }]));
   const creds = Object.fromEntries(users.map((u) => [u.id, { hasPassword: !!u.password_hash, legacyPinHash: u.legacy_pin_hash }]));
-  const shifts = (await q.query('SELECT id, name, sort_order, updated_at FROM shifts ORDER BY sort_order, id')).rows;
+  const shifts = (await q.query('SELECT id, name, sort_order, updated_at FROM plantillas WHERE archived_at IS NULL ORDER BY sort_order, id')).rows;
   const perms = (await q.query('SELECT role, perm, allowed, updated_at FROM role_permissions ORDER BY role, perm')).rows;
   data.config = { turnos: { list: shifts.map((s) => ({ id: s.id, name: s.name, order: s.sort_order })), updatedAt: iso(maxIso(shifts)) } };
   if (perms.length) {
@@ -62,13 +76,18 @@ async function insertItems(c, id, items) {
   }
 }
 
+// Foto de la plantilla de un control importado: la del historial el día del control (o el
+// último día de su semana), o el turno que trae el archivo si es una plantilla.
+const SNAPSHOT_SQL = (tech, ref, y, m, w, shift) =>
+  `coalesce(plantilla_on(${tech}, least(coalesce(${ref}::timestamptz, now())::date, period_end(${y}, ${m}, ${w}))), (SELECT id FROM plantillas WHERE id = ${shift}))`;
+
 async function insertControl(c, id, r) {
   await c.query(
     `INSERT INTO controls (id, tech_id, tech_name, shift_id, period_y, period_m, period_w, status, count_bueno, count_cambio, count_faltante,
-       correction, supersedes_id, started_at, created_by, demo, imported, created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,'borrador',$8,$9,$10,$11,$12,$13,$14,$15,true,$16,$17)`,
+       correction, supersedes_id, started_at, created_by, demo, imported, created_at, updated_at, plantilla_id_snapshot)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'borrador',$8,$9,$10,$11,$12,$13,$14,$15,true,$16,$17,${SNAPSHOT_SQL('$19::text', '$18', '$5', '$6', '$7', '$20::text')})`,
     [id, r.techId, r.techName, r.shiftId, r.period.y, r.period.m, r.period.w, r.counts.bueno, r.counts.cambio, r.counts.faltante,
-      r.correction, r.supersedes, r.startedAt, r.by, r.demo, r.createdAt ?? stampIso(r) ?? new Date(), stampIso(r) ?? new Date()],
+      r.correction, r.supersedes, r.startedAt, r.by, r.demo, r.createdAt ?? stampIso(r) ?? new Date(), stampIso(r) ?? new Date(), r.finishedAt ?? null, r.techId, r.shiftId ?? null],
   );
   await insertItems(c, id, r.items);
   if (r.status === 'finalizado') await c.query("UPDATE controls SET status = 'finalizado', finished_at = $2 WHERE id = $1", [id, r.finishedAt]);
@@ -80,7 +99,8 @@ async function updateControl(c, id, r) {
   await insertItems(c, id, r.items);
   await c.query(
     `UPDATE controls SET tech_name = $2, shift_id = $3, count_bueno = $4, count_cambio = $5, count_faltante = $6, started_at = $7,
-       demo = $8, status = $9, finished_at = $10 WHERE id = $1`,
+       demo = $8, status = $9, finished_at = $10,
+       plantilla_id_snapshot = ${SNAPSHOT_SQL('tech_id', '$10', 'period_y', 'period_m', 'period_w', '$3')} WHERE id = $1`,
     [id, r.techName, r.shiftId, r.counts.bueno, r.counts.cambio, r.counts.faltante, r.startedAt, r.demo, r.status, r.status === 'finalizado' ? r.finishedAt : null],
   );
 }
@@ -118,8 +138,68 @@ function controlOrder(create) {
   return out;
 }
 
-const GENERIC = ['categories', 'techs', 'tools', 'units', 'assignments', 'shiftChanges', 'alertRes'];
-const DELETE_ORDER = [['assignments', 'assignments'], ['units', 'units'], ['shiftChanges', 'shift_changes'], ['alertRes', 'alert_resolutions'], ['techs', 'techs'], ['tools', 'tools'], ['categories', 'categories']];
+// Los cambios de turno no van a shift_changes: pasan al historial (reconcileMembership).
+const GENERIC = ['categories', 'techs', 'tools', 'units', 'assignments', 'alertRes'];
+const DELETE_ORDER = [['assignments', 'assignments'], ['units', 'units'], ['alertRes', 'alert_resolutions'], ['techs', 'techs'], ['tools', 'tools'], ['categories', 'categories']];
+
+const changeDay = (x) => x.effectiveFrom || (x.at ? localDateISO(new Date(x.at)) : null);
+
+// Pertenencia de los técnicos que cambian con el archivo.
+// - Sin historial: se arma con los cambios de turno del archivo y su turno actual.
+// - Con historial: los cambios nuevos se agregan como movimientos (los que caen antes del
+//   último tramo no se pueden aplicar sin reescribir el historial y se cuentan como omitidos);
+//   después, si la plantilla de hoy no es la del archivo, se mueve desde hoy.
+// El historial nunca se borra ni se edita: un cambio de turno modificado o borrado en el
+// archivo no cambia nada (los cambios de turno de 2.1 tampoco se editaban).
+async function reconcileMembership(c, plan, { actorId, today }) {
+  const ch = plan.changes;
+  const final = plan.final;
+  const newSc = ch.shiftChanges.create;
+  const touched = new Set([...Object.keys(ch.techs.create), ...Object.keys(ch.techs.update), ...Object.values(newSc).map((x) => x.techId)]);
+  let skipped = 0;
+  for (const techId of [...touched].sort()) {
+    const t = final.techs[techId];
+    if (!t) continue;
+    const fileChanges = Object.entries(final.shiftChanges).filter(([, x]) => x.techId === techId)
+      .map(([id, x]) => ({ id, from: x.from, to: x.to, effectiveFrom: x.effectiveFrom, at: x.at, note: x.note, by: x.by }));
+    let hist = await loadHistory(c, { techIds: [techId] });
+    if (!hist.length) {
+      for (const r of await rangesFromChanges(c, t.shiftId ?? null, fileChanges)) {
+        const range = { id: r.srcId ?? newId('ph'), techId, plantillaId: r.plantillaId, validFrom: r.validFrom, validTo: r.validTo, reason: r.reason ?? 'Importación del .txt' };
+        await insertRange(c, range, { actorId: r.by ?? actorId, demo: !!t.demo, createdAt: r.createdAt });
+      }
+      continue;
+    }
+    const move = async (to, from, reason, firstId) => {
+      let n = 0;
+      const p = planMove(hist, { techId, targetId: to, from, reason }, { newId: (pre) => (n++ === 0 && firstId ? firstId : newId(pre)) });
+      if (p.close) await closeRange(c, p.close.id, p.close.validTo);
+      for (const r of p.inserts) await insertRange(c, r, { actorId, demo: !!t.demo });
+      hist = await loadHistory(c, { techIds: [techId] });
+    };
+    const news = fileChanges.filter((x) => newSc[x.id] && changeDay(x))
+      .sort((a, b) => changeDay(a).localeCompare(changeDay(b)) || (a.at || '').localeCompare(b.at || ''));
+    for (const x of news) {
+      const exists = x.to && (await c.query('SELECT 1 FROM plantillas WHERE id = $1', [x.to])).rows[0];
+      try {
+        if (!exists) throw new DomainError('plantilla inexistente');
+        await move(x.to, changeDay(x), x.note || 'Cambio de turno (importado)', x.id);
+      } catch (err) {
+        if (!(err instanceof DomainError)) throw err;
+        skipped++;
+      }
+    }
+    const cur = effectiveRange(hist, today)?.plantillaId ?? null;
+    const want = t.shiftId ?? null;
+    if (want === cur) continue;
+    if (want) await move(want, today, 'Importación del .txt');
+    else {
+      const open = hist.find((r) => r.validTo == null);
+      if (open) await closeRange(c, open.id, open.validFrom && open.validFrom > today ? open.validFrom : today);
+    }
+  }
+  return { skipped };
+}
 
 export async function applyImportPlan(c, plan, { actorId }) {
   const ch = plan.changes;
@@ -136,13 +216,32 @@ export async function applyImportPlan(c, plan, { actorId }) {
   const delUsers = ch.users.delete.filter((id) => id !== actorId);
   if (delUsers.length) await c.query('DELETE FROM users WHERE id = ANY($1)', [delUsers]);
 
-  // Turnos (antes que los técnicos que los nombran).
-  for (const [id, s] of Object.entries(ch.shifts.create)) await c.query('INSERT INTO shifts (id, name, sort_order) VALUES ($1,$2,$3)', [id, s.name, s.order]);
-  for (const [id, s] of Object.entries(ch.shifts.update)) await c.query('UPDATE shifts SET name = $2, sort_order = $3 WHERE id = $1', [id, s.name, s.order]);
+  // Turnos = plantillas (antes que los técnicos que los nombran). Una plantilla archivada con
+  // el mismo id vuelve a estar activa.
+  for (const [id, s] of Object.entries(ch.shifts.create)) {
+    await c.query(
+      `INSERT INTO plantillas (id, name, current_shift_label, sort_order, created_by) VALUES ($1,$2,$2,$3,$4)
+       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, sort_order = EXCLUDED.sort_order, archived_at = NULL`,
+      [id, s.name, s.order, actorId],
+    );
+  }
+  for (const [id, s] of Object.entries(ch.shifts.update)) await c.query('UPDATE plantillas SET name = $2, sort_order = $3 WHERE id = $1', [id, s.name, s.order]);
 
   for (const name of GENERIC) {
     for (const [id, r] of Object.entries(ch[name].create)) await insertGeneric(c, name, id, r);
     for (const [id, r] of Object.entries(ch[name].update)) await updateGeneric(c, name, id, r);
+  }
+  const today = localDateISO();
+  const membership = await reconcileMembership(c, plan, { actorId, today });
+  // Turno borrado: la plantilla se archiva y su gente queda sin plantilla desde hoy (en 2.1 el
+  // técnico quedaba sin turno).
+  for (const id of ch.shifts.delete) {
+    await c.query(
+      `UPDATE tech_plantilla_history SET valid_to = CASE WHEN valid_from IS NULL OR valid_from < $2::date THEN $2::date ELSE valid_from END
+        WHERE plantilla_id = $1 AND valid_to IS NULL`,
+      [id, today],
+    );
+    await c.query('UPDATE plantillas SET archived_at = now() WHERE id = $1 AND archived_at IS NULL', [id]);
   }
   for (const id of controlOrder(ch.controls.create)) await insertControl(c, id, ch.controls.create[id]);
   for (const [id, r] of Object.entries(ch.controls.update)) await updateControl(c, id, r);
@@ -151,7 +250,6 @@ export async function applyImportPlan(c, plan, { actorId }) {
   for (const [id, a] of Object.entries(ch.audit.create)) {
     await c.query('INSERT INTO audit_log (id, action, entity, entity_id, detail, at, actor_id, imported) VALUES ($1,$2,$3,$4,$5,$6,$7,true)', [id, a.action, a.entity, a.entityId, a.detail, a.at, a.by]);
   }
-  if (ch.shifts.delete.length) await c.query('DELETE FROM shifts WHERE id = ANY($1)', [ch.shifts.delete]);
 
   // Usuarios: los de 2.x entran sin contraseña, con su PIN como contraseña temporal.
   for (const [id, u] of Object.entries(ch.users.create)) {
@@ -168,4 +266,5 @@ export async function applyImportPlan(c, plan, { actorId }) {
     if (!u.active) await deleteUserSessions(c, id);
   }
   if (ch.permisos) await replaceOverrides(c, ch.permisos, actorId);
+  return { membershipSkipped: membership.skipped };
 }

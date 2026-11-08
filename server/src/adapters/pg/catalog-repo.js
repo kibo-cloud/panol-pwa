@@ -5,7 +5,12 @@ const iso = (d) => (d instanceof Date ? d.toISOString() : d ?? null);
 
 const COMMON = { version: 'version', createdAt: 'created_at', updatedAt: 'updated_at', by: 'created_by' };
 export const TABLES = {
-  techs: { table: 'techs', key: 'id', cols: { name: 'name', legajo: 'legajo', shiftId: 'shift_id', active: 'active', alta: 'alta', demo: 'demo' } },
+  // La plantilla de un técnico sale del historial (tech_plantilla_history), no de techs.shift_id.
+  techs: { table: 'techs', key: 'id', cols: { name: 'name', legajo: 'legajo', active: 'active', alta: 'alta', demo: 'demo' } },
+  plantillas: {
+    table: 'plantillas', key: 'id',
+    cols: { name: 'name', supervisorUserId: 'supervisor_user_id', currentShiftLabel: 'current_shift_label', order: 'sort_order', archivedAt: 'archived_at' },
+  },
   shifts: { table: 'shifts', key: 'id', cols: { name: 'name', order: 'sort_order' } },
   categories: { table: 'categories', key: 'id', cols: { name: 'name', demo: 'demo' } },
   tools: { table: 'tools', key: 'id', cols: { name: 'name', description: 'description', categoryId: 'category_id', serialized: 'serialized', active: 'active', demo: 'demo' } },

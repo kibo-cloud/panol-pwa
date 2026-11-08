@@ -1,5 +1,7 @@
 // /api/techs, /api/shifts, /api/categories, /api/tools, /api/units: altas y ediciones con el
 // permiso de 2.1 correspondiente. Toda edición o baja exige If-Match.
+// /api/shifts y /api/techs/:id/shift-change son las rutas de 2.1: delegan en las plantillas
+// (permiso plantillas_edit para los turnos, shift_change para mover).
 import * as catalog from '../../application/catalog.js';
 import { S, obj, idParams, requireVersion, sendRow, actorOf } from './rest.js';
 import { LIM, SCHEMA_LIM } from '../../domain/constants.js';
@@ -10,7 +12,7 @@ export function registerCatalogRoutes(app) {
 
   // ------------------------------------------------------------ técnicos
   const techBody = { name: S.name, legajo: S.str(LIM.legajo), alta: S.dayOrNull };
-  app.post('/api/techs', { ...perm('techs_edit'), schema: { body: obj({ ...techBody, shiftId: S.idOrNull }, ['name', 'legajo']) } },
+  app.post('/api/techs', { ...perm('techs_edit'), schema: { body: obj({ ...techBody, shiftId: S.idOrNull, plantillaId: S.idOrNull }, ['name', 'legajo']) } },
     async (req, reply) => sendRow(reply, 'tech', await catalog.createTech(db, actorOf(req), req.body), 201));
   app.patch('/api/techs/:id', { ...perm('techs_edit'), schema: { params: idParams, body: obj({ ...techBody, active: S.bool }, [], { minProperties: 1 }) } },
     async (req, reply) => sendRow(reply, 'tech', await catalog.updateTech(db, actorOf(req), req.params.id, req.body, requireVersion(req))));
@@ -24,11 +26,11 @@ export function registerCatalogRoutes(app) {
   });
 
   // ------------------------------------------------------------ turnos
-  app.post('/api/shifts', { ...perm('shifts_edit'), schema: { body: obj({ name: S.name }, ['name']) } },
+  app.post('/api/shifts', { ...perm('plantillas_edit'), schema: { body: obj({ name: S.name }, ['name']) } },
     async (req, reply) => sendRow(reply, 'shift', await catalog.createShift(db, actorOf(req), req.body), 201));
-  app.patch('/api/shifts/:id', { ...perm('shifts_edit'), schema: { params: idParams, body: obj({ name: S.name, order: S.int(0, 1000) }, [], { minProperties: 1 }) } },
+  app.patch('/api/shifts/:id', { ...perm('plantillas_edit'), schema: { params: idParams, body: obj({ name: S.name, order: S.int(0, 1000) }, [], { minProperties: 1 }) } },
     async (req, reply) => sendRow(reply, 'shift', await catalog.updateShift(db, actorOf(req), req.params.id, req.body, requireVersion(req))));
-  app.delete('/api/shifts/:id', { ...perm('shifts_edit'), schema: { params: idParams } },
+  app.delete('/api/shifts/:id', { ...perm('plantillas_edit'), schema: { params: idParams } },
     async (req) => catalog.deleteShift(db, actorOf(req), req.params.id, requireVersion(req)));
 
   // ------------------------------------------------------------ categorías
