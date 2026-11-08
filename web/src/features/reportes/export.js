@@ -6,6 +6,7 @@ import { act } from '../../ui/feedback.js';
 import { saveFile, loadScript } from '../../ui/files.js';
 import { gateUI } from '../tecnicos/view.js';
 import { computeReport } from './view.js';
+import { csvCell } from './csv.js';
 import { fdt, mlabel, nowISO } from '../../state/period.js';
 
 function repTables(R) {
@@ -16,8 +17,7 @@ function repTables(R) {
 }
 const fileBase = (R) => `reporte-herramientas-${R.f.ym}${R.f.w !== 'all' ? '-s' + R.f.w : ''}`;
 
-// CSV como 2.1: separador ; y comillas solo cuando hacen falta.
-export function csvCell(v) { const s = String(v ?? ''); return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+// CSV como 2.1 (separador ;), con las fórmulas neutralizadas: ver csv.js.
 ACT.exportCsv = () => {
   if (!gateUI('reports_export')) return; const R = computeReport(); const T = repTables(R);
   const block = (title, rows) => [csvCell(title), ...rows.map((r) => r.map(csvCell).join(';'))].join('\r\n');
