@@ -223,9 +223,53 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       gerencia user, lockout countdown, 0 CSP violations, 0 console errors; `npm run dev` proxied
       `/api` login + SSE; server and `db:stop` stopped. `node tests/e2e/run.mjs t6` 4/4 (2.1
       suite untouched).
-- [ ] E1.T7 E2E: runner starts the server on a seeded embedded DB; the 30 existing specs
+- [x] E1.T7 E2E: runner starts the server on a seeded embedded DB; the 30 existing specs
       adapted; new specs for login, lockout, forced password change, `.txt` migration,
       conflict 409, offline draft.
+      Commits `be1117d` (CSV formula guard), `375b9e2` (draft sent on route leave), `cdd0a4a`
+      (runner + specs), `452c313` (2.1 root app retired). Route: delegated writer.
+      Runner (`tests/e2e/server.mjs`, no new deps): `vite build` when `web/dist` is older than
+      the sources; PostgreSQL via the integration harness (embedded temp cluster, or
+      `TEST_DATABASE_URL`); template DB = migrations + `panol_app` + invented users
+      (`tests/e2e/seed.mjs`, one per role, `panol-e2e-1234`); each spec gets
+      `CREATE DATABASE ... TEMPLATE` (TRUNCATE is blocked by the append-only triggers), a new
+      Fastify app as `panol_app` and a fresh browser context, behind a fixed-port proxy whose
+      `offline` flag drops every connection (SSE included). Specs read state through the API
+      from the page or the owner pool (`srv.db`): the v3 app has no globals. `npm run test:e2e`.
+      Spec mapping (35 = 26 adapted + 9 new; 4 retired with 2.1 device storage):
+      t1 import (5): malformed/oversized/proto files and XSS ids/turnos/numbers rejected by the
+      server report with data unchanged; imported markup escaped on every route; replace without
+      active admin refused; logged-out and non-admin cannot import (no UI, forged click, API
+      401/403; replaces the 2.1 launch handler). t2 output (3): CSP header exact on pages/assets/
+      API, no inline script/style (replaces the meta hash; `tests/csp-hash.mjs` retired); typed
+      markup shown as text; xlsx/pdf from `/vendor/` with sha384 SRI (no cdnjs, no online skip).
+      t3 merge (4): version/updatedAt bump + stale 409 + 428 (replaces client stamps/tombstones);
+      Combinar newer wins/tie keeps server/file tombstone deletes/tombstoned record not created/
+      future clamp; replace restores an export (needs a second admin in the file) and re-import
+      = 0 changes; integrity flags a negative pool inserted through the owner connection.
+      t4 credentials (3): argon2id + generic error; 5 failures lock, button disabled, 429, persists
+      after reload in `login_locks`; 2.0.0 import, sha256/fnv PIN once then forced change.
+      t5 PWA (6): SW cache `panol-v3.0.0-dev` without /api or error pages, offline shell, recovery;
+      offline banner + draft in IndexedDB across reload, resent on reconnect; SSE refresh keeps the
+      typed form (replaces BroadcastChannel); leaving the checklist saves the draft (replaces
+      pagehide flush; found the bug fixed in `375b9e2`); change survives immediate reload; failed
+      action shows a toast/dialog error (replaces the injected rejecting handler).
+      t6 flows (4): boot = login screen (no first-run setup in v3); demo routes at 1280/390 + admin
+      tabs + integrity; tool/tech/entrega/control/reposición persist; consulta and gerencia
+      read-only (UI, forged clicks, API 403). t7 verifier (4): maxlength = LIM + server 400; ISO
+      dates + future clamp on import; empty optional date -> NULL, empty required date -> report
+      error; 8 clicks on Ingresar -> 1 attempt. Retired: unsaved localStorage copy, replace
+      tombstones in the device, quarantine of stored records. t8 new (6): "Mantener la sesión"
+      (persistent httpOnly 30-day cookie vs session cookie), admin reset -> forced change, SSE
+      between two sessions, 409 notice + no overwrite + explicit keep, 2.0.0 replace migration end
+      to end (counts, routes, users), CSV formulas neutralized.
+      CSV fix test-first: `web/test/csv.test.js` RED (`'=1+1'` expected), then GREEN; the route
+      leave bug was found RED by t5 (draft never reached the server) then GREEN.
+      Evidence: `npm test` 91/91; `npm run test:db` 89/89; `npm run build` ok;
+      `npm run test:e2e` 35 passed, 0 failed, 0 skipped (257 s, Edge headless, embedded PG 16.14).
+      Root `manifest.webmanifest` and `icons/*` removed after checking identical git blob hashes
+      with `web/public/`; `tests/e2e/fixtures/` kept (`make-fixtures.mjs` now uses
+      `startStaticServer` for the 2.0.0 baseline).
 - [ ] E1.T8 Deploy and CI: `Dockerfile`, `docker-compose.yml` (app, `postgres:16.x`, caddy
       with automatic HTTPS, backup with rotation + optional rclone off-VPS copy),
       restore script tested in CI, `LEEME.md` install/update/restore; GitHub Actions on push
