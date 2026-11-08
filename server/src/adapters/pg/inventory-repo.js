@@ -21,9 +21,14 @@ export async function loadPools(q) {
 }
 
 // Controles con sus ítems, en la forma que usa el dominio (como en 2.1).
-export async function loadControls(q, { status } = {}) {
-  const where = status ? 'WHERE status = $1' : '';
-  const { rows } = await q.query(`SELECT * FROM controls ${where}`, status ? [status] : []);
+// Filtros opcionales: status, id (con lock: FOR UPDATE).
+export async function loadControls(q, { status, id, lock = false } = {}) {
+  const conds = [];
+  const params = [];
+  if (status) conds.push(`status = $${params.push(status)}`);
+  if (id) conds.push(`id = $${params.push(id)}`);
+  const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+  const { rows } = await q.query(`SELECT * FROM controls ${where}${lock ? ' FOR UPDATE' : ''}`, params);
   const ids = rows.map((r) => r.id);
   const items = ids.length ? (await q.query('SELECT * FROM control_items WHERE control_id = ANY($1)', [ids])).rows : [];
   const byCtl = {};
@@ -37,7 +42,7 @@ export async function loadControls(q, { status } = {}) {
     return {
       id: r.id, techId: r.tech_id, techName: r.tech_name, shiftId: r.shift_id, period, pkey: pkeyOf(period), pnum: pnumOf(period), status: r.status,
       items: byCtl[r.id] || {}, counts: { bueno: r.count_bueno, cambio: r.count_cambio, faltante: r.count_faltante },
-      correction: r.correction, supersedes: r.supersedes_id, startedAt: iso(r.started_at), finishedAt: iso(r.finished_at), updatedAt: iso(r.updated_at), version: r.version,
+      correction: r.correction, supersedes: r.supersedes_id, startedAt: iso(r.started_at), finishedAt: iso(r.finished_at), updatedAt: iso(r.updated_at), version: r.version, by: r.created_by, demo: r.demo,
     };
   });
 }
@@ -83,19 +88,19 @@ function updateSql(table, id, set, cols) {
 }
 
 // Guarda un plan de planMovement(). Llamar dentro de una transacción.
-export async function applyMovementPlan(client, plan, { actorId = null, auditId, ip = null } = {}) {
+export async function applyMovementPlan(client, plan, { actorId = null, auditId, ip = null, demo = false } = {}) {
   const m = plan.movement;
   await client.query(
     `INSERT INTO movements (id, type, tech_id, tool_id, qty, unit_id, new_assignment_id, old_assignment_id, old_unit_id, new_unit_id,
-       old_state, returned, old_dest, condition, linked_control_id, resolves_movement_id, reason, notes, at, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+       old_state, returned, old_dest, condition, linked_control_id, resolves_movement_id, reason, notes, at, created_by, demo)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
     [m.id, m.type, m.techId ?? null, m.toolId ?? null, m.qty ?? null, m.unitId ?? null, m.newAssignmentId ?? null, m.oldAssignmentId ?? null,
       m.oldUnitId ?? null, m.newUnitId ?? null, m.oldState ?? null, m.returned ?? null, m.oldDest ?? null, m.condition ?? null,
-      m.linkedControlId ?? null, m.resolvesMovementId ?? null, m.reason || null, m.notes || null, m.at, actorId],
+      m.linkedControlId ?? null, m.resolvesMovementId ?? null, m.reason || null, m.notes || null, m.at, actorId, demo],
   );
   // Unidades nuevas antes de las transferencias y asignaciones que las nombran.
   for (const u of plan.newUnits) {
-    await client.query('INSERT INTO units (id, tool_id, code, status, tech_id, created_by) VALUES ($1,$2,$3,$4,$5,$6)', [u.id, u.toolId, u.code, u.status, u.techId, actorId]);
+    await client.query('INSERT INTO units (id, tool_id, code, status, tech_id, created_by, demo) VALUES ($1,$2,$3,$4,$5,$6,$7)', [u.id, u.toolId, u.code, u.status, u.techId, actorId, demo]);
   }
   for (const [seq, t] of plan.transfers.entries()) {
     await client.query('INSERT INTO movement_transfers (movement_id, seq, tool_id, qty, from_pool, to_pool, unit_id) VALUES ($1,$2,$3,$4,$5,$6,$7)', [m.id, seq, t.toolId, t.qty, t.from, t.to, t.unitId ?? null]);
@@ -103,8 +108,8 @@ export async function applyMovementPlan(client, plan, { actorId = null, auditId,
   for (const u of plan.assignmentUpdates) await client.query(updateSql('assignments', u.id, u.set, ASG_COLS));
   for (const a of plan.newAssignments) {
     await client.query(
-      'INSERT INTO assignments (id, tech_id, tool_id, unit_id, qty, active, since, movement_id, replaces, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
-      [a.id, a.techId, a.toolId, a.unitId, a.qty, a.active, a.since, a.movementId, a.replaces, actorId],
+      'INSERT INTO assignments (id, tech_id, tool_id, unit_id, qty, active, since, movement_id, replaces, created_by, demo) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+      [a.id, a.techId, a.toolId, a.unitId, a.qty, a.active, a.since, a.movementId, a.replaces, actorId, demo],
     );
   }
   for (const u of plan.unitUpdates) await client.query(updateSql('units', u.id, u.set, UNIT_COLS));
@@ -115,21 +120,38 @@ export async function applyMovementPlan(client, plan, { actorId = null, auditId,
 
 // Guarda un control como borrador con sus ítems y, si corresponde, lo finaliza. Los ítems
 // solo se pueden escribir mientras el control es borrador (lo exige un trigger).
-export async function saveControl(client, id, doc, { actorId = null, startedAt, finishedAt } = {}) {
+export async function saveControl(client, id, doc, { actorId = null, startedAt, finishedAt, demo = false } = {}) {
   await client.query(
     `INSERT INTO controls (id, tech_id, tech_name, shift_id, period_y, period_m, period_w, status, count_bueno, count_cambio, count_faltante,
-       correction, supersedes_id, started_at, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,'borrador',$8,$9,$10,$11,$12,$13,$14)`,
+       correction, supersedes_id, started_at, created_by, demo)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'borrador',$8,$9,$10,$11,$12,$13,$14,$15)`,
     [id, doc.techId, doc.techName, doc.shiftId, doc.period.y, doc.period.m, doc.period.w, doc.counts.bueno, doc.counts.cambio, doc.counts.faltante,
-      doc.correction, doc.supersedes, startedAt ?? null, actorId],
+      doc.correction, doc.supersedes, startedAt ?? null, actorId, demo],
   );
-  for (const [aid, it] of Object.entries(doc.items)) {
+  await insertItems(client, id, doc.items);
+  if (doc.status === 'finalizado') {
+    await client.query("UPDATE controls SET status = 'finalizado', finished_at = $2 WHERE id = $1", [id, finishedAt]);
+  }
+}
+
+async function insertItems(client, id, items) {
+  for (const [aid, it] of Object.entries(items)) {
     await client.query(
       'INSERT INTO control_items (control_id, assignment_id, state, note, tool_id, tool_name, category, unit_id, unit_code, qty) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
       [id, aid, it.state, it.note || null, it.toolId, it.toolName, it.category, it.unitId, it.unitCode, it.qty],
     );
   }
-  if (doc.status === 'finalizado') {
-    await client.query("UPDATE controls SET status = 'finalizado', finished_at = $2 WHERE id = $1", [id, finishedAt]);
-  }
+}
+
+// Reemplaza los ítems y los totales de un borrador; con status 'finalizado' además lo cierra.
+// La versión del control sube por el trigger.
+export async function rewriteControl(client, id, doc, { finishedAt = null } = {}) {
+  await client.query('DELETE FROM control_items WHERE control_id = $1', [id]);
+  await insertItems(client, id, doc.items);
+  const fin = doc.status === 'finalizado';
+  await client.query(
+    `UPDATE controls SET tech_name = $2, shift_id = $3, count_bueno = $4, count_cambio = $5, count_faltante = $6,
+       status = $7, finished_at = $8 WHERE id = $1`,
+    [id, doc.techName, doc.shiftId, doc.counts.bueno, doc.counts.cambio, doc.counts.faltante, fin ? 'finalizado' : 'borrador', fin ? finishedAt : null],
+  );
 }

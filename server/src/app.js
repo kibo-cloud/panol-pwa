@@ -6,9 +6,13 @@ import { errorHandler, notFound } from './adapters/http/errors.js';
 import { registerAuth } from './adapters/http/auth.js';
 import { registerAuthRoutes } from './adapters/http/auth-routes.js';
 import { registerUserRoutes } from './adapters/http/users-routes.js';
+import { registerCatalogRoutes } from './adapters/http/catalog-routes.js';
+import { registerReadRoutes } from './adapters/http/read-routes.js';
+import { registerEventRoutes } from './adapters/http/events-routes.js';
 
 // extend(app): permite a las pruebas registrar rutas antes de `ready()`.
-export async function buildApp({ config, pool, logger, extend } = {}) {
+// events: opciones del flujo SSE (p. ej. heartbeatMs en pruebas).
+export async function buildApp({ config, pool, logger, extend, events } = {}) {
   if (!config) throw new Error('buildApp necesita config');
   if (!pool) throw new Error('buildApp necesita pool');
   const app = Fastify({
@@ -47,6 +51,9 @@ export async function buildApp({ config, pool, logger, extend } = {}) {
 
   registerAuthRoutes(app);
   registerUserRoutes(app);
+  registerCatalogRoutes(app);
+  registerReadRoutes(app);
+  registerEventRoutes(app, events);
   if (extend) await extend(app);
   return app;
 }

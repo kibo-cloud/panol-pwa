@@ -20,7 +20,7 @@ export function errorHandler(err, req, reply) {
     return reply.code(err.status).send({ error: err.code, message: err.message, ...err.extra });
   }
   if (err && err.name === 'DomainError') {
-    const body = { error: err.code, message: err.message };
+    const body = { error: err.code, message: err.message, ...(err.extra || {}) };
     if (err.retryAfter) {
       reply.header('Retry-After', String(err.retryAfter));
       body.retryAfter = err.retryAfter;
