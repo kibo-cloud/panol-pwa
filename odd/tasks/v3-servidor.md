@@ -351,6 +351,7 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   backups, CI workflow, LEEME); first CI run pending.
 - 2026-11-08: E1.T9 done: CI green after runner-only fixes; stage 1 PR opened.
 - 2026-11-08: E2.T1 done (plantillas backend) and E2.T2 done (líneas, sectores, cajas backend).
+- 2026-11-08: coverage rule fix, E2.T3 done (frontend) and E2.T4 specs done (43/43 local); CI + PR pending.
 
 ## Stage 1 implementation notes (E1.T1-E1.T3)
 - Embedded PG runs through the bundled `initdb`/`pg_ctl` of `embedded-postgres`
@@ -455,6 +456,15 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 - Cajas compartidas: a holder is a tech XOR a caja (CHECK); controls and assignments
   generalise to the holder; one original control per holder and period. Referente = a tech.
 - Line on missing/broken tools stays in stage 4 (optional, never blocks).
+- Coverage rule (E2.T3, commit `82f72e7`): a permanent move of a tech who is in (or scheduled
+  for) a temporary coverage is allowed from the coverage start onwards: the coverage range is
+  shortened to the move date (void if it never started), the automatic return range is voided
+  (closed at its own start) and the target becomes the new open range; audit detail says the
+  coverage ended and the return was cancelled. A new coverage (`until`) while one is still
+  running is refused (422 `coverage_active`, "tiene una cobertura temporal hasta el …").
+  Migration 007 lets the history trigger lower `valid_to` of a temporary range only (never
+  below `valid_from`); other closed ranges stay immutable. Move-selected checks the plantilla
+  the tech is in today (during a coverage, the coverage plantilla).
 
 ## Stage 2 tasks (branch `v3/etapa-2-plantillas`)
 - [x] E2.T1 Backend plantillas: migration (plantillas, history tables with exclusion
@@ -509,14 +519,40 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       and integrity clean, archive rules (caja with tools 409, línea with active cajas 409,
       archived caja refuses alta and control), `.txt` export without caja rows and export ->
       dry-run = 0 changes). Stage 1 tests unchanged.
-- [ ] E2.T3 Frontend: Plantillas module replacing Turnos (list, plantilla view based on
+- [x] E2.T3 Frontend: Plantillas module replacing Turnos (list, plantilla view based on
       `Turno.dc.html`, select + "Mover seleccionados", "Cambiar de plantilla" from the tech
       sheet based on `CambioTurno.dc.html`, coverage with return date, rotation, supervisor
       change, history), "Mi plantilla" first for supervisors with their alerts, grouping by
       plantilla in panel, filters, reports; Líneas/Sectores/Cajas screens; design guide.
+      Commits `82f72e7` (backend coverage rule, see Stage 2 decisions) and `9c8084d`.
+      Route: delegated writer. Code: `web/src/state/plantillas.js` (pure: date ranges,
+      coverage, report plantilla, grouping, selection, form validation), `features/plantillas/
+      {view,move}.js`, `features/lineas/view.js` (catalog, caja sheet, "Asignar herramienta"),
+      derive/store/drafts/control/entregas generalised to the holder key (`<techId>` or
+      `caja:<id>`, alerts now taken from the server), admin Configuración (shift labels),
+      PERMS + labels, routes (`#plantillas`, `#plantilla-<id>`, `#lineas`, `#caja-<id>`,
+      `#control-caja:<id>`; `#turnos`/`#turno-<id>` kept as aliases). `shifts_edit` stays in the
+      web list for parity but is hidden in the matrix. Test-first: coverage rule RED observed
+      (unit `move_before_last` thrown; 2 integration tests failing) then GREEN; web pure modules
+      written with their tests (no separate RED run). Evidence: `npm test` 131/131 (constants
+      parity fixed; new `web/test/plantillas.test.js` 11, router + drafts caja cases);
+      `npm run test:db` 123/123; `npm run build` ok, `web/dist/index.html` with 0 inline
+      script/style/handlers.
 - [ ] E2.T4 E2E: move one and several techs, coverage return, rotation, supervisor view,
       caja assignment + control, `.txt` migration of turnos to plantillas; existing specs
       adapted; CI green; PR.
+      Done except CI/PR (parent): commit `d694dcd`. Route: delegated writer. Adapted: route
+      list (`plantillas`, `lineas`), `plantilla-<id>` detail, admin tab `config`. New
+      `t9-plantillas` (8): move one from the tech sheet (history + report keeps the control
+      snapshot, UI and `/api/reports`), "Mover seleccionados" 2 of 3 in one step (audit 2),
+      past coverage back in base + coverage from the sheet + second coverage refused (sheet and
+      422) + permanent move cancels the return, rotation and supervisor change recorded and the
+      supervisor sees Mi plantilla/alerts first and cannot rotate another plantilla (UI, forged
+      click, 403), consulta/gerencia cannot move or rotate, línea + caja + one-form assignment +
+      caja control finalized, 2.0.0 `.txt` turnos as plantillas, every route incl. new ones at
+      1280/390. Evidence: `PANOL_E2E_BUILD=1 npm run test:e2e` 43 passed, 0 failed, 0 skipped
+      (326 s; no console/CSP errors). Found and fixed while writing specs: tech/tool ids missing
+      from `S.*[id]` objects in the new sheets.
 
 ## Stage 2 implementation notes (E2.T1)
 - Membership: `tech_plantilla_history` ranges `[valid_from, valid_to)` with
@@ -627,8 +663,7 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   specs untouched and still green thanks to the delegating legacy routes).
 
 ## Next step
-- E2.T3 frontend (add the 3 permission keys to `web/src/state/constants.js` first: the parity
-  test fails until then), then E2.T4. Engram mirror of this document: pending (parent). PR #1
+- Push `v3/etapa-2-plantillas`, CI green, stage 2 PR (parent). Engram mirror of this document: pending (parent). PR #1
   awaits user review.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);
