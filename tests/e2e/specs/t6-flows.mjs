@@ -1,8 +1,8 @@
-// T6: end-to-end flows of normal use (regression net for the hardening work).
+// T6: end-to-end flows of normal use on the v3 server (regression net).
+// v3: the 2.1 first-run setup (create the first admin on the device) no longer exists; the
+// server always has users and boot shows the login screen. Reads go through /api/state.
 import { sleep } from '../harness.mjs';
-import { assert, eq, setupAdmin, login, logout, loadDemo, snapshot, ROUTES } from '../app.mjs';
-
-const idOf = (page, col, name) => page.eval(`(Object.entries(S.${col}).find(([,x])=>x.name===${JSON.stringify(name)})||[''])[0]`);
+import { assert, eq, loginAs, loadDemo, snapshot, state, api, idOf, forgedAct, modalOpen, isLoggedIn, ROUTES } from '../app.mjs';
 
 async function checkRoutes(page, routes, width) {
   await page.viewport(width);
@@ -15,96 +15,124 @@ async function checkRoutes(page, routes, width) {
   await page.screenshot(`routes-${width}`);
 }
 
+const pool = async (page, tool) => (await api(page, 'GET', '/api/inventory')).body.pools[tool];
+
+// Read-only profile: no edit buttons, forged clicks open nothing, the API answers 403.
+async function readOnly(page, username) {
+  await loginAs(page, username);
+  await sleep(300);
+  const before = await snapshot(page);
+  for (const r of ROUTES) await page.hash('#' + r);
+  await page.hash('#tecnicos'); eq(await page.count('[data-act="techNew"]'), 0, username + ': no new tech button');
+  await page.hash('#config'); eq(await page.count('[data-act="toolNew"],[data-act="catNew"]'), 0, username + ': no tool buttons');
+  await page.hash('#entregas'); eq(await page.count('#mvform'), 0, username + ': no movement form');
+  const st = await state(page);
+  const t = Object.values(st.assignments).find((a) => a.active).techId;
+  await page.hash('#control-' + t);
+  eq(await page.count('[data-act="ckFinish"]'), 0, username + ': cannot finish controls');
+  await page.hash('#mas');
+  for (const a of ['techNew', 'toolNew', 'catNew', 'dataImport', 'loadDemo', 'userNew']) {
+    await forgedAct(page, a);
+    eq(await modalOpen(page), false, `${username}: no dialog from ${a}`);
+  }
+  const w = await api(page, 'POST', '/api/techs', { name: 'No debería', legajo: 'X1', shiftId: 'manana' });
+  eq(w.status, 403, username + ': API refuses the write');
+  eq(await snapshot(page), before, username + ': data unchanged');
+}
+
 export const tests = [
   {
-    name: 'boot shows the first-run setup without errors',
+    name: 'boot shows the login screen without errors',
     async fn(page) {
-      assert(await page.eval('!!document.getElementById("a-name")'), 'setup form');
-      eq(await page.eval('ME.id'), null, 'nobody logged in');
+      assert(await page.eval('!!document.getElementById("a-user")&&!!document.getElementById("a-pass")'), 'login form');
+      eq(await page.eval('document.getElementById("a-keep").checked'), true, '"Mantener la sesión" checked by default');
+      eq((await api(page, 'GET', '/api/auth/me')).status, 401, 'nobody logged in');
+      eq(await page.count('#side nav'), 0, 'no app chrome before login');
     }
   },
   {
     name: 'demo data: every route renders at 1280 and 390 without overflow',
     async fn(page) {
-      await setupAdmin(page);
-      await loadDemo(page);
-      const d = await page.eval(`(() => { const d = derive(); return { t: d.techs[0].id, h: d.tools[0].id, s: d.shifts[0].id, c: d.effList[0].id }; })()`);
-      const routes = [...ROUTES, 'tecnico-' + d.t, 'herramienta-' + d.h, 'turno-' + d.s, 'control-' + d.t, 'controlver-' + d.c];
+      await loginAs(page);
+      const st = await loadDemo(page);
+      const t = Object.keys(st.techs)[0];
+      const h = Object.keys(st.tools)[0];
+      const c = Object.values(st.derived.effective)[0];
+      assert(c, 'an effective control in the demo data');
+      const routes = [...ROUTES, 'tecnico-' + t, 'herramienta-' + h, 'turno-' + st.shifts[0].id, 'control-' + t, 'controlver-' + c];
       await checkRoutes(page, routes, 1280);
       await checkRoutes(page, routes, 390);
       await page.viewport(1280);
       await page.hash('#admin');
-      for (const tab of ['users', 'shifts', 'data', 'audit']) { await page.click(`[data-act="adminTab"][data-v="${tab}"]`); assert((await page.text('#view')).length > 50, 'admin tab ' + tab); }
-      const issues = await page.eval('integrity().length');
-      eq(issues, 0, 'demo data has no integrity issues');
+      for (const tab of ['users', 'shifts', 'data', 'audit']) {
+        await page.click(`[data-act="adminTab"][data-v="${tab}"]`);
+        await page.waitFor("!document.querySelector('#view .loading')", 10000, 'admin tab ' + tab);
+        assert((await page.text('#view')).length > 50, 'admin tab ' + tab);
+      }
+      await page.click('[data-act="adminTab"][data-v="data"]');
+      assert((await page.text('#view')).includes('Sin inconsistencias'), 'integrity view clean');
+      eq((await api(page, 'GET', '/api/integrity')).body.issues.length, 0, 'demo data has no integrity issues');
     }
   },
   {
     name: 'tool, tech, entrega, control and reposicion persist after reload',
     async fn(page) {
-      await setupAdmin(page);
+      await loginAs(page);
       await page.hash('#config');
       await page.act('catNew'); await page.type('#f-cn', 'Manuales'); await page.modalBtn('Crear');
       await page.act('toolNew'); await page.type('#f-tn', 'Martillo'); await page.type('#f-ts', '5'); await page.modalBtn('Crear herramienta');
-      const tool = await idOf(page, 'tools', 'Martillo');
+      let st = await state(page);
+      const tool = idOf(st, 'tools', 'Martillo');
       assert(tool, 'tool created');
       await page.hash('#tecnicos');
       await page.act('techNew'); await page.type('#f-name', 'Juan Pérez'); await page.type('#f-leg', '555'); await page.modalBtn('Crear técnico');
-      const tech = await idOf(page, 'techs', 'Juan Pérez');
+      st = await state(page);
+      const tech = idOf(st, 'techs', 'Juan Pérez');
       assert(tech, 'tech created');
       await page.hash('#entregas');
       await page.select('#mvtech', tech); await page.select('#mvtool', tool);
       await page.act('mvSubmit');
-      await page.waitFor(`Object.values(S.assignments).some((a)=>a.active&&a.techId===${JSON.stringify(tech)})`, 5000, 'assignment');
-      eq(await page.eval(`derive().pools[${JSON.stringify(tool)}].disponible`), 4, 'stock decreased');
+      await page.waitFor("!document.body.classList.contains('busy')", 10000, 'entrega sent');
+      st = await state(page);
+      assert(Object.values(st.assignments).some((a) => a.active && a.techId === tech), 'assignment');
+      eq((await pool(page, tool)).disponible, 4, 'stock decreased');
       await page.hash('#control-' + tech);
       await page.act('ckAllOk'); await page.act('ckFinish'); await page.modalBtn('Confirmar y guardar');
-      await page.waitFor(`Object.values(S.controls).some((c)=>c.status==='finalizado'&&c.techId===${JSON.stringify(tech)})`, 5000, 'control');
-      await page.eval('closeModal()');
+      await page.waitFor("!!document.querySelector('#modal-root .success')", 10000, 'control saved');
+      st = await state(page);
+      assert(Object.values(st.controls).some((c) => c.status === 'finalizado' && c.techId === tech), 'control finalized');
+      await page.eval("document.querySelector('#modal-root .scrim').click()");
       await page.hash('#entregas');
       await page.click('[data-act="mvType"][data-v="reposicion"]');
       await page.select('#mvtech', tech);
-      const asg = await page.eval(`Object.entries(S.assignments).find(([,a])=>a.active&&a.techId===${JSON.stringify(tech)})[0]`);
+      const asg = Object.entries(st.assignments).find(([, a]) => a.active && a.techId === tech)[0];
       await page.select('#mvasg', asg);
       await page.act('mvSubmit');
-      await page.waitFor(`Object.values(S.movements).some((m)=>m.type==='reposicion')`, 5000, 'reposicion');
-      const p = await page.eval(`derive().pools[${JSON.stringify(tool)}]`);
+      await page.waitFor("!document.body.classList.contains('busy')", 10000, 'reposicion sent');
+      st = await state(page);
+      assert(Object.values(st.movements).some((m) => m.type === 'reposicion'), 'reposicion');
+      const p = await pool(page, tool);
       eq(p.asignado, 1, 'one assigned after reposicion'); eq(p.reparacion, 1, 'old one in repair'); eq(p.disponible, 3, 'stock');
-      await sleep(400);
       const before = await snapshot(page);
       await page.reload(); await page.ready();
+      assert(await isLoggedIn(page), 'session kept');
       eq(await snapshot(page), before, 'everything persisted');
-      assert(await page.eval('!!ME.id'), 'session kept');
-      eq(await page.eval('integrity().length'), 0, 'no integrity issues');
+      eq((await api(page, 'GET', '/api/integrity')).body.issues.length, 0, 'no integrity issues');
     }
   },
   {
-    name: 'a consulta user cannot change data',
+    name: 'consulta and gerencia users cannot change data',
     async fn(page) {
-      await setupAdmin(page);
+      await loginAs(page);
       await loadDemo(page);
-      await page.hash('#admin');
-      await page.act('userNew');
-      await page.type('#u-name', 'Carla Consulta');
-      await page.click('#modal-root [data-act="mset"][data-k="role"][data-v="consulta"]');
-      await page.type('#u-pin', '4321'); await page.type('#u-pin2', '4321');
-      await page.modalBtn('Crear usuario');
-      await page.waitFor("Object.values(S.users).some((u)=>u.role==='consulta')", 5000, 'consulta user');
-      await logout(page);
-      eq(await login(page, '4321', 'Carla Consulta'), '', 'consulta logs in');
-      await sleep(400);
-      const before = await snapshot(page);
-      for (const r of ROUTES) await page.hash('#' + r);
-      await page.hash('#tecnicos'); eq(await page.count('[data-act="techNew"]'), 0, 'no new tech button');
-      await page.hash('#config'); eq(await page.count('[data-act="toolNew"],[data-act="catNew"]'), 0, 'no tool buttons');
-      await page.hash('#entregas'); eq(await page.count('#mvform'), 0, 'no movement form');
-      await page.hash('#control'); const t = await page.eval('derive().activeTechs[0].id'); await page.hash('#control-' + t);
-      eq(await page.count('[data-act="ckFinish"]'), 0, 'cannot finish controls');
-      await page.toasts();
-      await page.eval('ACT.techNew(); ACT.dataOpen(); ACT.loadDemo(); ACT.userNew();', { gesture: true });
-      await sleep(300);
-      eq(await page.count('#modal-root:not([hidden]) .sheet'), 0, 'no dialogs opened');
-      eq(await snapshot(page), before, 'data unchanged');
+      await page.hash('#mas'); await page.act('logout'); await page.modalBtn('Cerrar sesión');
+      await page.ready();
+      await readOnly(page, 'consulta');
+      await page.hash('#mas'); await page.act('logout'); await page.modalBtn('Cerrar sesión');
+      await page.ready();
+      await readOnly(page, 'gerencia');
+      await page.hash('#reportes');
+      eq(await page.count('[data-act="exportCsv"]'), 1, 'gerencia can export reports');
     }
   }
 ];
