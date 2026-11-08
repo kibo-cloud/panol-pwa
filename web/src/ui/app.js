@@ -6,6 +6,7 @@ import { avatar } from './components.js';
 import { NAV, parseRoute, navKeyOf } from './router.js';
 import { VIEWS, UI, setRender, scheduleRender, freshMv } from './registry.js';
 import { installDelegation, ACT } from './actions.js';
+import { installSortable } from './sortable.js';
 import { closeModal, checkModalConflict } from './modal.js';
 import { toast, setAuthHandler, errMsg } from './feedback.js';
 import { api } from '../api/index.js';
@@ -116,6 +117,7 @@ async function start() {
 
 export function boot() {
   installDelegation();
+  installSortable();
   setRender(render);
   watchBrowser();
   onStore(() => { scheduleRender(); checkModalConflict(); runHooks(hooks.afterState); });

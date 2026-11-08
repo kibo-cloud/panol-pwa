@@ -4,6 +4,7 @@
 // o un control se identifica con una clave: `<techId>` o `caja:<cajaId>` (como el servidor).
 import { pkeyOf, pnumOf, plabel, periodOf } from './period.js';
 import { holderKey } from './plantillas.js';
+import { sortByOrder, orderTools } from './orden.js';
 
 export function groupBy(arr, k) { const o = {}; for (const x of arr) { const key = typeof k === 'function' ? k(x) : x[k]; (o[key] || (o[key] = [])).push(x); } return o; }
 const list = (o) => Object.entries(o || {}).map(([id, x]) => ({ id, ...x }));
@@ -33,8 +34,12 @@ export function deriveState(S) {
   const lineas = list(S.lineas).sort((a, b) => (a.order || 0) - (b.order || 0) || byName(a, b));
   const cajas = list(S.cajas).sort(byName);
   const activeCajas = cajas.filter((k) => !k.archivedAt);
-  const cats = list(S.categories).sort(byName);
-  const tools = list(S.tools).sort(byName);
+  // Orden personalizado (etapa 3): categorías y herramientas como en la caja física.
+  const cats = sortByOrder(list(S.categories));
+  const tools = orderTools(list(S.tools), cats);
+  const toolRank = Object.fromEntries(tools.map((t, i) => [t.id, i]));
+  const especialidades = sortByOrder(list(S.especialidades));
+  const kits = list(S.kits).sort((a, b) => (a.especialidadId ? 1 : 0) - (b.especialidadId ? 1 : 0) || byName(a, b));
   const units = list(S.units).sort((a, b) => (a.code || '').localeCompare(b.code || '', 'es', { numeric: true }));
   const unitsByTool = groupBy(units, 'toolId');
   const asgs = list(S.assignments);
@@ -42,7 +47,7 @@ export function deriveState(S) {
   // Asignaciones por poseedor (técnico o `caja:<id>`).
   const asgByTech = groupBy(activeAsg, holderKey);
   const tname = (id) => ((S.tools[id] || {}).name || '');
-  for (const k in asgByTech) asgByTech[k].sort((a, b) => tname(a.toolId).localeCompare(tname(b.toolId), 'es'));
+  for (const k in asgByTech) asgByTech[k].sort((a, b) => (toolRank[a.toolId] ?? 1e9) - (toolRank[b.toolId] ?? 1e9) || tname(a.toolId).localeCompare(tname(b.toolId), 'es'));
   const ctls = list(S.controls).map((c) => ({ ...c, hk: holderKey(c) }));
   const fin = ctls.filter((c) => c.status === 'finalizado');
   const eff = {};
@@ -112,5 +117,5 @@ export function deriveState(S) {
   const my = (S.derived && S.derived.myPlantilla) || { plantillaIds: [], techIds: [], alertKeys: [] };
   const myPlantilla = { plantillaIds: my.plantillaIds.filter((id) => shiftById[id]), techIds: my.techIds || [], alertKeys: new Set(my.alertKeys || []) };
   const hasDemo = DEMO_COLS.some((c) => Object.values(S[c] || {}).some((d) => d && d.demo));
-  return { cur, curKey, curNum, shifts, plantillas: shifts, shiftById, plantillaById, archivedPlantillas, techs, activeTechs, lineas, cajas, activeCajas, cats, tools, units, unitsByTool, asgs, activeAsg, asgByTech, ctls, fin, eff, effList, effByTech, drafts, supersededBy, stateOf, hist, transitions, movs, pools, pendingReturns, techInfo, cajaInfo, shiftInfo, kpi, alertsOpen, alertsByPlantilla, myPlantilla, hasDemo };
+  return { especialidades, kits, toolRank, cur, curKey, curNum, shifts, plantillas: shifts, shiftById, plantillaById, archivedPlantillas, techs, activeTechs, lineas, cajas, activeCajas, cats, tools, units, unitsByTool, asgs, activeAsg, asgByTech, ctls, fin, eff, effList, effByTech, drafts, supersededBy, stateOf, hist, transitions, movs, pools, pendingReturns, techInfo, cajaInfo, shiftInfo, kpi, alertsOpen, alertsByPlantilla, myPlantilla, hasDemo };
 }

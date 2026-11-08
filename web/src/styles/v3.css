@@ -31,3 +31,31 @@ body.auth .netwrap{max-width:400px}
 .labels{display:grid;gap:8px;max-width:480px}
 .lblrow{display:flex;align-items:center;gap:8px}
 .lblrow input{flex:1;min-width:0}
+
+/* Etapa 3: listas ordenables (manija para arrastrar en la computadora, flechas de 44 px en el
+   celular), kits y especialidad. */
+.ordlist{list-style:none;margin:0;padding:0}
+.orditem{gap:8px;padding-left:6px;position:relative;touch-action:pan-y}
+.orditem:focus-visible{outline:2px solid var(--pri);outline-offset:-2px}
+.orditem .grow{min-width:0}
+.grip{display:none;width:28px;height:44px;place-items:center;color:var(--ink2);cursor:grab;flex:none;touch-action:none}
+.ordbtns{display:flex;flex:none}
+.ordbtn{width:44px;height:44px}
+.ordbtn[disabled]{color:var(--line);pointer-events:none}
+.orditem.dragging{background:var(--pri-soft2);z-index:2;cursor:grabbing}
+.orditem.dropbefore{box-shadow:inset 0 2px 0 var(--pri)}
+.orditem.dropafter{box-shadow:inset 0 -2px 0 var(--pri)}
+.ordlist.sorting{user-select:none}
+.ordbar{margin:8px 0 0;position:static}
+.ordbar .grow{flex:1;min-width:0}
+.tgroup{margin-top:12px}
+@media (min-width:1024px){.grip{display:grid}.ordbtn{width:34px;height:34px}}
+@media (prefers-reduced-motion:no-preference){.orditem{transition:background .15s ease-out}}
+.kitcard .list{margin:10px 0}
+.kitqty{width:76px;min-height:44px;text-align:right;flex:none}
+.kitadd{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.kitadd select{flex:1 1 200px;min-width:0}
+.kitadd input{width:84px;min-height:44px}
+.kitpv .row{align-items:flex-start}
+.kitprob{display:flex;align-items:center;gap:4px;color:var(--bad-ink);margin-top:4px}
+.espsel{min-height:44px;max-width:100%}

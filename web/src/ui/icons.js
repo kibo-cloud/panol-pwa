@@ -29,5 +29,5 @@ sliders:'<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M
 info:'<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
 eye:'<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
 eyeoff:'<path d="m2 2 20 20M6.7 6.7C3.8 8.6 2 12 2 12s3 7 10 7c2 0 3.7-.6 5.2-1.5M10.6 5.1C11 5 11.5 5 12 5c7 0 10 7 10 7s-.7 1.7-2.2 3.5"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>'};
-IC.shift=IC.clock;IC.more=IC.menu;IC.tool=IC.wrench;
+IC.up='<path d="m18 15-6-6-6 6"/>';IC.grip='<circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/>';IC.shift=IC.clock;IC.more=IC.menu;IC.tool=IC.wrench;
 export const icon=(n,s=20)=>`<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]||''}</svg>`;

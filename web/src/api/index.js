@@ -68,6 +68,16 @@ export const api = {
   updateCategory: (id, body, version) => http.patch(`/api/categories/${enc(id)}`, body, { version }),
   deleteCategory: (id, version) => http.del(`/api/categories/${enc(id)}`, { version }),
   createTool: (body) => http.post('/api/tools', body),
+  // etapa 3: orden, especialidades y kits
+  reorderCategories: (ids, version) => http.put('/api/categories/order', { ids }, { version }),
+  reorderTools: (categoryId, ids, version) => http.put('/api/tools/order', { categoryId, ids }, { version }),
+  createEspecialidad: (body) => http.post('/api/especialidades', body),
+  updateEspecialidad: (id, body, version) => http.patch(`/api/especialidades/${enc(id)}`, body, { version }),
+  archiveEspecialidad: (id, version) => http.post(`/api/especialidades/${enc(id)}/archive`, undefined, { version }),
+  createKit: (body) => http.post('/api/kits', body),
+  saveKit: (id, body, version) => http.put(`/api/kits/${enc(id)}`, body, { version }),
+  deleteKit: (id, version) => http.del(`/api/kits/${enc(id)}`, { version }),
+  deliverKit: (id, body, version, o) => http.post(`/api/kits/${enc(id)}/deliver`, body, idem({ ...o, version })),
   updateTool: (id, body, version) => http.patch(`/api/tools/${enc(id)}`, body, { version }),
 
   // operaciones (con Idempotency-Key)

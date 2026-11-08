@@ -15,6 +15,7 @@ import './features/reportes/view.js';
 import './features/reportes/export.js';
 import './features/alertas/view.js';
 import './features/config/view.js';
+import './features/kits/deliver.js';
 import './features/admin/view.js';
 import './features/datos/view.js';
 import { boot } from './ui/app.js';
