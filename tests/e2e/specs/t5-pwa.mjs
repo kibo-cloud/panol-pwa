@@ -11,7 +11,12 @@ const CACHE = 'panol-v3.0.0-dev';
 const idbDrafts = (page) => page.eval("new Promise((res,rej)=>{const r=indexedDB.open('panol-v3',1);r.onupgradeneeded=()=>r.result.createObjectStore('panol-drafts',{keyPath:'key'});r.onsuccess=()=>{const t=r.result.transaction('panol-drafts','readonly').objectStore('panol-drafts').getAll();t.onsuccess=()=>{res(t.result);r.result.close()};t.onerror=()=>rej(t.error)};r.onerror=()=>rej(r.error)})");
 
 async function swControlled(page) {
-  await page.waitFor("navigator.serviceWorker.ready.then(()=>true)", 15000, 'sw ready');
+  // La espera vive dentro de la página con su propio tope: `ready` nunca resuelve si el registro falla.
+  const ready = await page.eval("Promise.race([navigator.serviceWorker.ready.then(()=>'ready'),new Promise((r)=>setTimeout(()=>r('timeout'),15000))])");
+  if (ready !== 'ready') {
+    const diag = await page.eval("Promise.all([navigator.serviceWorker.getRegistrations().then((rs)=>rs.map((r)=>({scope:r.scope,active:!!r.active,installing:!!r.installing,waiting:!!r.waiting}))),navigator.serviceWorker.register('/sw.js').then(()=>'register ok',(e)=>'register error: '+e),fetch('/sw.js').then((r)=>r.status+' '+r.headers.get('content-type'))]).then(JSON.stringify)");
+    throw new Error('service worker not ready after 15 s: ' + diag);
+  }
   if (!(await page.eval('!!navigator.serviceWorker.controller'))) { await page.reload(); await page.ready(); }
   await page.waitFor('!!navigator.serviceWorker.controller', 10000, 'page controlled by the SW');
 }
