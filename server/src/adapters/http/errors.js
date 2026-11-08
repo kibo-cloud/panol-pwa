@@ -20,7 +20,12 @@ export function errorHandler(err, req, reply) {
     return reply.code(err.status).send({ error: err.code, message: err.message, ...err.extra });
   }
   if (err && err.name === 'DomainError') {
-    return reply.code(err.status || 422).send({ error: err.code, message: err.message });
+    const body = { error: err.code, message: err.message };
+    if (err.retryAfter) {
+      reply.header('Retry-After', String(err.retryAfter));
+      body.retryAfter = err.retryAfter;
+    }
+    return reply.code(err.status || 422).send(body);
   }
   if (err && err.validation) {
     return reply.code(400).send({ error: 'invalid_request', message: 'Los datos enviados no son válidos.' });

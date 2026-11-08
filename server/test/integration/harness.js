@@ -51,12 +51,12 @@ export async function createTestDatabase() {
 }
 
 // Base migrada + pool + app lista para `inject`.
-export async function setupApp({ migrate = true, env = {} } = {}) {
+export async function setupApp({ migrate = true, env = {}, extend } = {}) {
   const db = await createTestDatabase();
   const pool = createPool(db.url, { max: 5 });
   if (migrate) await runMigrations(pool);
   const config = buildConfig({ NODE_ENV: 'test', DATABASE_URL: db.url, ...env });
-  const app = await buildApp({ config, pool, logger: false });
+  const app = await buildApp({ config, pool, logger: false, extend });
   await app.ready();
   return {
     app,

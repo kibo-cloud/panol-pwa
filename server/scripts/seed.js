@@ -6,6 +6,18 @@ import { loadInventoryContext, applyMovementPlan, saveControl } from '../src/ada
 import { planMovement } from '../src/domain/movements.js';
 import { buildControlDoc } from '../src/domain/controls.js';
 import { periodOf, prevP, pkeyOf } from '../src/domain/period.js';
+import { hashPassword } from '../src/application/passwords.js';
+
+// Usuarios de desarrollo, uno o más por perfil. Contraseña de todos: DEV_PASSWORD (solo local).
+export const DEV_PASSWORD = 'panol-dev-1234';
+const USERS = [
+  ['u-admin', 'admin', 'Admin Desarrollo', 'admin'],
+  ['u-gerencia', 'gerencia', 'Gerencia Desarrollo', 'gerencia'],
+  ['u-supervisor', 'supervisor', 'Supervisor Desarrollo', 'supervisor'],
+  ['u-responsable', 'responsable', 'Responsable Desarrollo', 'responsable'],
+  ['u-responsable2', 'responsable2', 'Responsable Dos', 'responsable'],
+  ['u-consulta', 'consulta', 'Consulta Desarrollo', 'consulta'],
+];
 
 const TECHS = [
   ['t-ana', 'Ana Prueba', 'DEV-001', 'manana'],
@@ -29,9 +41,13 @@ export async function seed(pool, { now = new Date() } = {}) {
   let n = 0;
   const newId = (p) => `${p}seed${++n}`;
   const at = (daysAgo) => new Date(now.getTime() - daysAgo * 864e5).toISOString();
-  const summary = { techs: TECHS.length, categories: CATEGORIES.length, tools: TOOLS.length, movements: 0, controls: 0 };
+  const summary = { users: USERS.length, techs: TECHS.length, categories: CATEGORIES.length, tools: TOOLS.length, movements: 0, controls: 0 };
 
+  const hash = await hashPassword(DEV_PASSWORD);
   await withTransaction(pool, async (c) => {
+    for (const [id, username, name, role] of USERS) {
+      await c.query('INSERT INTO users (id, username, name, role, password_hash, must_change_password) VALUES ($1,$2,$3,$4,$5,false)', [id, username, name, role, hash]);
+    }
     for (const [id, name, legajo, shift, active = true] of TECHS) {
       await c.query('INSERT INTO techs (id, name, legajo, shift_id, active, alta) VALUES ($1,$2,$3,$4,$5,$6)', [id, name, legajo, shift, active, at(120).slice(0, 10)]);
     }
