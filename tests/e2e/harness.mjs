@@ -118,7 +118,8 @@ export async function launchBrowser() {
   proc.stderr.on('data', (d) => { stderrTail = (stderrTail + d).slice(-3000); });
   proc.on('exit', (code, signal) => { exited = code ?? signal; });
   const portFile = path.join(dir, 'DevToolsActivePort');
-  for (let i = 0; i < 300 && !fs.existsSync(portFile) && exited === null; i++) await sleep(100);
+  // No se corta la espera cuando el proceso sale: en Windows msedge.exe delega en otro proceso y sale con 0.
+  for (let i = 0; i < 300 && !fs.existsSync(portFile); i++) await sleep(100);
   if (!fs.existsSync(portFile)) {
     try { proc.kill(); } catch { /* ignore */ }
     throw new Error('browser did not start (no DevToolsActivePort)' + (exited !== null ? ', exit ' + exited : ', timeout 30 s') + '\n' + stderrTail);
