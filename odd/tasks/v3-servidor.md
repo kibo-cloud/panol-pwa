@@ -582,8 +582,8 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
          `duplicate_plantilla_name`, dry-run reports `shifts.name` "nombre de plantilla
          repetido". RED (no index, no report error) -> GREEN. Note: `lower()` follows the DB
          locale (non-ASCII capitals such as Ñ may not fold), same as the existing API check.
-      Evidence: `npm test` 136/136; `npm run test:db` 132/132; `PANOL_E2E_BUILD=1 npm run test:e2e` 43/0/0 (318 s). Commit: see git log
-      (`fix(server): ...`). Follow-up: `web/src/state/plantillas.js` `coverageOf`/`validateMove`
+      Evidence: `npm test` 136/136; `npm run test:db` 132/132; `PANOL_E2E_BUILD=1 npm run test:e2e` 43/0/0 (318 s). Commit `624b097`
+      (`fix(server): ...`, docs amended). Follow-up: `web/src/state/plantillas.js` `coverageOf`/`validateMove`
       still mirror the old rule client-side (web/ outside this surface; the server decides).
 
 ## Stage 2 implementation notes (E2.T1)
