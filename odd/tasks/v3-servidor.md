@@ -105,10 +105,30 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       Sec-Fetch-Site, forced change flow, admin-only users with If-Match 409, last-admin and
       self-deactivate guards, permission defaults + overrides, idle/absolute expiry);
       `node tests/e2e/run.mjs t4` 3/3 (2.1 suite untouched).
-- [ ] E1.T4 API for every 2.1 operation: CRUD (techs, tools, units, categories, turnos),
+- [x] E1.T4 API for every 2.1 operation: CRUD (techs, tools, units, categories, turnos),
       movements with server-side stock validation, controls (draft, finalize, correction),
       alert resolutions, audit, permissions; schema validation; `version` + `If-Match` -> 409;
       SSE `/api/events`; audit on every important action; idempotency keys for drafts.
+      Commits `745c437` (catalog, read models, reports, SSE, migration 002) and `68a522a`
+      (movements, controls, alerts, demo). Route: delegated writer.
+      Endpoints: `POST/PATCH /api/techs`, `POST /api/techs/:id/shift-change`,
+      `POST/PATCH/DELETE /api/shifts`, `POST/PATCH/DELETE /api/categories`,
+      `POST/PATCH /api/tools`, `PATCH /api/units/:id`, `GET /api/state|inventory|alerts|
+      integrity|reports|controls|controls/:id`, `GET /api/audit` (admin, cursor),
+      `POST /api/movements`, `POST /api/controls`, `PATCH /api/controls/:id`,
+      `POST /api/controls/:id/finalize`, `POST|DELETE /api/alerts/:key/resolution`,
+      `POST|DELETE /api/demo`, `GET /api/events` (SSE via LISTEN/NOTIFY, ping 25 s).
+      Evidence: `npm test` 52/52 (new: derive/report/integrity/catalog rules); `npm run
+      test:db` 55/55 (new files catalog-api, movements-api, controls-api, reads-api:
+      permissions for consulta/gerencia/responsable/supervisor, schema rejections, 428/409
+      with `current`, ETag, oversell race with the tool row held from another connection ->
+      [201, 422] and [201, 422, 422], idempotent replay incl. concurrent same key and
+      mismatch 422, finalize immutability, unique original, correction flow, report numbers
+      on an API-built fixture, SSE event after a write, demo load/clear). Race test RED
+      observed with the `FOR UPDATE` removed (`[201, 201]`), GREEN with it. Domain unit tests
+      were written with the code (no RED run). `npm run db:reset` + `npm start` + curl login
+      (cookie + `X-CSRF-Token`) -> `GET /api/state` 200, `POST /api/techs` 201 with `ETag`;
+      server and `db:stop` stopped. `node tests/e2e/run.mjs t6` 4/4 (2.1 suite untouched).
 - [ ] E1.T5 `.txt` v2 importer and export: admin-only; same validation as 2.1 plus the empty
       date rule; `data.deleted` applied; PIN users migrated (PIN works once as temporary
       password, then forced change); import report before confirming; *Descargar .txt*.
@@ -140,6 +160,7 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 ## Progress
 - 2026-11-07: first delivery (no code) approved with adjustments; E1.T0 done.
 - 2026-11-07: E1.T1-E1.T3 done (server scaffold, schema + domain, auth and users).
+- 2026-11-07: E1.T4 done (API for every 2.1 operation, SSE, idempotency, demo data).
 
 ## Stage 1 implementation notes (E1.T1-E1.T3)
 - Embedded PG runs through the bundled `initdb`/`pg_ctl` of `embedded-postgres`
@@ -161,8 +182,26 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 - Dev users (seed): admin, gerencia, supervisor, responsable, responsable2, consulta, all
   with `panol-dev-1234` (documented in `.env.example`).
 
+## Stage 1 implementation notes (E1.T4)
+- Concurrency: every PATCH/DELETE of an editable row (and the shift change and finalize
+  POSTs) requires `If-Match`; missing -> 428, stale -> 409 `{error:'conflict', current}`.
+  (T3 user routes keep If-Match optional; left for the security follow-up.)
+- Stock: a movement locks its tool row (`FOR UPDATE`) before loading the inventory
+  context; unit-code and pending-return uniqueness also rely on the DB indexes.
+- Idempotency: table `idempotency_keys` (per user + key, request hash); the key is claimed
+  in the same transaction as the write, so a failed write can be retried.
+- Demo data (2.1 `demo_manage`): rows flagged `demo`; clearing is the only exception to the
+  append-only ledger and finalized controls, allowed by the DB triggers only for demo rows
+  inside a transaction with `panol.demo_clear` on. Audit entries are never deleted (2.1
+  deleted demo audit). Clearing is refused (409) if real movements/controls point at demo
+  techs or tools. Demo unit codes / legajos get a `DEMO-` / `D` prefix when already taken.
+- Small additions over 2.1: unit code correction (`PATCH /api/units/:id`), shift order
+  edit, alert reopen, last shift cannot be deleted, serialized flag change refused (409)
+  instead of silently ignored when the tool has movements.
+
 ## Next step
-- E1.T4 API for every 2.1 operation (reuses `planMovement` + `applyMovementPlan`,
-  `saveControl`, `requirePerm`).
-- Follow-ups: periodic cleanup of expired sessions and old login attempts; generate the
-  Compose `postgres` tag from `server/pg-version.json` in E1.T8.
+- E1.T5 `.txt` v2 importer and export.
+- Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
+  keys; SSE does not re-check the session after it is opened (closes on reconnect only);
+  `/api/state` and movement planning load the full ledger (fine for stage 1 volumes);
+  generate the Compose `postgres` tag from `server/pg-version.json` in E1.T8.
