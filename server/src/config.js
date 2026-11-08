@@ -60,6 +60,8 @@ export function buildConfig(env = process.env) {
       absoluteHours: int(env.SESSION_ABSOLUTE_HOURS, 24, 1),
       rememberDays: int(env.SESSION_REMEMBER_DAYS, 30, 1),
     },
+    // App web compilada (npm run build); vacío = no se sirve.
+    webDist: env.WEB_DIST === undefined ? path.join(ROOT_DIR, 'web', 'dist') : env.WEB_DIST,
     logLevel: env.LOG_LEVEL || (nodeEnv === 'test' ? 'silent' : 'info'),
   };
   return Object.freeze(cfg);

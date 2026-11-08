@@ -11,6 +11,7 @@ import { registerReadRoutes } from './adapters/http/read-routes.js';
 import { registerOperationRoutes } from './adapters/http/operation-routes.js';
 import { registerEventRoutes } from './adapters/http/events-routes.js';
 import { registerTxtRoutes } from './adapters/http/txt-routes.js';
+import { registerSecurityHeaders, registerWeb, spaFallback } from './adapters/http/web-routes.js';
 
 // extend(app): permite a las pruebas registrar rutas antes de `ready()`.
 // events: opciones del flujo SSE (p. ej. heartbeatMs en pruebas).
@@ -27,7 +28,10 @@ export async function buildApp({ config, pool, logger, extend, events } = {}) {
   app.decorate('config', config);
   app.decorate('db', pool);
   app.setErrorHandler(errorHandler);
+  let web = false;
   app.setNotFoundHandler((req, reply) => {
+    // Rutas de la app web (por hash): se responde index.html.
+    if (web && spaFallback(req, reply, web)) return;
     const e = notFound('No existe esa ruta.', 'route_not_found');
     reply.code(e.status).send({ error: e.code, message: e.message });
   });
@@ -37,6 +41,7 @@ export async function buildApp({ config, pool, logger, extend, events } = {}) {
     return payload;
   });
 
+  registerSecurityHeaders(app);
   await app.register(cookie);
   registerAuth(app);
 
@@ -58,6 +63,7 @@ export async function buildApp({ config, pool, logger, extend, events } = {}) {
   registerOperationRoutes(app);
   registerEventRoutes(app, events);
   registerTxtRoutes(app);
+  web = await registerWeb(app);
   if (extend) await extend(app);
   return app;
 }
