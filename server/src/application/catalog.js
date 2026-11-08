@@ -12,6 +12,8 @@ import { newId } from './ids.js';
 import { withTransaction, checkVersion, onUnique, record, notifyChange } from './common.js';
 import * as plantillas from './plantillas.js';
 import { insertRange } from '../adapters/pg/plantilla-repo.js';
+import { CATEGORY_SCOPE, toolScope, insertAt } from '../domain/orden.js';
+import { lockScope, lockScopes, bumpScope, toolIdsOf, writeOrder } from './orden.js';
 
 const rule = (msg, code = 'invalid_input', status = 422) => new DomainError(msg, code, status);
 const changed = (set, cur) => Object.fromEntries(Object.entries(set).filter(([k, v]) => v !== undefined && v !== cur[k]));
@@ -22,6 +24,13 @@ async function plantillaNameOf(c, id) {
 }
 
 // ---------------------------------------------------------------- técnicos
+// Especialidad (etapa 3): opcional; al cambiarla tiene que estar activa.
+async function checkEspecialidad(c, id) {
+  if (id == null || id === '') return null;
+  const e = await repo.getRow(c, 'especialidades', id);
+  if (!e || e.archivedAt) throw rule('Elegí una especialidad válida.', 'invalid_especialidad');
+  return e.id;
+}
 async function assertLegajoFree(c, legajo, exceptId) {
   const { rows } = await c.query('SELECT id, name FROM techs WHERE lower(btrim(legajo)) = lower($1) AND id IS DISTINCT FROM $2 LIMIT 1', [legajo, exceptId]);
   if (rows[0]) throw legajoTaken(legajo, rows[0].name);
@@ -43,7 +52,8 @@ export async function createTech(db, actor, input) {
       const p = await repo.getRow(c, 'plantillas', pid);
       if (!p || p.archivedAt) throw rule('Elegí una plantilla válida.', 'invalid_plantilla');
     } else pid = (await c.query('SELECT id FROM plantillas WHERE archived_at IS NULL ORDER BY sort_order, id LIMIT 1')).rows[0]?.id ?? null;
-    const row = await repo.insertRow(c, 'techs', newId('t'), { name, legajo, active: true, alta, by: actor.id }).catch(legajoUnique(legajo));
+    const especialidadId = await checkEspecialidad(c, input.especialidadId);
+    const row = await repo.insertRow(c, 'techs', newId('t'), { name, legajo, active: true, alta, especialidadId, by: actor.id }).catch(legajoUnique(legajo));
     // Primer rango de pertenencia: desde siempre (la plantilla vale para todos sus controles).
     if (pid) await insertRange(c, { id: newId('ph'), techId: row.id, plantillaId: pid, validFrom: null, validTo: null, reason: 'Alta del técnico' }, { actorId: actor.id });
     await record(c, actor, { action: 'tech_create', entity: 'techs', id: row.id, version: row.version, event: 'create', detail: `Alta de técnico ${name} (legajo ${legajo}) en ${await plantillaNameOf(c, pid)}` });
@@ -65,10 +75,11 @@ export async function updateTech(db, actor, id, input, version) {
     }
     if (input.alta !== undefined) set.alta = cleanDay(input.alta, 'La fecha de alta');
     if (input.active !== undefined) set.active = input.active;
+    if (input.especialidadId !== undefined && (input.especialidadId || null) !== (cur.especialidadId ?? null)) set.especialidadId = await checkEspecialidad(c, input.especialidadId);
     const diff = changed(set, cur);
     if (!Object.keys(diff).length) return plantillas.withMembership(c, cur);
     const row = await repo.updateRow(c, 'techs', id, diff).catch(legajoUnique(set.legajo));
-    if (diff.name !== undefined || diff.legajo !== undefined || diff.alta !== undefined) {
+    if (diff.name !== undefined || diff.legajo !== undefined || diff.alta !== undefined || diff.especialidadId !== undefined) {
       await record(c, actor, { action: 'tech_edit', entity: 'techs', id, version: row.version, detail: `Edición de técnico ${row.name} (legajo ${row.legajo})` });
     }
     if (diff.active !== undefined) {
@@ -114,7 +125,10 @@ export async function createCategory(db, actor, input) {
   return withTransaction(db, async (c) => {
     await repo.lockName(c, 'categories.name');
     await assertUniqueName(c, name, 'categories', null, 'Ya existe esa categoría.');
+    // Va al final del orden (trigger de la migración 009).
+    await lockScope(c, CATEGORY_SCOPE);
     const row = await repo.insertRow(c, 'categories', newId('g'), { name, by: actor.id });
+    await bumpScope(c, CATEGORY_SCOPE);
     await record(c, actor, { action: 'category_create', entity: 'categories', id: row.id, version: row.version, event: 'create', detail: `Alta de categoría ${name}` });
     return row;
   });
@@ -135,9 +149,11 @@ export async function updateCategory(db, actor, id, input, version) {
 
 export async function deleteCategory(db, actor, id, version) {
   return withTransaction(db, async (c) => {
+    await lockScope(c, CATEGORY_SCOPE);
     const cur = checkVersion(await repo.getRow(c, 'categories', id, { lock: true }), version, 'No se encontró la categoría.');
     if ((await c.query('SELECT 1 FROM tools WHERE category_id = $1 LIMIT 1', [id])).rows[0]) throw rule('La categoría tiene herramientas.', 'category_has_tools', 409);
     await repo.deleteRow(c, 'categories', id);
+    await bumpScope(c, CATEGORY_SCOPE);
     await record(c, actor, { action: 'category_delete', entity: 'categories', id, event: 'delete', detail: `Baja de categoría ${cur.name}` });
     return { ok: true };
   });
@@ -151,6 +167,7 @@ async function checkCategory(c, categoryId) {
 }
 
 // Alta con stock inicial (por cantidad) o códigos iniciales (por código), como en 2.1.
+// `position` (desde 1) la inserta en ese lugar de su categoría; sin posición va al final.
 export async function createTool(db, actor, input) {
   const name = cleanName(input.name, 'Ingresá el nombre.');
   const description = cleanText(input.description, 'La descripción');
@@ -159,7 +176,12 @@ export async function createTool(db, actor, input) {
     await repo.lockName(c, 'tools.name');
     await assertUniqueName(c, name, 'tools', null, 'Ya existe una herramienta con ese nombre.');
     const categoryId = await checkCategory(c, input.categoryId);
-    const tool = await repo.insertRow(c, 'tools', newId('h'), { name, description, categoryId, serialized, active: true, by: actor.id });
+    const scope = toolScope(categoryId);
+    await lockScope(c, scope);
+    const tool0 = await repo.insertRow(c, 'tools', newId('h'), { name, description, categoryId, serialized, active: true, by: actor.id });
+    if (input.position != null) await writeOrder(c, 'tools', insertAt(await toolIdsOf(c, categoryId), tool0.id, input.position));
+    await bumpScope(c, scope);
+    const tool = await repo.getRow(c, 'tools', tool0.id);
     await record(c, actor, { action: 'tool_create', entity: 'tools', id: tool.id, version: tool.version, event: 'create', detail: `Alta de herramienta ${name}` });
     const codes = serialized ? String(input.codes ?? '').trim() : '';
     const stock = serialized ? 0 : input.stock || 0;
@@ -179,6 +201,13 @@ export async function createTool(db, actor, input) {
 
 export async function updateTool(db, actor, id, input, version) {
   return withTransaction(db, async (c) => {
+    // Cambio de categoría: el orden de las dos categorías se bloquea antes que la herramienta.
+    let scopes = [];
+    if (input.categoryId !== undefined) {
+      const before = (await c.query('SELECT category_id FROM tools WHERE id = $1', [id])).rows[0];
+      if (before && (before.category_id ?? null) !== (input.categoryId || null)) scopes = [toolScope(before.category_id), toolScope(input.categoryId)];
+      await lockScopes(c, scopes);
+    }
     const cur = checkVersion(await repo.getRow(c, 'tools', id, { lock: true }), version, 'No se encontró la herramienta.');
     const set = {};
     if (input.name !== undefined) {
@@ -197,6 +226,7 @@ export async function updateTool(db, actor, id, input, version) {
     const diff = changed(set, cur);
     if (!Object.keys(diff).length) return cur;
     const row = await repo.updateRow(c, 'tools', id, diff);
+    if (diff.categoryId !== undefined) for (const s of new Set([toolScope(cur.categoryId), toolScope(row.categoryId)])) await lockScope(c, s).then(() => bumpScope(c, s));
     const { active, ...rest } = diff;
     if (Object.keys(rest).length) await record(c, actor, { action: 'tool_edit', entity: 'tools', id, version: row.version, detail: `Edición de herramienta ${row.name}` });
     if (active !== undefined) await record(c, actor, { action: 'tool_toggle', entity: 'tools', id, version: row.version, detail: `${active ? 'Activación' : 'Desactivación'} de herramienta ${row.name}` });

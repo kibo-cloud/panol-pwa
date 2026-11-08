@@ -11,7 +11,7 @@ export function registerCatalogRoutes(app) {
   const perm = (p) => ({ preHandler: app.requirePerm(p) });
 
   // ------------------------------------------------------------ técnicos
-  const techBody = { name: S.name, legajo: S.str(LIM.legajo), alta: S.dayOrNull };
+  const techBody = { name: S.name, legajo: S.str(LIM.legajo), alta: S.dayOrNull, especialidadId: S.idOrNull };
   app.post('/api/techs', { ...perm('techs_edit'), schema: { body: obj({ ...techBody, shiftId: S.idOrNull, plantillaId: S.idOrNull }, ['name', 'legajo']) } },
     async (req, reply) => sendRow(reply, 'tech', await catalog.createTech(db, actorOf(req), req.body), 201));
   app.patch('/api/techs/:id', { ...perm('techs_edit'), schema: { params: idParams, body: obj({ ...techBody, active: S.bool }, [], { minProperties: 1 }) } },
@@ -45,7 +45,7 @@ export function registerCatalogRoutes(app) {
   const toolBody = { name: S.name, description: S.text, categoryId: S.idOrNull, serialized: S.bool };
   app.post('/api/tools', {
     ...perm('tools_edit'),
-    schema: { body: obj({ ...toolBody, codes: S.str(SCHEMA_LIM.text), stock: S.int(0, 1000000) }, ['name']) },
+    schema: { body: obj({ ...toolBody, codes: S.str(SCHEMA_LIM.text), stock: S.int(0, 1000000), position: S.int(1, 100000) }, ['name']) },
   }, async (req, reply) => sendRow(reply, 'tool', await catalog.createTool(db, actorOf(req), req.body), 201));
   app.patch('/api/tools/:id', { ...perm('tools_edit'), schema: { params: idParams, body: obj({ ...toolBody, active: S.bool }, [], { minProperties: 1 }) } },
     async (req, reply) => sendRow(reply, 'tool', await catalog.updateTool(db, actorOf(req), req.params.id, req.body, requireVersion(req))));

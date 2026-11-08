@@ -26,12 +26,13 @@ const maxIso = (rows) => rows.reduce((m, r) => (r.updated_at && (!m || r.updated
 export async function loadTxtState(q) {
   const data = {};
   const P = await readPlantillas(q);
-  data.techs = strip(P.techs.map(({ plantillaId, ...t }) => t));
+  // El .txt v2 no tiene especialidad ni orden personalizado (etapa 3): no salen.
+  data.techs = strip(P.techs.map(({ plantillaId, especialidadId, ...t }) => t));
   data.shiftChanges = Object.fromEntries(Object.entries(P.shiftChanges).sort(([a], [b]) => (a < b ? -1 : 1)));
   // El .txt v2 no tiene cajas compartidas (etapa 2): sus asignaciones, controles, movimientos y
   // alertas resueltas no salen, y las unidades salen sin la caja.
   const noCaja = (list) => list.filter((r) => !r.cajaId).map(({ cajaId, ...r }) => r);
-  for (const c of ['categories', 'tools', 'units', 'assignments', 'alertRes']) data[c] = strip(noCaja((await listRows(q, c, `ORDER BY ${TABLES[c].key}`)).map((r) => (c === 'units' ? { ...r, cajaId: null } : r))));
+  for (const c of ['categories', 'tools', 'units', 'assignments', 'alertRes']) data[c] = strip(noCaja((await listRows(q, c, `ORDER BY ${TABLES[c].key}`)).map(({ order, ...r }) => (c === 'units' ? { ...r, cajaId: null } : r))));
   data.controls = strip(noCaja((await loadControls(q)).sort((a, b) => (a.id < b.id ? -1 : 1))));
   data.movements = strip(noCaja(await loadMovementsFull(q)));
   data.audit = Object.fromEntries((await q.query('SELECT id, action, entity, entity_id, detail, at, actor_id FROM audit_log ORDER BY at, id')).rows.map((r) => [
@@ -58,7 +59,8 @@ export async function loadTxtState(q) {
 const stampIso = (r) => (Number.isFinite(stamp(r)) ? new Date(stamp(r)).toISOString() : null);
 
 // Campos de la 3.0 que el .txt v2 no tiene: una importación no los toca.
-const V3_ONLY = new Set(['cajaId']);
+// El orden y la especialidad conservan su valor (una herramienta nueva va al final del orden).
+const V3_ONLY = new Set(['cajaId', 'especialidadId', 'order']);
 const v2Cols = (s) => Object.entries(s.cols).filter(([k]) => !V3_ONLY.has(k));
 
 async function insertGeneric(c, name, id, r) {

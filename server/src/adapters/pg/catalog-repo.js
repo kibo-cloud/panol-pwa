@@ -6,14 +6,17 @@ const iso = (d) => (d instanceof Date ? d.toISOString() : d ?? null);
 const COMMON = { version: 'version', createdAt: 'created_at', updatedAt: 'updated_at', by: 'created_by' };
 export const TABLES = {
   // La plantilla de un técnico sale del historial (tech_plantilla_history), no de techs.shift_id.
-  techs: { table: 'techs', key: 'id', cols: { name: 'name', legajo: 'legajo', active: 'active', alta: 'alta', demo: 'demo' } },
+  techs: { table: 'techs', key: 'id', cols: { name: 'name', legajo: 'legajo', active: 'active', alta: 'alta', especialidadId: 'especialidad_id', demo: 'demo' } },
   plantillas: {
     table: 'plantillas', key: 'id',
     cols: { name: 'name', supervisorUserId: 'supervisor_user_id', currentShiftLabel: 'current_shift_label', order: 'sort_order', archivedAt: 'archived_at' },
   },
   shifts: { table: 'shifts', key: 'id', cols: { name: 'name', order: 'sort_order' } },
-  categories: { table: 'categories', key: 'id', cols: { name: 'name', demo: 'demo' } },
-  tools: { table: 'tools', key: 'id', cols: { name: 'name', description: 'description', categoryId: 'category_id', serialized: 'serialized', active: 'active', demo: 'demo' } },
+  // Etapa 3: orden personalizado (`order`), especialidades y kits (los ítems van aparte).
+  categories: { table: 'categories', key: 'id', cols: { name: 'name', order: 'sort_order', demo: 'demo' } },
+  tools: { table: 'tools', key: 'id', cols: { name: 'name', description: 'description', categoryId: 'category_id', serialized: 'serialized', active: 'active', order: 'sort_order', demo: 'demo' } },
+  especialidades: { table: 'especialidades', key: 'id', cols: { name: 'name', order: 'sort_order', archivedAt: 'archived_at' } },
+  kits: { table: 'kits', key: 'id', cols: { name: 'name', especialidadId: 'especialidad_id' } },
   units: { table: 'units', key: 'id', cols: { toolId: 'tool_id', code: 'code', status: 'status', techId: 'tech_id', cajaId: 'caja_id', demo: 'demo' } },
   lineas: { table: 'lineas', key: 'id', cols: { name: 'name', kind: 'kind', order: 'sort_order', archivedAt: 'archived_at' } },
   cajas: { table: 'cajas', key: 'id', cols: { name: 'name', lineaId: 'linea_id', referenteTechId: 'referente_tech_id', archivedAt: 'archived_at' } },

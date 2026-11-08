@@ -19,7 +19,9 @@ const inPeriod = (pkey, y, m, weeks) => {
   return p.y === y && p.m === m && (!weeks || weeks.includes(p.w));
 };
 
-// f: { ym: 'YYYY-MM', w: 'all'|'1'..'4', shift: 'all'|id, tech: 'all'|id }
+// f: { ym: 'YYYY-MM', w: 'all'|'1'..'4', shift: 'all'|id, tech: 'all'|id, especialidad: 'all'|'none'|id }
+// Etapa 3: filtro y columna de especialidad, y `tools`: las herramientas asignadas a los técnicos
+// del informe, en el orden personalizado (estado actual de cada asignación).
 // La plantilla de cada técnico es la del período (foto del último control, o el historial al
 // final del período), así un informe viejo no cambia cuando alguien se mueve de plantilla.
 // `plantilla` es otro nombre del filtro `shift`.
@@ -29,7 +31,12 @@ export function computeReport(d, filters = {}) {
     w: filters.w || 'all',
     shift: filters.plantilla || filters.shift || 'all',
     tech: filters.tech || 'all',
+    especialidad: filters.especialidad || 'all',
   };
+  const espOf = (t) => t.especialidadId || null;
+  const espOk = (t) => f.especialidad === 'all' || (f.especialidad === 'none' ? !espOf(t) : espOf(t) === f.especialidad);
+  const espById = d.especialidadById || {};
+  const espName = (id) => (id && espById[id] ? espById[id].name : '');
   const [y, m] = f.ym.split('-').map(Number);
   const weeks = f.w === 'all' ? [1, 2, 3, 4] : [+f.w];
   const range = f.w === 'all' ? monthRange(y, m) : weekRange({ y, m, w: +f.w });
@@ -46,7 +53,7 @@ export function computeReport(d, filters = {}) {
     return { cs, last: cs[cs.length - 1] };
   };
   const plOf = (t) => reportPlantillaOf(t, { lastControl: lastOf(t).last, hist: d.plantillaHist, day });
-  const ts = d.activeTechs.filter((t) => (f.tech === 'all' || t.id === f.tech) && (f.shift === 'all' || plOf(t) === f.shift));
+  const ts = d.activeTechs.filter((t) => (f.tech === 'all' || t.id === f.tech) && (f.shift === 'all' || plOf(t) === f.shift) && espOk(t));
   const rows = ts.map((t) => {
     const { cs, last } = lastOf(t);
     const pid = plOf(t);
@@ -59,7 +66,7 @@ export function computeReport(d, filters = {}) {
     const repos = d.movs.filter((x) => x.techId === t.id && x.type === 'reposicion' && inRange(x.at, range)).length;
     const recup = d.transitions.filter((x) => x.techId === t.id && recovered(x) && inPeriod(x.pkey, y, m, weeks)).length;
     return {
-      id: t.id, name: t.name, legajo: t.legajo, shiftId: pid, plantillaId: pid, shift: shiftName(pid), total: i.total,
+      id: t.id, name: t.name, legajo: t.legajo, shiftId: pid, plantillaId: pid, shift: shiftName(pid), especialidadId: espOf(t), especialidad: espName(espOf(t)), total: i.total,
       bueno: ok, cambio: ch, faltante: fa, pct: den ? Math.round((ok / den) * 100) : null, ctl: cs.length, expected: started.length,
       repos, recup, fromControl: !!last,
     };
@@ -107,9 +114,21 @@ export function computeReport(d, filters = {}) {
   });
 
   const techById = Object.fromEntries(d.techs.map((t) => [t.id, t]));
-  const label = `${f.w === 'all' ? mlabel(y, m) : plabel({ y, m, w: +f.w })}${f.shift !== 'all' ? ', ' + shiftName(f.shift) : ''}${f.tech !== 'all' && techById[f.tech] ? ', ' + techById[f.tech].name : ''}`;
+  const label = `${f.w === 'all' ? mlabel(y, m) : plabel({ y, m, w: +f.w })}${f.shift !== 'all' ? ', ' + shiftName(f.shift) : ''}${f.tech !== 'all' && techById[f.tech] ? ', ' + techById[f.tech].name : ''}${f.especialidad === 'none' ? ', sin especialidad' : f.especialidad !== 'all' ? ', ' + (espName(f.especialidad) || 'especialidad') : ''}`;
   const T = (k) => rows.reduce((a, r) => a + r[k], 0);
   const den = T('bueno') + T('cambio') + T('faltante');
   const totals = { techs: rows.length, total: T('total'), bueno: T('bueno'), cambio: T('cambio'), faltante: T('faltante'), pct: den ? Math.round((T('bueno') / den) * 100) : 0, repos: T('repos') };
-  return { f, y, m, rows, shifts, plantillas: shifts, evo, label, started, totals };
+  // Herramientas en el orden personalizado, con el estado actual de sus asignaciones.
+  const toolRows = [];
+  for (const tool of d.tools) {
+    const s = { bueno: 0, cambio: 0, faltante: 0, pendiente: 0, total: 0 };
+    for (const id of ids) for (const a of d.asgByTech[id] || []) {
+      if (a.toolId !== tool.id) continue;
+      const q = a.qty || 1;
+      s[(d.stateOf[a.id] && d.stateOf[a.id].state) || 'pendiente'] += q;
+      s.total += q;
+    }
+    if (s.total) toolRows.push({ id: tool.id, name: tool.name, categoryId: tool.categoryId ?? null, ...s });
+  }
+  return { f, y, m, rows, shifts, plantillas: shifts, evo, label, started, totals, tools: toolRows };
 }

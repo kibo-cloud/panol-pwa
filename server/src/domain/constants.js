@@ -68,6 +68,8 @@ export const PERMS = [
   ['plantillas_edit', 'Administrar plantillas: crear, renombrar, supervisor y archivar'],
   ['plantilla_rotate', 'Rotar cualquier plantilla (el supervisor siempre rota la suya)'],
   ['lineas_edit', 'Administrar líneas, sectores y cajas compartidas'],
+  // Etapa 3: kits (kit base y por especialidad), solo admin por defecto.
+  ['kits_edit', 'Administrar kits: kit base y kits por especialidad'],
 ];
 export const PERM_KEYS = PERMS.map(([k]) => k);
 
