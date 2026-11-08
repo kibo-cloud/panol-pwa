@@ -1,0 +1,7 @@
+# Solo CI (prueba del Compose sin VPS): con DOMAIN=localhost Caddy usa su propia autoridad
+# (certificado interno, sin Let's Encrypt) y además la app se publica en 127.0.0.1:3000 para
+# la prueba de humo. Uso: docker compose -f docker-compose.yml -f docker-compose.ci.yml ...
+services:
+  app:
+    ports:
+      - "127.0.0.1:3000:3000"

@@ -1,0 +1,19 @@
+# Caddy delante de la app: HTTPS automático (Let's Encrypt) para {$DOMAIN}, HTTP -> HTTPS,
+# HSTS y proxy a la app. El flujo SSE (/api/events) pasa sin búfer ni compresión.
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	@comprimible not path /api/events
+	encode @comprimible zstd gzip
+
+	# La app ya manda CSP, nosniff y Referrer-Policy; acá se fija HSTS para todo el sitio.
+	header >Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	header -Server
+
+	reverse_proxy app:3000 {
+		# Sin búfer: cada evento SSE llega enseguida al navegador.
+		flush_interval -1
+	}
+}

@@ -1,0 +1,15 @@
+# Lo que nunca entra a una imagen: datos reales, secretos, dependencias locales y salidas.
+privado/
+versiones/
+.env
+.env.*
+.git/
+.github/
+node_modules/
+.pgdata/
+web/dist/
+tests/
+server/test/
+docs/
+odd/
+*.log
