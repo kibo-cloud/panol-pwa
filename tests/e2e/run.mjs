@@ -10,6 +10,13 @@ import { E2E, OUT, launchBrowser, openPage } from './harness.mjs';
 import { startE2EServer } from './server.mjs';
 
 const filter = process.argv[2] || '';
+// Tope por spec: una llamada CDP que nunca resuelve tiene que fallar con mensaje, no colgar la corrida.
+const SPEC_TIMEOUT_MS = Number(process.env.PANOL_SPEC_TIMEOUT_MS) || 120000;
+const withTimeout = (p, ms, what) => {
+  let timer;
+  return Promise.race([p, new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('timeout after ' + ms + ' ms: ' + what)), ms); })])
+    .finally(() => clearTimeout(timer));
+};
 let stray = 0;
 process.on('unhandledRejection', (e) => { stray++; console.log('  UNHANDLED ' + (e && e.stack || e)); });
 
@@ -36,10 +43,12 @@ try {
     const page = await openPage(browser, srv);
     const ctx = { browser, srv, extra: [] };
     try {
-      await page.viewport(t.width || 1280, t.height || 860);
-      await page.goto('/');
-      await page.ready();
-      await t.fn(page, ctx);
+      await withTimeout((async () => {
+        await page.viewport(t.width || 1280, t.height || 860);
+        await page.goto('/');
+        await page.ready();
+        await t.fn(page, ctx);
+      })(), t.timeout || SPEC_TIMEOUT_MS, 'spec ' + t.name);
       const csp = (await page.eval('window.__csp||[]').catch(() => [])) || [];
       const extraCsp = [];
       for (const p of ctx.extra) extraCsp.push(...((await p.eval('window.__csp||[]').catch(() => [])) || []));
@@ -52,11 +61,11 @@ try {
       fail++;
       failures.push(t.name);
       console.log('  FAIL ' + t.name + '\n       ' + String(e.stack || e).split('\n').slice(0, 4).join('\n       '));
-      try { await page.screenshot('FAIL-' + t.name.replace(/[^a-z0-9]+/gi, '-')); } catch { /* ignore */ }
+      try { await withTimeout(page.screenshot('FAIL-' + t.name.replace(/[^a-z0-9]+/gi, '-')), 10000, 'screenshot'); } catch { /* ignore */ }
     } finally {
       srv.offline = false;
-      for (const p of ctx.extra) await p.dispose();
-      await page.dispose();
+      for (const p of ctx.extra) await withTimeout(p.dispose(), 10000, 'dispose extra page').catch((e) => console.log('       ' + e.message));
+      await withTimeout(page.dispose(), 10000, 'dispose page').catch((e) => console.log('       ' + e.message));
     }
   }
 } finally {
