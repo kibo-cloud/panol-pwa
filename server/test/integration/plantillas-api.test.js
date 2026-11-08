@@ -177,6 +177,51 @@ describe('mover técnicos', () => {
     assert.equal(h.ranges.length, 3);
     assert.equal(h.current, 'noche');
   });
+
+  test('cambio definitivo durante una cobertura: cierra la cobertura y cancela la vuelta', async () => {
+    const t = await newTech('Cubre Dos', 'COB-2', 'tarde');
+    const from = addDays(today, -2);
+    const until = addDays(today, 5);
+    assert.equal((await api.call('admin', 'POST', `/api/techs/${t.id}/move`, { plantillaId: 'noche', from, until, reason: 'Cubre licencia' })).statusCode, 200);
+    // Otra cobertura mientras dura la primera: no.
+    const again = await api.call('admin', 'POST', `/api/techs/${t.id}/move`, { plantillaId: 'manana', from: today, until: addDays(today, 2), reason: 'x' });
+    assert.equal(again.statusCode, 422);
+    assert.equal(again.json().error, 'coverage_active');
+    assert.match(again.json().message, new RegExp(`cobertura temporal hasta el ${until}`));
+    // Antes del comienzo de la cobertura: no (no se reescribe lo anterior).
+    assert.equal((await api.call('admin', 'POST', `/api/techs/${t.id}/move`, { plantillaId: 'manana', from: addDays(from, -1), reason: 'x' })).json().error, 'move_before_last');
+    // Definitivo: la cobertura termina en la fecha del cambio y la vuelta a la base se anula.
+    const r = await api.call('supervisor', 'POST', `/api/techs/${t.id}/move`, { plantillaId: 'manana', from: today, reason: 'Se queda en mañana' });
+    assert.equal(r.statusCode, 200);
+    assert.deepEqual((await hist(t.id)).map((x) => [x.plantilla_id, x.f, x.t, x.temporary]), [
+      ['tarde', null, from, false], ['noche', from, today, true], ['manana', today, null, false], ['tarde', until, until, false],
+    ]);
+    const on = async (d) => (await api.q('SELECT plantilla_on($1, $2::date) AS p', [t.id, d]))[0].p;
+    assert.equal(await on(addDays(today, -1)), 'noche');
+    assert.equal(await on(today), 'manana');
+    assert.equal(await on(addDays(until, 1)), 'manana');
+    assert.equal((await state()).techs[t.id].plantillaId, 'manana');
+    const [a] = await api.q("SELECT detail FROM audit_log WHERE action = 'tech_move' AND entity_id = $1", [t.id]);
+    assert.match(a.detail, /Turno noche a Turno mañana desde .*termina la cobertura temporal y se cancela la vuelta a Turno tarde/);
+    // Terminada la cobertura (sin vuelta pendiente), una nueva cobertura sí se puede.
+    assert.equal((await api.call('admin', 'POST', `/api/techs/${t.id}/move`, { plantillaId: 'tarde', from: addDays(today, 1), until: addDays(today, 3), reason: 'Cubre' })).statusCode, 200);
+  });
+
+  test('cobertura programada: el cambio definitivo desde su comienzo la anula; sin cobertura activa el historial sigue cerrado', async () => {
+    const t = await newTech('Cubre Tres', 'COB-3', 'tarde');
+    const from = addDays(today, 3);
+    const until = addDays(today, 6);
+    assert.equal((await api.call('admin', 'POST', `/api/techs/${t.id}/move`, { plantillaId: 'noche', from, until, reason: 'Cubre' })).statusCode, 200);
+    // Un rango cerrado que no es una cobertura no se acorta.
+    const [base] = await hist(t.id);
+    await assert.rejects(api.q('UPDATE tech_plantilla_history SET valid_to = $2 WHERE id = $1', [base.id, today]), /solo agregar/);
+    const r = await api.call('admin', 'POST', `/api/techs/${t.id}/move`, { plantillaId: 'tarde', from, reason: 'Ya no cubre' });
+    assert.equal(r.statusCode, 200);
+    assert.deepEqual((await hist(t.id)).map((x) => [x.plantilla_id, x.f, x.t, x.temporary]), [
+      ['tarde', null, from, false], ['noche', from, from, true], ['tarde', until, until, false], ['tarde', from, null, false],
+    ].sort((x, y) => (x[1] ?? '').localeCompare(y[1] ?? '')));
+    assert.equal((await api.q('SELECT plantilla_on($1, $2::date) AS p', [t.id, addDays(from, 1)]))[0].p, 'tarde');
+  });
 });
 
 describe('rotación y supervisor', () => {

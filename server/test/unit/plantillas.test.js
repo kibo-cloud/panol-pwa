@@ -65,6 +65,24 @@ test('validaciones: fecha, motivo, destino distinto, hasta posterior, no antes d
   assert.throws(() => mv({ reason: 'x'.repeat(2001) }), /hasta 2000/);
 });
 
+test('cambio definitivo durante una cobertura: acorta la cobertura y anula la vuelta a la base', () => {
+  const h = [R('r1', 'manana', null, '2026-03-05'), R('r2', 'noche', '2026-03-05', '2026-03-12', { temporary: true }), R('r3', 'manana', '2026-03-12')];
+  const p = planMove(h, { techId: 'tA', targetId: 'tarde', from: '2026-03-08', reason: 'Se queda' }, { newId });
+  assert.deepEqual(p.shorten, { id: 'r2', validTo: '2026-03-08' });
+  assert.deepEqual(p.close, { id: 'r3', validTo: '2026-03-12' });
+  assert.deepEqual(p.inserts.map((r) => [r.plantillaId, r.validFrom, r.validTo, r.temporary]), [['tarde', '2026-03-08', null, false]]);
+  assert.equal(p.fromPlantillaId, 'noche');
+  assert.equal(p.cancelledReturn.plantillaId, 'manana');
+  // Volver antes a la base también es un cambio definitivo.
+  assert.equal(planMove(h, { techId: 'tA', targetId: 'manana', from: '2026-03-08', reason: 'Vuelve antes' }, { newId }).inserts[0].plantillaId, 'manana');
+  // Desde el comienzo de la cobertura la anula; antes no se puede.
+  assert.deepEqual(planMove(h, { techId: 'tA', targetId: 'tarde', from: '2026-03-05', reason: 'x' }, { newId }).shorten, { id: 'r2', validTo: '2026-03-05' });
+  assert.throws(() => planMove(h, { techId: 'tA', targetId: 'tarde', from: '2026-03-04', reason: 'x' }, { newId }), /no puede ser anterior al 2026-03-05/);
+  // Otra cobertura mientras dura la primera, no; después de que termina, sí.
+  assert.throws(() => planMove(h, { techId: 'tA', targetId: 'tarde', from: '2026-03-08', until: '2026-03-10', reason: 'x' }, { newId }), /cobertura temporal hasta el 2026-03-12/);
+  assert.equal(planMove(h, { techId: 'tA', targetId: 'tarde', from: '2026-03-12', until: '2026-03-15', reason: 'x' }, { newId }).shorten, null);
+});
+
 test('mover a un técnico sin plantilla abre su primer rango', () => {
   const p = planMove([], { techId: 'tA', targetId: 'tarde', from: '2026-03-05', reason: 'Alta en plantilla' }, { newId });
   assert.equal(p.close, null);

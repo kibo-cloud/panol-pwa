@@ -6,7 +6,7 @@ import * as repo from '../adapters/pg/catalog-repo.js';
 import * as prepo from '../adapters/pg/plantilla-repo.js';
 import { loadOverrides } from '../adapters/pg/auth-repo.js';
 import { DomainError, notFoundError } from '../domain/errors.js';
-import { planMove, planRotation, canRotate, cleanPlantillaName, cleanShiftLabels } from '../domain/plantillas.js';
+import { planMove, effectiveRange, planRotation, canRotate, cleanPlantillaName, cleanShiftLabels } from '../domain/plantillas.js';
 import { validDay } from '../domain/catalog.js';
 import { localDateISO } from '../domain/period.js';
 import { newId } from './ids.js';
@@ -155,10 +155,13 @@ export async function applyMove(c, actor, techId, input, { expectFrom = null, to
   const target = await activePlantilla(c, input.plantillaId, { lock: true, msg: 'Elegí la plantilla destino.' });
   const ranges = await prepo.loadHistory(c, { techIds: [techId] });
   if (expectFrom) {
-    const open = ranges.find((r) => r.validTo == null);
-    if (!open || open.plantillaId !== expectFrom) throw rule(`${tech.name} no está en esta plantilla.`, 'not_member');
+    // La plantilla en la que está hoy (durante una cobertura, la de la cobertura).
+    const here = effectiveRange(ranges, today) || ranges.find((r) => r.validTo == null);
+    if (!here || here.plantillaId !== expectFrom) throw rule(`${tech.name} no está en esta plantilla.`, 'not_member');
   }
   const plan = planMove(ranges, { techId, targetId: target.id, from: input.from || today, until: input.until ?? null, reason: input.reason }, { newId });
+  // Primero se acorta la cobertura y se anula la vuelta; después entra el rango nuevo.
+  if (plan.shorten) await prepo.shortenCoverage(c, plan.shorten.id, plan.shorten.validTo);
   if (plan.close) await prepo.closeRange(c, plan.close.id, plan.close.validTo);
   const inserted = [];
   for (const r of plan.inserts) inserted.push(await prepo.insertRange(c, r, { actorId: actor.id, demo: !!tech.demo }).catch(onOverlap));
@@ -168,7 +171,7 @@ export async function applyMove(c, actor, techId, input, { expectFrom = null, to
   const first = inserted[0];
   const detail = first.temporary
     ? `Cobertura temporal de ${tech.name}: ${fromName} a ${target.name} del ${first.validFrom} al ${first.validTo}. Motivo: ${first.reason}`
-    : `Cambio de plantilla de ${tech.name}: ${fromName} a ${target.name} desde ${first.validFrom}. Motivo: ${first.reason}`;
+    : `Cambio de plantilla de ${tech.name}: ${fromName} a ${target.name} desde ${first.validFrom}${plan.cancelledReturn ? ` (termina la cobertura temporal y se cancela la vuelta a ${await nameOf(c, plan.cancelledReturn.plantillaId)} del ${plan.cancelledReturn.from})` : ''}. Motivo: ${first.reason}`;
   await record(c, actor, { action: first.temporary ? 'tech_coverage' : 'tech_move', entity: 'techs', id: techId, version: touched.version, detail });
   return { tech: await withMembership(c, touched), ranges: inserted, fromPlantillaId: plan.fromPlantillaId, toPlantillaId: target.id, fromName, toName: target.name };
 }

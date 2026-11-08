@@ -58,6 +58,13 @@ export async function closeRange(q, id, validTo) {
   return rows[0] ? RANGE(rows[0]) : null;
 }
 
+// Acorta una cobertura temporal (migración 007): termina antes por un cambio definitivo.
+export async function shortenCoverage(q, id, validTo) {
+  const { rows } = await q.query('UPDATE tech_plantilla_history SET valid_to = $2 WHERE id = $1 AND temporary AND valid_to > $2 RETURNING *', [id, validTo]);
+  if (!rows[0]) throw new Error(`No se pudo acortar la cobertura ${id}`);
+  return RANGE(rows[0]);
+}
+
 // Rangos calculados por la función de la migración 005 a partir de cambios de turno de 2.1.
 export async function rangesFromChanges(q, currentPlantillaId, changes) {
   const { rows } = await q.query('SELECT * FROM plantilla_ranges_from_changes($1, $2::jsonb)', [currentPlantillaId, JSON.stringify(changes)]);
