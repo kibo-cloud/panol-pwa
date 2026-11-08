@@ -1,0 +1,12 @@
+# Datos reales de la empresa: nunca al repo (es público)
+privado/
+
+# Secretos
+.env
+.env.*
+!.env.example
+
+# Dependencias y salidas generadas
+node_modules/
+dist/
+tests/e2e/out/

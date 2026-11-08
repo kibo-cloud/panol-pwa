@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Reportes y estadísticas — escritorio</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#2447C8;text-decoration:none}a:hover{color:#1A3599}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 1200px; background: #F4F5F7; font-family: Inter, system-ui, sans-serif; color: #101828; font-variant-numeric: tabular-nums">
+
+<aside style="flex: 1 1 232px; max-width: 100%; box-sizing: border-box; background: #FFFFFF; border-right: 1px solid #E3E6EB; padding: 20px 14px; display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; align-items: center; gap: 10px; padding: 0 8px">
+<span style="width: 36px; height: 36px; border-radius: 10px; background: #101828; color: #FFFFFF; display: flex; align-items: center; justify-content: center">
+<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg></span>
+<span style="display: flex; flex-direction: column"><span style="font-size: 16px; font-weight: 700">Pañol</span><span style="font-size: 12px; color: #5D6676">Control de herramientas</span></span>
+</div>
+<nav aria-label="Secciones" style="display: flex; flex-direction: column; gap: 2px">
+<sc-for list="{{nav}}" as="n" hint-placeholder-count="10">
+<a href="{{n.href}}" style="display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 10px; border-radius: 10px; font-size: 14px; font-weight: {{n.weight}}; color: {{n.fg}}; background: {{n.bg}}">
+<span style="width: 6px; height: 6px; border-radius: 50%; background: {{n.dot}}"></span>{{n.label}}<span style="margin-left: auto; font-size: 12px; font-weight: 600; color: #B42318">{{n.badge}}</span></a>
+</sc-for>
+</nav>
+<div style="margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 12px; background: #F4F5F7">
+<span style="width: 32px; height: 32px; border-radius: 50%; background: #EEF1FB; color: #2447C8; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center">LG</span>
+<span style="display: flex; flex-direction: column"><span style="font-size: 13px; font-weight: 600">Laura Gómez</span><span style="font-size: 12px; color: #5D6676">Administradora</span></span>
+</div>
+</aside>
+
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 20px 32px; background: #FFFFFF; border-bottom: 1px solid #E3E6EB">
+<div style="flex: 1 1 260px; display: flex; flex-direction: column; gap: 2px">
+<h1 style="margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em">Reportes y estadísticas</h1>
+<span style="font-size: 13px; color: #5D6676">Calculados con los controles y movimientos registrados</span>
+</div>
+<button style="height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid #D0D5DD; background: #FFFFFF; font: inherit; font-size: 14px; font-weight: 600; color: #101828; display: flex; align-items: center; gap: 8px; cursor: pointer">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16"></path></svg>Excel</button>
+<button style="height: 40px; padding: 0 14px; border-radius: 10px; border: 0; background: #2447C8; color: #FFFFFF; font: inherit; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; cursor: pointer">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16"></path></svg>Exportar PDF</button>
+</header>
+
+<div style="padding: 24px 32px 40px; display: flex; flex-direction: column; gap: 20px">
+
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center">
+<div role="tablist" aria-label="Tipo de reporte" style="display: flex; background: #E6E8EC; border-radius: 12px; padding: 4px; gap: 4px">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="3">
+<button role="tab" aria-selected="{{t.on}}" onClick="{{t.pick}}" style="height: 36px; padding: 0 16px; border-radius: 9px; border: 0; background: {{t.bg}}; color: {{t.fg}}; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer">{{t.label}}</button>
+</sc-for>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto">
+<sc-for list="{{filters}}" as="f" hint-placeholder-count="4">
+<button style="height: 40px; padding: 0 12px; border-radius: 10px; border: 1px solid #D0D5DD; background: #FFFFFF; font: inherit; font-size: 13px; color: #344054; display: flex; align-items: center; gap: 6px; cursor: pointer"><span style="color: #5D6676">{{f.k}}:</span><span style="font-weight: 600">{{f.v}}</span>
+<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg></button>
+</sc-for>
+</div>
+</div>
+
+<section aria-label="Resumen del período" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px">
+<sc-for list="{{kpis}}" as="k" hint-placeholder-count="5">
+<div style="background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 13px; color: #5D6676">{{k.label}}</span>
+<span style="font-size: 26px; font-weight: 700; letter-spacing: -0.02em">{{k.value}}</span>
+<span style="font-size: 12px; font-weight: 600; color: {{k.dfg}}">{{k.delta}}</span>
+</div>
+</sc-for>
+</section>
+
+<sc-if value="{{isShift}}" hint-placeholder-val="{{true}}">
+<div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+<section style="flex: 2 1 520px; min-width: 0; background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-size: 16px; font-weight: 600">Comparación entre turnos · octubre 2026</h2>
+<div style="overflow-x: auto">
+<table style="width: 100%; min-width: 560px; border-collapse: collapse; font-size: 14px">
+<thead><tr style="text-align: right; color: #5D6676; font-size: 12px">
+<th style="text-align: left; padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Turno</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Técnicos</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Herramientas</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Para cambio</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Faltantes</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Controles</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Pendientes</th>
+</tr></thead>
+<tbody>
+<sc-for list="{{shiftRows}}" as="s" hint-placeholder-count="3">
+<tr style="text-align: right; font-weight: {{s.w}}">
+<td style="text-align: left; padding: 12px 8px; border-bottom: 1px solid #EEF0F3">{{s.name}}</td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3">{{s.techs}}</td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3">{{s.tools}}</td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3; color: #A8410A">{{s.o}}</td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3; color: #B42318">{{s.r}}</td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3">{{s.done}}</td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3">{{s.pend}}</td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+</section>
+<section style="flex: 1 1 320px; min-width: 0; background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; font-size: 16px; font-weight: 600">Herramientas en condiciones</h2>
+<sc-for list="{{shiftBars}}" as="b" hint-placeholder-count="3">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<span style="display: flex; justify-content: space-between; font-size: 13px"><span style="font-weight: 600">{{b.name}}</span><span>{{b.pct}}</span></span>
+<span style="height: 12px; border-radius: 999px; background: #EEF0F3; overflow: hidden; display: block"><span style="display: block; height: 100%; width: {{b.w}}; background: #22A559; border-radius: 999px"></span></span>
+</div>
+</sc-for>
+<span style="font-size: 12px; color: #5D6676">Escala desde 80 % para resaltar diferencias.</span>
+</section>
+</div>
+</sc-if>
+
+<sc-if value="{{isPeriod}}" hint-placeholder-val="{{false}}">
+<section style="background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: baseline">
+<h2 style="margin: 0; font-size: 16px; font-weight: 600">Evolución mensual · junio a noviembre 2026</h2>
+<span style="font-size: 12px; color: #5D6676">Noviembre en curso (semana 1)</span>
+</div>
+<div style="overflow-x: auto">
+<table style="width: 100%; min-width: 620px; border-collapse: collapse; font-size: 14px">
+<thead><tr style="text-align: right; color: #5D6676; font-size: 12px">
+<th style="text-align: left; padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Mes</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Controles</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Para cambio</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Faltantes</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Reposiciones</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Recuperadas</th>
+<th style="text-align: left; padding: 10px 8px 10px 16px; font-weight: 600; border-bottom: 1px solid #E3E6EB; width: 30%">Faltantes</th>
+</tr></thead>
+<tbody>
+<sc-for list="{{months}}" as="m" hint-placeholder-count="6">
+<tr style="text-align: right">
+<td style="text-align: left; padding: 12px 8px; border-bottom: 1px solid #EEF0F3; font-weight: 600">{{m.m}}</td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3">{{m.c}}</td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3; color: #A8410A">{{m.o}}</td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3; color: #B42318">{{m.r}}</td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3">{{m.rep}}</td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3">{{m.rec}}</td>
+<td style="text-align: left; padding: 12px 8px 12px 16px; border-bottom: 1px solid #EEF0F3"><span style="display: block; height: 10px; border-radius: 999px; width: {{m.w}}; background: #B42318"></span></td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+</section>
+</sc-if>
+
+<sc-if value="{{isTech}}" hint-placeholder-val="{{false}}">
+<section style="background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-size: 16px; font-weight: 600">Por técnico · octubre 2026</h2>
+<div style="overflow-x: auto">
+<table style="width: 100%; min-width: 720px; border-collapse: collapse; font-size: 14px">
+<thead><tr style="text-align: right; color: #5D6676; font-size: 12px">
+<th style="text-align: left; padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Técnico</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Asignadas</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Bueno</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Cambio</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Faltante</th>
+<th style="text-align: left; padding: 10px 8px 10px 16px; font-weight: 600; border-bottom: 1px solid #E3E6EB">En condiciones</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Controles</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Reposiciones</th>
+</tr></thead>
+<tbody>
+<sc-for list="{{techRows}}" as="t" hint-placeholder-count="7">
+<tr style="text-align: right">
+<td style="text-align: left; padding: 12px 8px; border-bottom: 1px solid #EEF0F3"><span style="display: flex; flex-direction: column"><span style="font-weight: 600">{{t.name}}</span><span style="font-size: 12px; color: #5D6676">{{t.shift}}</span></span></td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3">{{t.a}}</td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3; color: #12703A">{{t.g}}</td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3; color: #A8410A">{{t.o}}</td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3; color: #B42318">{{t.r}}</td>
+<td style="text-align: left; padding: 12px 8px 12px 16px; border-bottom: 1px solid #EEF0F3"><span style="display: flex; align-items: center; gap: 8px"><span style="flex: 1; max-width: 140px; height: 8px; border-radius: 999px; background: #EEF0F3; overflow: hidden; display: block"><span style="display: block; height: 100%; width: {{t.pct}}; background: #22A559"></span></span><span style="font-size: 13px; font-weight: 600">{{t.pct}}</span></span></td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3">{{t.c}}</td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3">{{t.rep}}</td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+</section>
+</sc-if>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { tab: 'shift' }; }
+  renderVals() {
+    const labels = ['Dashboard', 'Técnicos', 'Turnos', 'Control de herramientas', 'Entrega y reposición', 'Inventario general', 'Historial de controles', 'Reportes y estadísticas', 'Configuración de herramientas', 'Administración'];
+    const files = ['Escritorio', 'Tecnicos', 'Tecnicos', 'Control', 'Reposicion', 'Inventario', 'Historial', 'Reportes', 'Configuracion', 'Administracion'];
+    const act = 7;
+    const nav = labels.map((label, i) => ({ label, href: files[i] + '.dc.html', badge: i === 3 ? '24' : '',
+      bg: i === act ? '#EEF1FB' : 'transparent', fg: i === act ? '#2447C8' : '#344054', weight: i === act ? '600' : '500', dot: i === act ? '#2447C8' : '#C3C8D1' }));
+    const tab = this.state.tab;
+    const tabs = [['tech', 'Por técnico'], ['shift', 'Por turno'], ['period', 'Por período']].map(([k, label]) => {
+      const on = tab === k;
+      return { label, on: on ? 'true' : 'false', pick: () => this.setState({ tab: k }), bg: on ? '#FFFFFF' : 'transparent', fg: on ? '#101828' : '#4A5261' };
+    });
+    const filters = [{ k: 'Período', v: 'Octubre 2026' }, { k: 'Turno', v: 'Todos' }, { k: 'Técnico', v: 'Todos' }, { k: 'Herramienta', v: 'Todas' }];
+    const up = '#B42318', down = '#12703A', neu = '#5D6676';
+    const kpis = [
+      { label: 'En condiciones', value: '92,9 %', delta: '+0,4 pts vs. septiembre', dfg: down },
+      { label: 'Controles realizados', value: '161/168', delta: '96 % de cumplimiento', dfg: neu },
+      { label: 'Para cambio', value: '54', delta: '−1 vs. septiembre', dfg: down },
+      { label: 'Faltantes', value: '36', delta: 'igual que septiembre', dfg: neu },
+      { label: 'Reposiciones', value: '9', delta: '5 herramientas recuperadas', dfg: neu }
+    ];
+    const shiftRows = [
+      { name: 'Mañana', techs: 16, tools: 492, o: 21, r: 12, done: 62, pend: 2, w: '400' },
+      { name: 'Tarde', techs: 14, tools: 431, o: 17, r: 10, done: 55, pend: 1, w: '400' },
+      { name: 'Noche', techs: 12, tools: 361, o: 16, r: 14, done: 44, pend: 4, w: '400' },
+      { name: 'Total', techs: 42, tools: 1284, o: 54, r: 36, done: 161, pend: 7, w: '700' }
+    ].map((s) => ({ ...s, tools: s.tools.toLocaleString('es-AR') }));
+    const shiftBars = [['Mañana', 93.3], ['Tarde', 93.7], ['Noche', 91.7]].map(([name, p]) => ({ name, pct: String(p).replace('.', ',') + ' %', w: ((p - 80) / 20 * 100) + '%' }));
+    const months = [['Junio', 166, 48, 41, 7, 3], ['Julio', 168, 52, 38, 8, 6], ['Agosto', 162, 57, 40, 11, 4], ['Septiembre', 165, 55, 36, 10, 5], ['Octubre', 161, 54, 36, 9, 5], ['Noviembre', 18, 61, 32, 6, 1]]
+      .map(([m, c, o, r, rep, rec]) => ({ m, c, o, r, rep, rec, w: Math.round(r / 41 * 100) + '%' }));
+    const techRows = [
+      ['Lucas Benítez', 'Tarde', 14, 14, 0, 0, 4, 0], ['Sofía Herrera', 'Mañana', 12, 11, 1, 0, 4, 1],
+      ['Diego Sosa', 'Mañana', 10, 8, 1, 1, 3, 1], ['Agustina Peralta', 'Tarde', 10, 8, 2, 0, 4, 0],
+      ['Federico Lagos', 'Noche', 15, 11, 1, 3, 4, 2], ['Tomás Villalba', 'Noche', 12, 10, 1, 1, 3, 0], ['Martín Ríos', 'Mañana', 9, 6, 2, 1, 4, 1]
+    ].map(([name, shift, a, g, o, r, c, rep]) => ({ name, shift, a, g, o, r, c: c + '/4', rep, pct: Math.round(g / a * 100) + '%' }));
+    return { nav, tabs, filters, kpis, shiftRows, shiftBars, months, techRows,
+      isShift: tab === 'shift', isPeriod: tab === 'period', isTech: tab === 'tech' };
+  }
+}
+</script>
+</body>
+</html>

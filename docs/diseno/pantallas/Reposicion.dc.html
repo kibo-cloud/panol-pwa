@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Entrega y reposición — móvil</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#2447C8;text-decoration:none}a:hover{color:#1A3599}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; background: #F4F5F7; font-family: Inter, system-ui, sans-serif; color: #101828; font-variant-numeric: tabular-nums; overflow: hidden">
+
+<header style="display: flex; align-items: center; gap: 8px; padding: 16px 16px 12px; background: #FFFFFF; border-bottom: 1px solid #E3E6EB">
+<a href="Main.dc.html" aria-label="Cerrar" style="width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: #101828; margin-left: -8px">
+<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg></a>
+<h1 style="flex: 1; margin: 0; font-size: 18px; font-weight: 700">Nuevo movimiento</h1>
+</header>
+
+<main style="flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 18px">
+
+<fieldset style="border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px">
+<legend style="font-size: 13px; font-weight: 600; color: #344054; padding: 0; margin-bottom: 8px">Tipo de movimiento</legend>
+<div style="display: flex; flex-wrap: wrap; gap: 6px">
+<sc-for list="{{types}}" as="t" hint-placeholder-count="5">
+<button aria-pressed="{{t.on}}" onClick="{{t.pick}}" style="height: 40px; padding: 0 14px; border-radius: 999px; border: 1.5px solid {{t.border}}; background: {{t.bg}}; color: {{t.fg}}; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer">{{t.label}}</button>
+</sc-for>
+</div>
+<span style="font-size: 12px; color: #5D6676">{{typeHelp}}</span>
+</fieldset>
+
+<div style="display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 13px; font-weight: 600; color: #344054">Técnico</span>
+<button style="display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; border: 1px solid #D0D5DD; background: #FFFFFF; font: inherit; color: #101828; text-align: left; cursor: pointer">
+<span style="width: 36px; height: 36px; border-radius: 50%; background: #EEF1FB; color: #2447C8; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px">MR</span>
+<span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 15px; font-weight: 600">Martín Ríos</span><span style="font-size: 12px; color: #5D6676">Leg. 1042 · Turno mañana</span></span>
+<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5D6676" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>
+</button>
+</div>
+
+<sc-if value="{{isReplace}}" hint-placeholder-val="{{true}}">
+<div style="display: flex; flex-direction: column; gap: 14px; background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 16px; padding: 14px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 12px; font-weight: 600; color: #5D6676; text-transform: uppercase; letter-spacing: 0.04em">Sale</span>
+<div style="display: flex; align-items: center; gap: 10px">
+<span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 15px; font-weight: 600">Taladro percutor 13 mm</span><span style="font-size: 12px; color: #5D6676">HT-0142 · marcado en control del 30 oct</span></span>
+<span style="font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: #FFF0E0; color: #A8410A">Para cambio</span>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 13px; font-weight: 600; color: #344054">¿Devolvió la herramienta dañada?</span>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px">
+<sc-for list="{{returned}}" as="r" hint-placeholder-count="2">
+<button aria-pressed="{{r.on}}" onClick="{{r.pick}}" style="height: 44px; border-radius: 12px; border: 1.5px solid {{r.border}}; background: {{r.bg}}; color: {{r.fg}}; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">{{r.label}}</button>
+</sc-for>
+</div>
+<sc-if value="{{notReturned}}" hint-placeholder-val="{{false}}">
+<span style="font-size: 12px; color: #A8410A; font-weight: 500">Se creará una alerta de devolución pendiente.</span>
+</sc-if>
+</div>
+<div style="height: 1px; background: #EEF0F3"></div>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="nueva" style="font-size: 12px; font-weight: 600; color: #5D6676; text-transform: uppercase; letter-spacing: 0.04em">Entra · código de la unidad nueva</label>
+<div style="display: flex; gap: 8px">
+<input id="nueva" value="HT-1187" style="flex: 1; min-width: 0; height: 48px; box-sizing: border-box; border-radius: 12px; border: 1px solid #D0D5DD; padding: 0 12px; font: inherit; font-size: 15px; font-weight: 600; color: #101828">
+</div>
+<span style="font-size: 12px; color: #12703A; font-weight: 500">Disponible en pañol central · Taladro percutor 13 mm</span>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{notReplace}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="herr" style="font-size: 13px; font-weight: 600; color: #344054">Herramienta</label>
+<div style="display: flex; gap: 8px">
+<input id="herr" placeholder="Buscar por nombre o código" style="flex: 1; min-width: 0; height: 48px; box-sizing: border-box; border-radius: 12px; border: 1px solid #D0D5DD; padding: 0 12px; font: inherit; font-size: 15px; color: #101828">
+</div>
+</div>
+</sc-if>
+
+<div style="display: flex; align-items: center; justify-content: space-between">
+<span style="font-size: 13px; font-weight: 600; color: #344054">Cantidad</span>
+<div style="display: flex; align-items: center; border: 1px solid #D0D5DD; border-radius: 12px; background: #FFFFFF">
+<button onClick="{{dec}}" aria-label="Restar uno" style="width: 44px; height: 44px; border: 0; background: transparent; font: inherit; font-size: 20px; color: #101828; cursor: pointer">−</button>
+<span aria-live="polite" style="min-width: 32px; text-align: center; font-size: 16px; font-weight: 700">{{qty}}</span>
+<button onClick="{{inc}}" aria-label="Sumar uno" style="width: 44px; height: 44px; border: 0; background: transparent; font: inherit; font-size: 20px; color: #101828; cursor: pointer">+</button>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="obs" style="font-size: 13px; font-weight: 600; color: #344054">Observaciones <span style="font-weight: 400; color: #5D6676">(opcional)</span></label>
+<textarea id="obs" rows="2" placeholder="Ej.: se entrega con maletín y 2 baterías" style="border-radius: 12px; border: 1px solid #D0D5DD; padding: 10px 12px; font: inherit; font-size: 14px; color: #101828; resize: none"></textarea>
+</div>
+
+<div style="display: flex; gap: 10px; align-items: flex-start; padding: 12px; border-radius: 12px; background: #EEF1FB; color: #1E3A9E; font-size: 12px; line-height: 1.5">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 1px"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"></path><path d="M3 3v5h5M12 7v5l3 2"></path></svg>
+<span>Se registra con fecha, hora y responsable (Laura Gómez). {{traceText}}</span>
+</div>
+</main>
+
+<footer style="padding: 12px 16px 24px; background: #FFFFFF; border-top: 1px solid #E3E6EB">
+<button style="width: 100%; height: 52px; border-radius: 14px; border: 0; background: #2447C8; color: #FFFFFF; font: inherit; font-size: 15px; font-weight: 700; cursor: pointer">{{cta}}</button>
+</footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { type: 'rep', ret: 'si', qty: 1 }; }
+  renderVals() {
+    const T = [
+      ['ini', 'Entrega inicial', 'Primera vez que el técnico recibe esta herramienta.', 'Registrar entrega inicial'],
+      ['rep', 'Reposición', 'Recibe una nueva a cambio de una dañada o faltante.', 'Registrar reposición'],
+      ['add', 'Adicional', 'Suma una unidad más a su asignación.', 'Registrar entrega adicional'],
+      ['dev', 'Devolución', 'Devuelve una herramienta asignada al pañol.', 'Registrar devolución'],
+      ['ret', 'Retiro', 'Se quita de su asignación (baja, traslado, etc.).', 'Registrar retiro']
+    ];
+    const cur = T.find((t) => t[0] === this.state.type);
+    const types = T.map(([k, label]) => {
+      const on = this.state.type === k;
+      return { label, on: on ? 'true' : 'false', pick: () => this.setState({ type: k }),
+        bg: on ? '#101828' : '#FFFFFF', fg: on ? '#FFFFFF' : '#344054', border: on ? '#101828' : '#D0D5DD' };
+    });
+    const returned = [['si', 'Sí, la devolvió'], ['no', 'No todavía']].map(([k, label]) => {
+      const on = this.state.ret === k;
+      return { label, on: on ? 'true' : 'false', pick: () => this.setState({ ret: k }),
+        bg: on ? '#EEF1FB' : '#FFFFFF', fg: on ? '#2447C8' : '#344054', border: on ? '#2447C8' : '#D0D5DD' };
+    });
+    const isReplace = this.state.type === 'rep';
+    return {
+      types, returned, isReplace, notReplace: !isReplace,
+      notReturned: isReplace && this.state.ret === 'no',
+      typeHelp: cur[2], cta: cur[3], qty: this.state.qty,
+      traceText: isReplace ? 'HT-0142 conserva su historial y queda vinculada a HT-1187.' : 'El inventario y la asignación se actualizan al confirmar.',
+      inc: () => this.setState({ qty: this.state.qty + 1 }),
+      dec: () => this.setState({ qty: Math.max(1, this.state.qty - 1) })
+    };
+  }
+}
+</script>
+</body>
+</html>

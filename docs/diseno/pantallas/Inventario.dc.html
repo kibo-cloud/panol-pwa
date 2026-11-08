@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Inventario general — escritorio</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#2447C8;text-decoration:none}a:hover{color:#1A3599}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 980px; background: #F4F5F7; font-family: Inter, system-ui, sans-serif; color: #101828; font-variant-numeric: tabular-nums">
+
+<aside style="flex: 1 1 232px; max-width: 100%; box-sizing: border-box; background: #FFFFFF; border-right: 1px solid #E3E6EB; padding: 20px 14px; display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; align-items: center; gap: 10px; padding: 0 8px">
+<span style="width: 36px; height: 36px; border-radius: 10px; background: #101828; color: #FFFFFF; display: flex; align-items: center; justify-content: center">
+<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg></span>
+<span style="display: flex; flex-direction: column"><span style="font-size: 16px; font-weight: 700">Pañol</span><span style="font-size: 12px; color: #5D6676">Control de herramientas</span></span>
+</div>
+<nav aria-label="Secciones" style="display: flex; flex-direction: column; gap: 2px">
+<sc-for list="{{nav}}" as="n" hint-placeholder-count="10">
+<a href="{{n.href}}" style="display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 10px; border-radius: 10px; font-size: 14px; font-weight: {{n.weight}}; color: {{n.fg}}; background: {{n.bg}}">
+<span style="width: 6px; height: 6px; border-radius: 50%; background: {{n.dot}}"></span>{{n.label}}<span style="margin-left: auto; font-size: 12px; font-weight: 600; color: #B42318">{{n.badge}}</span></a>
+</sc-for>
+</nav>
+<div style="margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 12px; background: #F4F5F7">
+<span style="width: 32px; height: 32px; border-radius: 50%; background: #EEF1FB; color: #2447C8; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center">LG</span>
+<span style="display: flex; flex-direction: column"><span style="font-size: 13px; font-weight: 600">Laura Gómez</span><span style="font-size: 12px; color: #5D6676">Administradora</span></span>
+</div>
+</aside>
+
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 20px 32px; background: #FFFFFF; border-bottom: 1px solid #E3E6EB">
+<div style="flex: 1 1 260px; display: flex; flex-direction: column; gap: 2px">
+<h1 style="margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em">Inventario general</h1>
+<span style="font-size: 13px; color: #5D6676">Cada unidad física con código único e historial completo</span>
+</div>
+<button style="height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid #D0D5DD; background: #FFFFFF; font: inherit; font-size: 14px; font-weight: 600; color: #101828; display: flex; align-items: center; gap: 8px; cursor: pointer">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16"></path></svg>Excel</button>
+<button style="height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid #D0D5DD; background: #FFFFFF; font: inherit; font-size: 14px; font-weight: 600; color: #101828; display: flex; align-items: center; gap: 8px; cursor: pointer">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16"></path></svg>PDF</button>
+<button style="height: 40px; padding: 0 14px; border-radius: 10px; border: 0; background: #2447C8; color: #FFFFFF; font: inherit; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; cursor: pointer">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>Nueva herramienta</button>
+</header>
+
+<div style="padding: 24px 32px 40px; display: flex; flex-direction: column; gap: 20px">
+
+<section aria-label="Resumen de inventario" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px">
+<sc-for list="{{summary}}" as="s" hint-placeholder-count="6">
+<div style="background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 14px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 13px; color: #5D6676">{{s.label}}</span>
+<span style="font-size: 24px; font-weight: 700">{{s.value}}</span>
+<span style="height: 4px; border-radius: 999px; background: #EEF0F3; overflow: hidden; display: block"><span style="display: block; height: 100%; width: {{s.pct}}; background: {{s.bar}}"></span></span>
+</div>
+</sc-for>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+<section style="flex: 3 1 600px; min-width: 0; background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 16px; display: flex; flex-direction: column">
+<div style="display: flex; flex-wrap: wrap; gap: 8px; padding: 16px; border-bottom: 1px solid #E3E6EB">
+<label style="flex: 1 1 240px; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; border-radius: 10px; border: 1px solid #D0D5DD; color: #5D6676">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+<input type="search" aria-label="Buscar en inventario" placeholder="Nombre, categoría o código (HT-…)" style="flex: 1; min-width: 0; border: 0; outline: none; font: inherit; font-size: 14px; color: #101828; background: transparent">
+</label>
+<sc-for list="{{filters}}" as="f" hint-placeholder-count="3">
+<button style="height: 40px; padding: 0 12px; border-radius: 10px; border: 1px solid #D0D5DD; background: #FFFFFF; font: inherit; font-size: 13px; color: #344054; display: flex; align-items: center; gap: 6px; cursor: pointer"><span style="color: #5D6676">{{f.k}}:</span><span style="font-weight: 600">{{f.v}}</span>
+<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg></button>
+</sc-for>
+</div>
+<div style="overflow-x: auto">
+<table style="width: 100%; min-width: 760px; border-collapse: collapse; font-size: 14px">
+<thead>
+<tr style="text-align: left; color: #5D6676; font-size: 12px; background: #F9FAFB">
+<th style="padding: 10px 16px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Código</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Herramienta</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Asignada a</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Último control</th>
+<th style="padding: 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Situación</th>
+<th style="padding: 10px 16px 10px 8px; font-weight: 600; border-bottom: 1px solid #E3E6EB">Último movimiento</th>
+</tr>
+</thead>
+<tbody>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="10">
+<tr style="background: {{r.rowBg}}">
+<td style="padding: 12px 16px; border-bottom: 1px solid #EEF0F3; font-weight: 600; font-size: 13px">{{r.code}}</td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3"><span style="display: flex; flex-direction: column"><span style="font-weight: 500">{{r.name}}</span><span style="font-size: 12px; color: #5D6676">{{r.cat}}</span></span></td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3"><span style="display: flex; flex-direction: column"><span>{{r.who}}</span><span style="font-size: 12px; color: #5D6676">{{r.shift}}</span></span></td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3"><span style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: {{r.sbg}}; color: {{r.sfg}}; white-space: nowrap"><span style="width: 7px; height: 7px; border-radius: 50%; background: {{r.sdot}}"></span>{{r.state}}</span></td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #EEF0F3; font-size: 13px">{{r.inv}}</td>
+<td style="padding: 12px 16px 12px 8px; border-bottom: 1px solid #EEF0F3; font-size: 13px; color: #5D6676">{{r.move}}</td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+<div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; font-size: 13px; color: #5D6676">
+<span>Mostrando 1–10 de 1.412</span>
+<span style="display: flex; gap: 6px">
+<button aria-label="Página anterior" style="width: 34px; height: 34px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; cursor: pointer">‹</button>
+<button aria-label="Página siguiente" style="width: 34px; height: 34px; border-radius: 8px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; cursor: pointer">›</button>
+</span>
+</div>
+</section>
+
+<aside aria-label="Ficha de la unidad HT-0142" style="flex: 1 1 300px; min-width: 0; background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 12px; font-weight: 600; color: #5D6676">HT-0142 · Eléctricas</span>
+<h2 style="margin: 0; font-size: 18px; font-weight: 700">Taladro percutor 13 mm</h2>
+</div>
+</div>
+<dl style="margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; font-size: 13px">
+<dt style="color: #5D6676">Asignada a</dt><dd style="margin: 0; font-weight: 500">Martín Ríos · Mañana</dd>
+<dt style="color: #5D6676">Estado</dt><dd style="margin: 0; font-weight: 600; color: #A8410A">Para cambio · 3 controles</dd>
+<dt style="color: #5D6676">Alta</dt><dd style="margin: 0; font-weight: 500">12 mar 2021</dd>
+</dl>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h3 style="margin: 0 0 6px; font-size: 13px; font-weight: 600; color: #344054">Historial</h3>
+<ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column">
+<sc-for list="{{history}}" as="h" hint-placeholder-count="5">
+<li style="display: flex; gap: 12px">
+<span style="display: flex; flex-direction: column; align-items: center"><span style="width: 10px; height: 10px; border-radius: 50%; background: {{h.dot}}; margin-top: 4px"></span><span style="flex: 1; width: 2px; background: #EEF0F3"></span></span>
+<span style="display: flex; flex-direction: column; gap: 2px; padding-bottom: 14px"><span style="font-size: 13px; font-weight: 600">{{h.title}}</span><span style="font-size: 12px; color: #5D6676">{{h.meta}}</span></span>
+</li>
+</sc-for>
+</ol>
+</div>
+<a href="Reposicion.dc.html" style="height: 44px; border-radius: 12px; background: #101828; color: #FFFFFF; font-size: 14px; font-weight: 600; display: flex; align-items: center; justify-content: center">Registrar reposición</a>
+</aside>
+</div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":980}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const nav = ['Dashboard', 'Técnicos', 'Turnos', 'Control de herramientas', 'Entrega y reposición', 'Inventario general', 'Historial de controles', 'Reportes y estadísticas', 'Configuración de herramientas', 'Administración']
+      .map((label, i) => ({ label, href: ['Escritorio', 'Tecnicos', 'Tecnicos', 'Control', 'Reposicion', 'Inventario', 'Historial', 'Reportes', 'Configuracion', 'Administracion'][i] + '.dc.html',
+        badge: i === 3 ? '24' : '', bg: i === 5 ? '#EEF1FB' : 'transparent', fg: i === 5 ? '#2447C8' : '#344054',
+        weight: i === 5 ? '600' : '500', dot: i === 5 ? '#2447C8' : '#C3C8D1' }));
+    const total = 1412;
+    const summary = [
+      ['Total registradas', 1412, '#101828'], ['Asignadas', 1284, '#2447C8'], ['Disponibles', 74, '#22A559'],
+      ['En reparación', 31, '#F08A24'], ['Retiradas', 15, '#98A1B0'], ['Dadas de baja', 8, '#B42318']
+    ].map(([label, v, bar]) => ({ label, value: v.toLocaleString('es-AR'), bar, pct: Math.max(2, Math.round(v / total * 100)) + '%' }));
+    const filters = [{ k: 'Categoría', v: 'Todas' }, { k: 'Situación', v: 'Todas' }, { k: 'Turno', v: 'Todos' }];
+    const S = {
+      good: { state: 'Buen estado', sbg: '#E3F5E9', sfg: '#12703A', sdot: '#22A559' },
+      change: { state: 'Para cambio', sbg: '#FFF0E0', sfg: '#A8410A', sdot: '#F08A24' },
+      missing: { state: 'Faltante', sbg: '#FDE8E7', sfg: '#B42318', sdot: '#D92D20' },
+      none: { state: 'Sin control', sbg: '#EEF0F3', sfg: '#4A5261', sdot: '#98A1B0' }
+    };
+    const rows = [
+      ['HT-0142', 'Taladro percutor 13 mm', 'Eléctricas', 'Martín Ríos', 'Mañana', 'change', 'Asignada', 'Control · 30 oct'],
+      ['HT-0217', 'Multímetro digital', 'Medición', 'Sofía Herrera', 'Mañana', 'change', 'En reparación', 'Reposición · hoy'],
+      ['HT-0931', 'Multímetro digital', 'Medición', 'Sofía Herrera', 'Mañana', 'none', 'Asignada', 'Reposición · hoy'],
+      ['HT-0389', 'Llave ajustable 10″', 'Manuales', 'Martín Ríos', 'Mañana', 'good', 'Asignada', 'Control · 30 oct'],
+      ['HT-0610', 'Pinza universal 8″', 'Manuales', 'Martín Ríos', 'Mañana', 'missing', 'Asignada', 'Control · 30 oct'],
+      ['HT-0503', 'Pinza amperométrica', 'Medición', 'Federico Lagos', 'Noche', 'missing', 'Asignada', 'Control · 5 nov'],
+      ['HT-0377', 'Llave ajustable 10″', 'Manuales', 'Diego Sosa', 'Mañana', 'change', 'Devolución pendiente', 'Reposición · 30 oct'],
+      ['HT-1187', 'Taladro percutor 13 mm', 'Eléctricas', '—', 'Pañol central', 'none', 'Disponible', 'Alta · 2 nov'],
+      ['HT-0722', 'Cinta métrica 5 m', 'Medición', 'Lucas Benítez', 'Tarde', 'good', 'Asignada', 'Control · hoy'],
+      ['HT-0088', 'Amoladora 115 mm', 'Eléctricas', '—', '—', 'none', 'Dada de baja', 'Baja · 18 sep']
+    ].map(([code, name, cat, who, shift, s, inv, move]) => ({ code, name, cat, who, shift, inv, move, ...S[s], rowBg: code === 'HT-0142' ? '#F5F7FE' : '#FFFFFF' }));
+    const history = [
+      { title: 'Control · Para cambio', meta: '30 oct 2026 · “Mandril con juego” · L. Gómez', dot: '#F08A24' },
+      { title: 'Control · Para cambio', meta: '16 oct 2026 · R. Paz', dot: '#F08A24' },
+      { title: 'Control · Para cambio', meta: '9 oct 2026 · “Ruido en el motor” · L. Gómez', dot: '#F08A24' },
+      { title: 'Cambio de turno del titular', meta: '2 sep 2026 · Noche → Mañana · sin cambios en la asignación', dot: '#2447C8' },
+      { title: 'Entrega inicial a Martín Ríos', meta: '12 mar 2021 · Pañol central', dot: '#98A1B0' }
+    ];
+    return { nav, summary, filters, rows, history };
+  }
+}
+</script>
+</body>
+</html>

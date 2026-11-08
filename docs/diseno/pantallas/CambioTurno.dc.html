@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Cambio de turno — móvil</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#2447C8;text-decoration:none}a:hover{color:#1A3599}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; background: #F4F5F7; font-family: Inter, system-ui, sans-serif; color: #101828; overflow: hidden">
+
+<header style="display: flex; align-items: center; gap: 8px; padding: 16px 16px 12px; background: #FFFFFF; border-bottom: 1px solid #E3E6EB">
+<a href="Tecnico.dc.html" aria-label="Volver a la ficha" style="width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: #101828; margin-left: -8px">
+<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg></a>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 2px">
+<h1 style="margin: 0; font-size: 18px; font-weight: 700">Cambiar turno</h1>
+<span style="font-size: 13px; color: #5D6676">Martín Ríos · Leg. 1042</span>
+</div>
+</header>
+
+<main style="flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 18px">
+<sc-if value="{{notSaved}}" hint-placeholder-val="{{true}}">
+<div style="display: flex; flex-direction: column; gap: 18px">
+<fieldset style="border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px">
+<legend style="font-size: 13px; font-weight: 600; color: #344054; margin-bottom: 8px; padding: 0">Nuevo turno</legend>
+<sc-for list="{{shifts}}" as="s" hint-placeholder-count="3">
+<button role="radio" aria-checked="{{s.on}}" disabled="{{s.current}}" onClick="{{s.pick}}" style="display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 0 14px; border-radius: 14px; border: {{s.border}}; background: {{s.bg}}; font: inherit; color: #101828; text-align: left; cursor: pointer">
+<span style="width: 20px; height: 20px; border-radius: 50%; border: 2px solid {{s.ring}}; display: flex; align-items: center; justify-content: center; flex-shrink: 0"><span style="width: 10px; height: 10px; border-radius: 50%; background: {{s.fill}}"></span></span>
+<span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 15px; font-weight: 600">{{s.name}}</span><span style="font-size: 12px; color: #5D6676">{{s.sub}}</span></span>
+<sc-if value="{{s.current}}" hint-placeholder-val="{{false}}"><span style="font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: #EEF0F3; color: #4A5261">Actual</span></sc-if>
+</button>
+</sc-for>
+</fieldset>
+
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="fecha" style="font-size: 13px; font-weight: 600; color: #344054">Desde</label>
+<input id="fecha" type="date" value="2026-11-09" style="height: 48px; box-sizing: border-box; border-radius: 12px; border: 1px solid #D0D5DD; padding: 0 12px; font: inherit; font-size: 15px; color: #101828; background: #FFFFFF">
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="motivo" style="font-size: 13px; font-weight: 600; color: #344054">Motivo</label>
+<select id="motivo" style="height: 48px; border-radius: 12px; border: 1px solid #D0D5DD; padding: 0 10px; font: inherit; font-size: 15px; color: #101828; background: #FFFFFF">
+<option>Rotación</option><option>Pedido del técnico</option><option>Cobertura</option><option>Otro</option>
+</select>
+</div>
+</div>
+
+<section style="background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 14px; font-weight: 600">Se conserva todo</h2>
+<sc-for list="{{kept}}" as="k" hint-placeholder-count="3">
+<div style="display: flex; align-items: center; gap: 10px; font-size: 14px">
+<span style="width: 24px; height: 24px; border-radius: 50%; background: #E3F5E9; color: #12703A; display: flex; align-items: center; justify-content: center; flex-shrink: 0"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></span>{{k}}</div>
+</sc-for>
+</section>
+</div>
+</sc-if>
+
+<sc-if value="{{saved}}" hint-placeholder-val="{{false}}">
+<div style="background: #FFFFFF; border: 1px solid #9ED8B1; border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start">
+<span style="width: 48px; height: 48px; border-radius: 50%; background: #E3F5E9; color: #12703A; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></span>
+<h2 style="margin: 0; font-size: 18px; font-weight: 700">Turno actualizado</h2>
+<span style="font-size: 14px; color: #5D6676">Martín Ríos pasa a {{targetName}} desde el 9 nov. Sus 9 herramientas y 31 controles siguen en su ficha.</span>
+<a href="Tecnico.dc.html" style="font-size: 14px; font-weight: 600; min-height: 44px; display: flex; align-items: center">Volver a la ficha</a>
+</div>
+</sc-if>
+
+<section style="display: flex; flex-direction: column; gap: 8px">
+<h2 style="margin: 0 4px; font-size: 12px; font-weight: 600; color: #5D6676; text-transform: uppercase; letter-spacing: 0.05em">Historial de turnos</h2>
+<ol style="list-style: none; margin: 0; padding: 0; background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 16px">
+<sc-for list="{{history}}" as="h" hint-placeholder-count="3">
+<li style="display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-bottom: 1px solid #EEF0F3">
+<span style="font-size: 14px; font-weight: 600">{{h.change}}</span>
+<span style="font-size: 12px; color: #5D6676">{{h.meta}}</span>
+</li>
+</sc-for>
+</ol>
+</section>
+</main>
+
+<sc-if value="{{notSaved}}" hint-placeholder-val="{{true}}">
+<footer style="padding: 12px 16px 24px; background: #FFFFFF; border-top: 1px solid #E3E6EB">
+<button onClick="{{save}}" disabled="{{noTarget}}" style="width: 100%; height: 52px; border-radius: 14px; border: 0; background: {{ctaBg}}; color: {{ctaFg}}; font: inherit; font-size: 15px; font-weight: 700; cursor: pointer">{{cta}}</button>
+</footer>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { target: 'tarde', saved: false }; }
+  renderVals() {
+    const S = [['manana', 'Mañana', '06:00 a 14:00 · 16 técnicos'], ['tarde', 'Tarde', '14:00 a 22:00 · 14 técnicos'], ['noche', 'Noche', '22:00 a 06:00 · 12 técnicos']];
+    const shifts = S.map(([k, name, sub]) => {
+      const current = k === 'manana';
+      const on = this.state.target === k;
+      return { name, sub, current, on: on ? 'true' : 'false', pick: () => this.setState({ target: k }),
+        border: on ? '2px solid #2447C8' : '1px solid #E3E6EB', bg: current ? '#F7F8FA' : on ? '#F5F7FE' : '#FFFFFF',
+        ring: on ? '#2447C8' : '#98A1B0', fill: on ? '#2447C8' : 'transparent' };
+    });
+    const t = S.find((s) => s[0] === this.state.target);
+    const noTarget = !t;
+    const base = [
+      { change: 'Noche → Mañana', meta: '2 sep 2026 · Rotación · L. Gómez' },
+      { change: 'Alta en Turno noche', meta: '12 mar 2021 · R. Paz' }
+    ];
+    const history = this.state.saved ? [{ change: 'Mañana → ' + t[1], meta: '6 nov 2026 14:50 · desde el 9 nov · L. Gómez' }, ...base] : base;
+    return {
+      shifts, history, saved: this.state.saved, notSaved: !this.state.saved, noTarget,
+      targetName: t ? t[1].toLowerCase() : '',
+      kept: ['9 herramientas asignadas', '31 controles anteriores', 'Entregas, reposiciones y novedades'],
+      cta: t ? 'Confirmar cambio a ' + t[1] : 'Elegí un turno',
+      ctaBg: noTarget ? '#E3E6EB' : '#2447C8', ctaFg: noTarget ? '#5D6676' : '#FFFFFF',
+      save: () => this.setState({ saved: true })
+    };
+  }
+}
+</script>
+</body>
+</html>

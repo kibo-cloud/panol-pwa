@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Control semanal — móvil</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#2447C8;text-decoration:none}a:hover{color:#1A3599}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; background: #F4F5F7; font-family: Inter, system-ui, sans-serif; color: #101828; font-variant-numeric: tabular-nums; overflow: hidden; position: relative">
+
+<header style="display: flex; flex-direction: column; gap: 12px; padding: 16px 16px 14px; background: #FFFFFF; border-bottom: 1px solid #E3E6EB">
+<div style="display: flex; align-items: center; gap: 8px">
+<a href="Turno.dc.html" aria-label="Volver al turno" style="width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: #101828; margin-left: -8px">
+<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg></a>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0">
+<h1 style="margin: 0; font-size: 18px; font-weight: 700">Martín Ríos</h1>
+<span style="font-size: 13px; color: #5D6676">Leg. 1042 · Turno mañana</span>
+</div>
+<span style="display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border-radius: 999px; background: #EEF1FB; color: #2447C8; font-size: 12px; font-weight: 600">
+<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path></svg>Nov · Sem 1</span>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; justify-content: space-between; align-items: baseline">
+<span style="font-size: 14px; font-weight: 600">{{doneCount}} de {{total}} controladas</span>
+<span style="font-size: 12px; color: #5D6676">{{savedLabel}}</span>
+</div>
+<div role="progressbar" aria-valuemin="0" aria-valuemax="{{total}}" aria-valuenow="{{doneCount}}" aria-label="Progreso del control" style="display: flex; gap: 3px; height: 8px">
+<sc-for list="{{items}}" as="it" hint-placeholder-count="9">
+<span style="flex: 1; border-radius: 999px; background: {{it.seg}}"></span>
+</sc-for>
+</div>
+<div style="display: flex; gap: 14px; font-size: 12px; color: #5D6676">
+<span style="display: flex; align-items: center; gap: 4px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #22A559"></span>{{cGood}} bueno</span>
+<span style="display: flex; align-items: center; gap: 4px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #F08A24"></span>{{cChange}} cambio</span>
+<span style="display: flex; align-items: center; gap: 4px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #D92D20"></span>{{cMissing}} faltante</span>
+<span style="display: flex; align-items: center; gap: 4px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #C3C8D1"></span>{{cPending}} pendiente</span>
+</div>
+</div>
+</header>
+
+<main style="flex: 1; overflow-y: auto; padding: 12px 16px 20px; display: flex; flex-direction: column; gap: 10px">
+<sc-if value="{{hasPending}}" hint-placeholder-val="{{true}}">
+<button onClick="{{markRestGood}}" style="height: 44px; border-radius: 12px; border: 1px dashed #9ED8B1; background: #F3FBF6; color: #12703A; font: inherit; font-size: 14px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer">
+<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>Marcar {{cPending}} pendientes como Buen estado</button>
+</sc-if>
+
+<sc-for list="{{items}}" as="it" hint-placeholder-count="5">
+<article style="background: #FFFFFF; border: 1.5px solid {{it.cardBorder}}; border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; justify-content: space-between; gap: 10px; align-items: flex-start">
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600">{{it.name}}</h2>
+<span style="font-size: 12px; color: #5D6676">{{it.code}} · {{it.cat}}</span>
+</div>
+<span style="font-size: 11px; color: #5D6676; text-align: right; white-space: nowrap; display: flex; flex-direction: column; gap: 2px">Anterior<span style="font-weight: 600; color: {{it.prevFg}}">{{it.prevLabel}}</span></span>
+</div>
+
+<div role="radiogroup" aria-label="Estado de {{it.name}}" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px">
+<sc-for list="{{it.opts}}" as="o" hint-placeholder-count="3">
+<button role="radio" aria-checked="{{o.checked}}" onClick="{{o.pick}}" style="height: 48px; border-radius: 12px; border: {{o.border}}; background: {{o.bg}}; color: {{o.fg}}; font: inherit; font-size: 13px; font-weight: {{o.weight}}; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; padding: 0 4px">
+<sc-if value="{{o.isGood}}" hint-placeholder-val="{{true}}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></sc-if>
+<sc-if value="{{o.isChange}}" hint-placeholder-val="{{false}}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg></sc-if>
+<sc-if value="{{o.isMissing}}" hint-placeholder-val="{{false}}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg></sc-if>
+{{o.label}}</button>
+</sc-for>
+</div>
+
+<sc-if value="{{it.showNote}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-direction: column; gap: 8px; background: {{it.noteBg}}; border-radius: 12px; padding: 12px">
+<label for="{{it.noteId}}" style="font-size: 13px; font-weight: 600; color: {{it.noteFg}}">{{it.noteLabel}}</label>
+<div style="display: flex; flex-wrap: wrap; gap: 6px">
+<sc-for list="{{it.chips}}" as="c" hint-placeholder-count="3">
+<button onClick="{{c.pick}}" style="min-height: 32px; padding: 0 10px; border-radius: 999px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #344054; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer">{{c.text}}</button>
+</sc-for>
+</div>
+<textarea id="{{it.noteId}}" rows="2" value="{{it.note}}" onChange="{{it.setNote}}" placeholder="{{it.placeholder}}" style="width: 100%; box-sizing: border-box; border-radius: 10px; border: 1.5px solid {{it.inputBorder}}; background: #FFFFFF; padding: 10px 12px; font: inherit; font-size: 14px; color: #101828; resize: none"></textarea>
+<sc-if value="{{it.noteError}}" hint-placeholder-val="{{false}}">
+<span role="alert" style="font-size: 12px; font-weight: 600; color: #B42318">La nota es obligatoria para registrar un faltante.</span>
+</sc-if>
+</div>
+</sc-if>
+</article>
+</sc-for>
+</main>
+
+<footer style="display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 24px; background: #FFFFFF; border-top: 1px solid #E3E6EB">
+<sc-if value="{{blockReason}}" hint-placeholder-val="{{true}}">
+<span style="font-size: 12px; color: #5D6676; text-align: center">{{blockReason}}</span>
+</sc-if>
+<div style="display: flex; gap: 8px">
+<button onClick="{{saveDraft}}" style="flex: 1; height: 52px; border-radius: 14px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer">Guardar borrador</button>
+<button onClick="{{openConfirm}}" disabled="{{cantFinish}}" style="flex: 1.4; height: 52px; border-radius: 14px; border: 0; background: {{finishBg}}; color: {{finishFg}}; font: inherit; font-size: 15px; font-weight: 700; letter-spacing: 0.02em; cursor: pointer">FINALIZAR CONTROL</button>
+</div>
+</footer>
+
+<sc-if value="{{confirmOpen}}" hint-placeholder-val="{{false}}">
+<div style="position: absolute; inset: 0; background: rgba(16, 24, 40, 0.5); display: flex; flex-direction: column; justify-content: flex-end">
+<div role="dialog" aria-modal="true" aria-label="Confirmar control" style="background: #FFFFFF; border-radius: 24px 24px 0 0; padding: 12px 20px 28px; display: flex; flex-direction: column; gap: 16px">
+<span style="align-self: center; width: 40px; height: 4px; border-radius: 999px; background: #D0D5DD"></span>
+<sc-if value="{{notSaved}}" hint-placeholder-val="{{true}}">
+<div style="display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h2 style="margin: 0; font-size: 20px; font-weight: 700">¿Finalizar el control?</h2>
+<span style="font-size: 14px; color: #5D6676">Martín Ríos · Noviembre, semana 1. El registro no podrá editarse; las correcciones se hacen con un nuevo registro de auditoría.</span>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+<div style="background: #E3F5E9; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 22px; font-weight: 700; color: #12703A">{{cGood}}</span><span style="font-size: 12px; font-weight: 600; color: #12703A">Buen estado</span></div>
+<div style="background: #FFF0E0; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 22px; font-weight: 700; color: #A8410A">{{cChange}}</span><span style="font-size: 12px; font-weight: 600; color: #A8410A">Para cambio</span></div>
+<div style="background: #FDE8E7; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 22px; font-weight: 700; color: #B42318">{{cMissing}}</span><span style="font-size: 12px; font-weight: 600; color: #B42318">Faltante</span></div>
+</div>
+<dl style="margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 13px">
+<dt style="color: #5D6676">Responsable</dt><dd style="margin: 0; font-weight: 500">Laura Gómez</dd>
+<dt style="color: #5D6676">Fecha y hora</dt><dd style="margin: 0; font-weight: 500">6 nov 2026 · 14:32</dd>
+<dt style="color: #5D6676">Alertas</dt><dd style="margin: 0; font-weight: 500">Se generarán {{alertCount}} alertas automáticas</dd>
+</dl>
+<div style="display: flex; gap: 8px">
+<button onClick="{{closeConfirm}}" style="flex: 1; height: 52px; border-radius: 14px; border: 1px solid #D0D5DD; background: #FFFFFF; color: #101828; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer">Revisar</button>
+<button onClick="{{confirm}}" style="flex: 1.4; height: 52px; border-radius: 14px; border: 0; background: #2447C8; color: #FFFFFF; font: inherit; font-size: 15px; font-weight: 700; cursor: pointer">Confirmar y guardar</button>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{saved}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-direction: column; gap: 16px; align-items: center; text-align: center">
+<span style="width: 64px; height: 64px; border-radius: 50%; background: #E3F5E9; color: #12703A; display: flex; align-items: center; justify-content: center">
+<svg aria-hidden="true" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></span>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h2 style="margin: 0; font-size: 20px; font-weight: 700">Control guardado</h2>
+<span style="font-size: 14px; color: #5D6676">Registro C-2026-11-0412 · 6 nov 2026, 14:32 · L. Gómez</span>
+</div>
+<a href="Turno.dc.html" style="width: 100%; height: 52px; border-radius: 14px; background: #2447C8; color: #FFFFFF; font-size: 15px; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 8px">Siguiente: Valentina Ruiz
+<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></a>
+<a href="Tecnico.dc.html" style="font-size: 14px; font-weight: 600; min-height: 44px; display: flex; align-items: center">Ver ficha de Martín Ríos</a>
+</div>
+</sc-if>
+</div>
+</div>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(p) {
+    super(p);
+    this.state = {
+      st: { 0: 'change', 1: 'good', 2: 'good', 3: 'missing', 4: 'good' },
+      notes: { 0: 'Mandril con juego, no ajusta la broca' },
+      savedAt: 'Borrador guardado 14:18',
+      confirmOpen: false,
+      saved: false
+    };
+  }
+  renderVals() {
+    const tools = [
+      { name: 'Taladro percutor 13 mm', code: 'HT-0142', cat: 'Eléctricas', prev: 'change' },
+      { name: 'Multímetro digital', code: 'HT-0244', cat: 'Medición', prev: 'good' },
+      { name: 'Llave ajustable 10″ (1 de 2)', code: 'HT-0388', cat: 'Manuales', prev: 'good' },
+      { name: 'Llave ajustable 10″ (2 de 2)', code: 'HT-0389', cat: 'Manuales', prev: 'good' },
+      { name: 'Juego de destornilladores ×8', code: 'HT-0451', cat: 'Manuales', prev: 'good' },
+      { name: 'Pinza amperométrica', code: 'HT-0503', cat: 'Medición', prev: 'good' },
+      { name: 'Pinza universal 8″', code: 'HT-0610', cat: 'Manuales', prev: 'missing' },
+      { name: 'Cinta métrica 5 m', code: 'HT-0722', cat: 'Medición', prev: 'good' },
+      { name: 'Linterna LED recargable', code: 'HT-0805', cat: 'Iluminación', prev: 'good' }
+    ];
+    const C = {
+      good: { label: 'Bueno', long: 'Buen estado', fg: '#12703A', bg: '#E3F5E9', line: '#22A559', seg: '#22A559' },
+      change: { label: 'Cambio', long: 'Para cambio', fg: '#A8410A', bg: '#FFF0E0', line: '#F08A24', seg: '#F08A24' },
+      missing: { label: 'Faltante', long: 'Faltante', fg: '#B42318', bg: '#FDE8E7', line: '#D92D20', seg: '#D92D20' }
+    };
+    const { st, notes } = this.state;
+    const setSt = (i, k) => this.setState({ st: { ...this.state.st, [i]: k } });
+    const setNote = (i, v) => this.setState({ notes: { ...this.state.notes, [i]: v } });
+    const items = tools.map((t, i) => {
+      const s = st[i];
+      const note = notes[i] || '';
+      const opts = ['good', 'change', 'missing'].map((k) => {
+        const on = s === k;
+        return { label: C[k].label, checked: on ? 'true' : 'false', pick: () => setSt(i, k),
+          isGood: k === 'good', isChange: k === 'change', isMissing: k === 'missing',
+          border: on ? '2px solid ' + C[k].line : '1px solid #D0D5DD',
+          bg: on ? C[k].bg : '#FFFFFF', fg: on ? C[k].fg : '#344054', weight: on ? '700' : '500' };
+      });
+      const isMissing = s === 'missing';
+      const chips = (isMissing
+        ? ['No está en el pañol', 'Extraviada en el trabajo', 'Entregada a otro sector', 'Pendiente de devolución']
+        : ['No funciona', 'Cable deteriorado', 'Carcasa dañada', 'Desgaste por uso']).map((text) => ({ text, pick: () => setNote(i, text) }));
+      const noteError = isMissing && !note.trim();
+      return { ...t, opts, chips, note, noteId: 'nota-' + i,
+        setNote: (e) => setNote(i, e.target.value),
+        seg: s ? C[s].seg : '#DDE1E7',
+        cardBorder: s ? C[s].line : '#E3E6EB',
+        prevLabel: C[t.prev].long, prevFg: C[t.prev].fg,
+        showNote: s === 'change' || isMissing,
+        noteBg: isMissing ? '#FDF2F1' : '#FFF7EE',
+        noteFg: isMissing ? '#B42318' : '#A8410A',
+        noteLabel: isMissing ? 'Motivo del faltante (obligatorio)' : 'Observación (opcional)',
+        placeholder: isMissing ? '¿Dónde está o qué pasó?' : 'Describí el problema',
+        inputBorder: noteError ? '#D92D20' : '#D0D5DD', noteError };
+    });
+    const vals = Object.values(st);
+    const cGood = vals.filter((v) => v === 'good').length;
+    const cChange = vals.filter((v) => v === 'change').length;
+    const cMissing = vals.filter((v) => v === 'missing').length;
+    const doneCount = vals.length;
+    const cPending = tools.length - doneCount;
+    const missingNotes = items.filter((it) => it.noteError).length;
+    const cantFinish = cPending > 0 || missingNotes > 0;
+    const blockReason = cPending > 0 ? 'Faltan ' + cPending + ' herramientas por controlar'
+      : missingNotes > 0 ? 'Completá la nota de ' + missingNotes + ' faltante' + (missingNotes > 1 ? 's' : '') : '';
+    return {
+      items, total: tools.length, doneCount, cGood, cChange, cMissing, cPending,
+      hasPending: cPending > 0, blockReason, cantFinish,
+      savedLabel: this.state.savedAt,
+      finishBg: cantFinish ? '#E3E6EB' : '#2447C8', finishFg: cantFinish ? '#5D6676' : '#FFFFFF',
+      alertCount: cChange + cMissing,
+      markRestGood: () => { const n = { ...this.state.st }; tools.forEach((_, i) => { if (!n[i]) n[i] = 'good'; }); this.setState({ st: n }); },
+      saveDraft: () => this.setState({ savedAt: 'Borrador guardado 14:31' }),
+      openConfirm: () => { if (!cantFinish) this.setState({ confirmOpen: true }); },
+      closeConfirm: () => this.setState({ confirmOpen: false }),
+      confirm: () => this.setState({ saved: true }),
+      confirmOpen: this.state.confirmOpen, saved: this.state.saved, notSaved: !this.state.saved
+    };
+  }
+}
+</script>
+</body>
+</html>

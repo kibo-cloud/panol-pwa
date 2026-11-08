@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Turno mañana — móvil</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#2447C8;text-decoration:none}a:hover{color:#1A3599}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; background: #F4F5F7; font-family: Inter, system-ui, sans-serif; color: #101828; font-variant-numeric: tabular-nums; overflow: hidden">
+
+<header style="display: flex; flex-direction: column; gap: 14px; padding: 16px 16px 12px; background: #FFFFFF; border-bottom: 1px solid #E3E6EB">
+<div style="display: flex; align-items: center; gap: 8px">
+<a href="Main.dc.html" aria-label="Volver al inicio" style="width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: #101828; margin-left: -8px">
+<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg></a>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 2px">
+<h1 style="margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em">Turno mañana</h1>
+<span style="font-size: 13px; color: #5D6676">16 técnicos · 06:00 a 14:00</span>
+</div>
+<button aria-label="Cambiar de turno" style="height: 40px; padding: 0 12px; border-radius: 10px; border: 1px solid #E3E6EB; background: #FFFFFF; font: inherit; font-size: 13px; font-weight: 600; color: #101828; display: flex; align-items: center; gap: 6px; cursor: pointer">Mañana
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg></button>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+<div style="background: #F4F5F7; border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px">
+<span style="font-size: 12px; color: #5D6676">Controlados</span>
+<span style="font-size: 18px; font-weight: 700">7<span style="font-size: 13px; font-weight: 500; color: #5D6676">/16</span></span>
+</div>
+<div style="background: #F4F5F7; border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px">
+<span style="font-size: 12px; color: #5D6676">Herramientas</span>
+<span style="font-size: 18px; font-weight: 700">492</span>
+</div>
+<div style="background: #F4F5F7; border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px">
+<span style="font-size: 12px; color: #5D6676">En condiciones</span>
+<span style="font-size: 18px; font-weight: 700">93 %</span>
+</div>
+</div>
+
+<label style="display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 12px; border-radius: 12px; background: #F4F5F7; color: #5D6676">
+<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+<span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Buscar técnico</span>
+<input type="search" placeholder="Buscar por nombre o legajo" style="flex: 1; border: 0; background: transparent; font: inherit; font-size: 15px; color: #101828; outline: none; min-width: 0">
+</label>
+
+<div role="tablist" aria-label="Filtrar técnicos" style="display: flex; gap: 6px">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="3">
+<button role="tab" aria-selected="{{t.on}}" onClick="{{t.pick}}" style="height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid {{t.border}}; background: {{t.bg}}; color: {{t.fg}}; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer">{{t.label}}</button>
+</sc-for>
+</div>
+</header>
+
+<main style="flex: 1; overflow-y: auto; padding: 12px 16px 24px; display: flex; flex-direction: column; gap: 10px">
+<sc-for list="{{techs}}" as="p" hint-placeholder-count="6">
+<a href="{{p.href}}" style="display: flex; flex-direction: column; gap: 12px; background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 16px; padding: 14px; color: #101828">
+<span style="display: flex; align-items: center; gap: 12px">
+<span style="position: relative; width: 44px; height: 44px; border-radius: 50%; background: #EEF1FB; color: #2447C8; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; flex-shrink: 0">{{p.initials}}
+<span aria-hidden="true" style="position: absolute; right: -1px; bottom: -1px; width: 14px; height: 14px; border-radius: 50%; background: {{p.light}}; border: 2.5px solid #FFFFFF"></span>
+</span>
+<span style="flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0">
+<span style="font-size: 15px; font-weight: 600">{{p.name}}</span>
+<span style="font-size: 13px; color: #5D6676">Leg. {{p.id}} · {{p.tools}} herramientas</span>
+</span>
+<span style="font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: {{p.pillBg}}; color: {{p.pillFg}}; white-space: nowrap">{{p.status}}</span>
+</span>
+<span style="display: flex; align-items: center; gap: 10px">
+<span style="flex: 1; display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: #EEF0F3; gap: 2px">
+<span style="display: block; width: {{p.wg}}; background: #22A559"></span>
+<span style="display: block; width: {{p.wo}}; background: #F08A24"></span>
+<span style="display: block; width: {{p.wr}}; background: #D92D20"></span>
+</span>
+<span style="display: flex; gap: 10px; font-size: 12px; color: #5D6676">
+<span><b style="color: #12703A">{{p.g}}</b> ok</span>
+<span><b style="color: #A8410A">{{p.o}}</b> cam.</span>
+<span><b style="color: #B42318">{{p.r}}</b> falt.</span>
+</span>
+</span>
+</a>
+</sc-for>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { tab: 'todos' }; }
+  renderVals() {
+    const S = {
+      done: { status: 'Controlado', pillBg: '#E3F5E9', pillFg: '#12703A' },
+      pend: { status: 'Pendiente', pillBg: '#EEF0F3', pillFg: '#4A5261' },
+      part: { status: 'Borrador 5/9', pillBg: '#EEF1FB', pillFg: '#2447C8' }
+    };
+    const all = [
+      { name: 'Martín Ríos', id: '1042', tools: 9, g: 0, o: 0, r: 0, st: 'part', href: 'Control.dc.html' },
+      { name: 'Sofía Herrera', id: '1018', tools: 12, g: 11, o: 1, r: 0, st: 'done', href: 'Tecnico.dc.html' },
+      { name: 'Diego Sosa', id: '1077', tools: 10, g: 8, o: 1, r: 1, st: 'done', href: 'Tecnico.dc.html' },
+      { name: 'Valentina Ruiz', id: '1103', tools: 11, g: 0, o: 0, r: 0, st: 'pend', href: 'Control.dc.html' },
+      { name: 'Nicolás Ferreyra', id: '0987', tools: 14, g: 12, o: 0, r: 2, st: 'done', href: 'Tecnico.dc.html' },
+      { name: 'Camila Acosta', id: '1120', tools: 9, g: 0, o: 0, r: 0, st: 'pend', href: 'Control.dc.html' },
+      { name: 'Joaquín Méndez', id: '1056', tools: 13, g: 13, o: 0, r: 0, st: 'done', href: 'Tecnico.dc.html' }
+    ];
+    const prevState = { '1042': [6, 3, 0], '1103': [11, 0, 0], '1120': [8, 1, 0] };
+    const techs = all.map((t) => {
+      let [g, o, r] = [t.g, t.o, t.r];
+      if (t.st !== 'done') { [g, o, r] = prevState[t.id]; }
+      const n = g + o + r;
+      const light = r > 0 ? '#D92D20' : o > 0 ? '#F08A24' : t.st === 'pend' ? '#98A1B0' : '#22A559';
+      return { ...t, ...S[t.st], g, o, r, light,
+        initials: t.name.split(' ').map((w) => w[0]).join(''),
+        wg: (g / n * 100) + '%', wo: (o / n * 100) + '%', wr: (r / n * 100) + '%' };
+    }).filter((t) => this.state.tab === 'todos' ? true : this.state.tab === 'pend' ? t.st !== 'done' : (t.o + t.r) > 0);
+    const tabs = [['todos', 'Todos · 16'], ['pend', 'Pendientes · 9'], ['nov', 'Con novedades']].map(([k, label]) => {
+      const on = this.state.tab === k;
+      return { label, on: on ? 'true' : 'false', pick: () => this.setState({ tab: k }),
+        bg: on ? '#101828' : '#FFFFFF', fg: on ? '#FFFFFF' : '#344054', border: on ? '#101828' : '#D0D5DD' };
+    });
+    return { techs, tabs };
+  }
+}
+</script>
+</body>
+</html>

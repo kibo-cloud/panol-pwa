@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Menú — móvil</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#2447C8;text-decoration:none}a:hover{color:#1A3599}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; background: #F4F5F7; font-family: Inter, system-ui, sans-serif; color: #101828; overflow: hidden">
+
+<header style="padding: 20px 20px 12px">
+<h1 style="margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.01em">Menú</h1>
+</header>
+
+<main style="flex: 1; overflow-y: auto; padding: 4px 16px 24px; display: flex; flex-direction: column; gap: 18px">
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 16px; padding: 14px">
+<span style="width: 44px; height: 44px; border-radius: 50%; background: #EEF1FB; color: #2447C8; display: flex; align-items: center; justify-content: center; font-weight: 700">LG</span>
+<span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 15px; font-weight: 600">Laura Gómez</span><span style="font-size: 13px; color: #5D6676">Administradora · Pañol central</span></span>
+<span style="font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: #EEF1FB; color: #2447C8">Admin</span>
+</div>
+
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="4">
+<section style="display: flex; flex-direction: column; gap: 8px">
+<h2 style="margin: 0 4px; font-size: 12px; font-weight: 600; color: #5D6676; text-transform: uppercase; letter-spacing: 0.05em">{{g.title}}</h2>
+<div style="background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 16px; display: flex; flex-direction: column; overflow: hidden">
+<sc-for list="{{g.items}}" as="i" hint-placeholder-count="3">
+<a href="{{i.href}}" style="display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 0 14px; border-bottom: 1px solid #EEF0F3; color: #101828">
+<span style="width: 36px; height: 36px; border-radius: 10px; background: #F4F5F7; color: #344054; display: flex; align-items: center; justify-content: center; flex-shrink: 0">
+<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="{{i.icon}}"></path></svg></span>
+<span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 15px; font-weight: 500">{{i.label}}</span><span style="font-size: 12px; color: #5D6676">{{i.sub}}</span></span>
+<sc-if value="{{i.badge}}" hint-placeholder-val="{{false}}"><span style="font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #FDE8E7; color: #B42318">{{i.badge}}</span></sc-if>
+<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#98A1B0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg>
+</a>
+</sc-for>
+</div>
+</section>
+</sc-for>
+
+<a href="Login.dc.html" style="height: 48px; border-radius: 12px; border: 1px solid #F4A9A3; background: #FFFFFF; color: #B42318; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center">Cerrar sesión</a>
+<span style="text-align: center; font-size: 12px; color: #5D6676">Pañol v1.0 · Datos guardados en este teléfono</span>
+</main>
+
+<nav aria-label="Navegación principal" style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: end; padding: 8px 8px 20px; background: #FFFFFF; border-top: 1px solid #E3E6EB">
+<a href="Main.dc.html" style="display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 48px; justify-content: center; font-size: 11px; font-weight: 500; color: #5D6676">
+<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"></path></svg>Inicio</a>
+<a href="Turno.dc.html" style="display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 48px; justify-content: center; font-size: 11px; font-weight: 500; color: #5D6676">
+<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="4"></circle><path d="M2 21v-1a6 6 0 0 1 12 0v1M16 3.1a4 4 0 0 1 0 7.8M22 21v-1a6 6 0 0 0-4-5.6"></path></svg>Turnos</a>
+<a href="Control.dc.html" style="display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: #101828">
+<span style="width: 52px; height: 52px; border-radius: 16px; background: #2447C8; color: #FFFFFF; display: flex; align-items: center; justify-content: center; margin-top: -20px">
+<svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"></rect><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><path d="m9 14 2 2 4-4"></path></svg>
+</span>Controlar</a>
+<a href="Reposicion.dc.html" style="display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 48px; justify-content: center; font-size: 11px; font-weight: 500; color: #5D6676">
+<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3"></path></svg>Entregas</a>
+<a href="Mas.dc.html" aria-current="page" style="display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 48px; justify-content: center; font-size: 11px; font-weight: 600; color: #2447C8">
+<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"></path></svg>Más</a>
+</nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const I = {
+      bell: 'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0',
+      hist: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2',
+      users: 'M9 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8zM2 21v-1a6 6 0 0 1 12 0v1M16 3.1a4 4 0 0 1 0 7.8M22 21v-1a6 6 0 0 0-4-5.6',
+      swap: 'M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3',
+      box: 'M21 8 12 3 3 8v8l9 5 9-5zM3 8l9 5 9-5M12 13v8',
+      chart: 'M3 3v18h18M8 17v-5M13 17V8M18 17v-3',
+      sliders: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
+      shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
+      db: 'M12 3c4.4 0 8 1.3 8 3v12c0 1.7-3.6 3-8 3s-8-1.3-8-3V6c0-1.7 3.6-3 8-3zM4 6c0 1.7 3.6 3 8 3s8-1.3 8-3M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3'
+    };
+    return { groups: [
+      { title: 'Operación', items: [
+        { label: 'Alertas', sub: '5 abiertas', href: 'Alertas.dc.html', icon: I.bell, badge: '5' },
+        { label: 'Historial de controles', sub: 'Por mes y semana', href: 'Historial.dc.html', icon: I.hist, badge: '' }
+      ] },
+      { title: 'Gestión', items: [
+        { label: 'Técnicos', sub: '42 registrados', href: 'Tecnicos.dc.html', icon: I.users, badge: '' },
+        { label: 'Cambios de turno', sub: 'Con historial completo', href: 'CambioTurno.dc.html', icon: I.swap, badge: '' },
+        { label: 'Inventario general', sub: '1.412 unidades', href: 'Inventario.dc.html', icon: I.box, badge: '' }
+      ] },
+      { title: 'Análisis', items: [
+        { label: 'Reportes y estadísticas', sub: 'Exportar a Excel o PDF', href: 'Reportes.dc.html', icon: I.chart, badge: '' }
+      ] },
+      { title: 'Configuración', items: [
+        { label: 'Herramientas y categorías', sub: '86 tipos · 9 categorías', href: 'Configuracion.dc.html', icon: I.sliders, badge: '' },
+        { label: 'Usuarios y permisos', sub: 'Solo administradores', href: 'Administracion.dc.html', icon: I.shield, badge: '' },
+        { label: 'Copia de seguridad', sub: 'Exportar o restaurar los datos del teléfono', href: '#', icon: I.db, badge: '' }
+      ] }
+    ] };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Ingreso — móvil</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#2447C8;text-decoration:none}a:hover{color:#1A3599}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; background: #FFFFFF; font-family: Inter, system-ui, sans-serif; color: #101828; overflow: hidden; padding: 24px">
+
+<div style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 32px">
+<div style="display: flex; flex-direction: column; gap: 16px">
+<span style="width: 56px; height: 56px; border-radius: 16px; background: #101828; color: #FFFFFF; display: flex; align-items: center; justify-content: center">
+<svg aria-hidden="true" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg></span>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.02em">Ingresá a Pañol</h1>
+<span style="font-size: 15px; color: #5D6676">Control y seguimiento de herramientas por técnico</span>
+</div>
+</div>
+
+<form style="display: flex; flex-direction: column; gap: 16px; margin: 0">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="usr" style="font-size: 13px; font-weight: 600; color: #344054">Usuario</label>
+<input id="usr" autocomplete="username" value="lgomez" style="height: 52px; box-sizing: border-box; border-radius: 12px; border: 1px solid #D0D5DD; padding: 0 14px; font: inherit; font-size: 16px; color: #101828">
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="pwd" style="font-size: 13px; font-weight: 600; color: #344054">Contraseña</label>
+<div style="display: flex; align-items: center; border-radius: 12px; border: 1px solid #D0D5DD; padding-left: 14px">
+<input id="pwd" type="{{pwdType}}" autocomplete="current-password" value="contraseña" style="flex: 1; min-width: 0; height: 50px; border: 0; outline: none; font: inherit; font-size: 16px; color: #101828; background: transparent">
+<button type="button" onClick="{{toggle}}" aria-label="{{toggleLabel}}" style="width: 48px; height: 48px; border: 0; background: transparent; color: #5D6676; display: flex; align-items: center; justify-content: center; cursor: pointer">
+<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+</div>
+</div>
+<div style="display: flex; justify-content: space-between; align-items: center">
+<label style="display: flex; align-items: center; gap: 10px; font-size: 14px; color: #344054; min-height: 44px">
+<input type="checkbox" checked="{{true}}" style="width: 20px; height: 20px; accent-color: #2447C8">Mantener la sesión</label>
+<a href="#" style="font-size: 14px; font-weight: 600">¿Olvidaste la contraseña?</a>
+</div>
+<a href="Main.dc.html" style="height: 52px; border-radius: 14px; background: #2447C8; color: #FFFFFF; font-size: 16px; font-weight: 700; display: flex; align-items: center; justify-content: center">Ingresar</a>
+</form>
+</div>
+
+<div style="display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 16px; background: #F4F5F7">
+<span style="width: 40px; height: 40px; border-radius: 10px; background: #FFFFFF; border: 1px solid #E3E6EB; color: #101828; display: flex; align-items: center; justify-content: center; flex-shrink: 0">
+<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="2"></rect><path d="M12 7v7m0 0-3-3m3 3 3-3"></path></svg></span>
+<span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; font-weight: 600">Instalá la app</span><span style="font-size: 12px; color: #5D6676">Acceso directo y pantalla completa</span></span>
+<button style="height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid #D0D5DD; background: #FFFFFF; font: inherit; font-size: 13px; font-weight: 600; color: #101828; cursor: pointer">Instalar</button>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { show: false }; }
+  renderVals() {
+    const show = this.state.show;
+    return { pwdType: show ? 'text' : 'password', toggleLabel: show ? 'Ocultar contraseña' : 'Mostrar contraseña',
+      toggle: () => this.setState({ show: !show }) };
+  }
+}
+</script>
+</body>
+</html>

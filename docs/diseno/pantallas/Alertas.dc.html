@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Alertas — móvil</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#2447C8;text-decoration:none}a:hover{color:#1A3599}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; background: #F4F5F7; font-family: Inter, system-ui, sans-serif; color: #101828; overflow: hidden">
+
+<header style="display: flex; flex-direction: column; gap: 12px; padding: 16px 16px 12px; background: #FFFFFF; border-bottom: 1px solid #E3E6EB">
+<div style="display: flex; align-items: center; gap: 8px">
+<a href="Main.dc.html" aria-label="Volver al inicio" style="width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: #101828; margin-left: -8px">
+<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg></a>
+<h1 style="flex: 1; margin: 0; font-size: 20px; font-weight: 700">Alertas</h1>
+</div>
+<div role="tablist" aria-label="Estado de las alertas" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); background: #EEF0F3; border-radius: 12px; padding: 4px; gap: 4px">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="2">
+<button role="tab" aria-selected="{{t.on}}" onClick="{{t.pick}}" style="height: 40px; border-radius: 9px; border: 0; background: {{t.bg}}; color: {{t.fg}}; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">{{t.label}}</button>
+</sc-for>
+</div>
+</header>
+
+<main style="flex: 1; overflow-y: auto; padding: 12px 16px 24px; display: flex; flex-direction: column; gap: 10px">
+<sc-if value="{{empty}}" hint-placeholder-val="{{false}}">
+<div style="padding: 48px 24px; text-align: center; display: flex; flex-direction: column; gap: 6px; align-items: center">
+<span style="width: 56px; height: 56px; border-radius: 50%; background: #E3F5E9; color: #12703A; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></span>
+<span style="font-size: 16px; font-weight: 600">Sin alertas abiertas</span>
+<span style="font-size: 14px; color: #5D6676">Todo está al día.</span>
+</div>
+</sc-if>
+<sc-for list="{{list}}" as="a" hint-placeholder-count="5">
+<article style="background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; gap: 12px; align-items: flex-start">
+<span style="width: 36px; height: 36px; border-radius: 10px; background: {{a.bg}}; color: {{a.fg}}; display: flex; align-items: center; justify-content: center; flex-shrink: 0">
+<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><path d="M12 9v4M12 17h.01"></path></svg></span>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 3px">
+<span style="font-size: 12px; font-weight: 600; color: {{a.fg}}">{{a.kind}}</span>
+<h2 style="margin: 0; font-size: 15px; font-weight: 600">{{a.title}}</h2>
+<span style="font-size: 13px; color: #5D6676">{{a.meta}}</span>
+</div>
+</div>
+<sc-if value="{{a.open}}" hint-placeholder-val="{{true}}">
+<div style="display: flex; gap: 8px">
+<a href="{{a.href}}" style="flex: 1; height: 44px; border-radius: 12px; border: 1px solid #D0D5DD; color: #101828; font-size: 14px; font-weight: 600; display: flex; align-items: center; justify-content: center">{{a.action}}</a>
+<button onClick="{{a.resolve}}" style="flex: 1; height: 44px; border-radius: 12px; border: 0; background: #101828; color: #FFFFFF; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Marcar resuelta</button>
+</div>
+</sc-if>
+<sc-if value="{{a.closed}}" hint-placeholder-val="{{false}}">
+<span style="font-size: 12px; color: #12703A; font-weight: 600; background: #F3FBF6; padding: 8px 10px; border-radius: 10px">{{a.resolvedText}}</span>
+</sc-if>
+</article>
+</sc-for>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { tab: 'open', done: { r1: 'Resuelta 3 nov · R. Paz · “Apareció en el vehículo 12”', r2: 'Resuelta 1 nov · L. Gómez · Reposición registrada' } }; }
+  renderVals() {
+    const T = {
+      missing: { bg: '#FDE8E7', fg: '#B42318' },
+      change: { bg: '#FFF0E0', fg: '#A8410A' },
+      pending: { bg: '#EEF0F3', fg: '#4A5261' }
+    };
+    const all = [
+      { id: 'a1', t: 'missing', kind: 'Faltantes nuevos', title: '3 faltantes en Turno noche', meta: 'Control del 5 nov · Federico Lagos y Tomás Villalba', action: 'Ver control', href: 'Historial.dc.html' },
+      { id: 'a2', t: 'change', kind: 'Para cambio reiterado', title: 'Taladro HT-0142 · 3 controles seguidos', meta: 'Martín Ríos · Turno mañana', action: 'Reponer', href: 'Reposicion.dc.html' },
+      { id: 'a3', t: 'pending', kind: 'Devolución pendiente', title: 'Llave ajustable HT-0377', meta: 'Diego Sosa · desde el 30 oct', action: 'Registrar', href: 'Reposicion.dc.html' },
+      { id: 'a4', t: 'pending', kind: 'Control pendiente', title: 'Tomás Villalba sin control hace 2 semanas', meta: 'Turno noche · último: 22 oct', action: 'Controlar', href: 'Control.dc.html' },
+      { id: 'a5', t: 'change', kind: 'Reposición pendiente', title: 'Pinza amperométrica sin stock', meta: 'Solicitada para Federico Lagos', action: 'Ver inventario', href: 'Inventario.dc.html' },
+      { id: 'r1', t: 'missing', kind: 'Faltante', title: 'Cinta métrica HT-0731', meta: 'Lucas Benítez · Turno tarde', action: '', href: '#' },
+      { id: 'r2', t: 'change', kind: 'Para cambio', title: 'Multímetro HT-0217', meta: 'Sofía Herrera · Turno mañana', action: '', href: '#' }
+    ];
+    const done = this.state.done;
+    const items = all.map((a) => ({ ...a, ...T[a.t], open: !done[a.id], closed: !!done[a.id], resolvedText: done[a.id] || '',
+      resolve: () => this.setState({ done: { ...this.state.done, [a.id]: 'Resuelta hoy 14:45 · L. Gómez' } }) }));
+    const open = items.filter((a) => a.open);
+    const closed = items.filter((a) => a.closed);
+    const tab = this.state.tab;
+    const tabs = [['open', 'Abiertas · ' + open.length], ['closed', 'Resueltas · ' + closed.length]].map(([k, label]) => {
+      const on = tab === k;
+      return { label, on: on ? 'true' : 'false', pick: () => this.setState({ tab: k }), bg: on ? '#FFFFFF' : 'transparent', fg: on ? '#101828' : '#4A5261' };
+    });
+    const list = tab === 'open' ? open : closed;
+    return { tabs, list, empty: list.length === 0 };
+  }
+}
+</script>
+</body>
+</html>
