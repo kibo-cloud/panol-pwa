@@ -74,19 +74,37 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       (`ed3dedb`, `privado/` verified absent); merged `fix/security-hardening` deleted;
       branches `v3-servidor` and `v3/etapa-1-servidor`; approved project `CLAUDE.md`; design
       guide §9 updated for v3; this document. Route: parent inline (mechanical docs).
-- [ ] E1.T1 Server scaffold: `package.json` (pinned deps), Fastify app with config from
+- [x] E1.T1 Server scaffold: `package.json` (pinned deps), Fastify app with config from
       `.env` (`.env.example`), TZ, `/api/health`, migration runner, `embedded-postgres` dev/test
       harness, `npm run db:reset` with invented seed, `.pgdata/` ignored, `node --test` setup.
-- [ ] E1.T2 Schema and domain: migration 001 with the 2.1-equivalent model (users, role
+      Commits `0326e6d` (+ `aad3363` db:stop script). Route: delegated writer.
+      Deps pinned (>= 2 weeks old): fastify 5.12.7, @fastify/cookie 11.1.3, pg 8.23.1,
+      argon2 0.45.1, embedded-postgres 16.14.0-beta.17 -> PostgreSQL 16.14, recorded in
+      `server/pg-version.json` (Compose image `postgres:16.14`).
+      Evidence: `npm test` 5/5; `npm run test:db` 4/4 (health, 404, DB session TZ, runner
+      order/idempotence/rollback/checksum); `npm run db:start` + `db:reset` ok; live
+      `GET /api/health` -> `{"ok":true,"db":true}`.
+- [x] E1.T2 Schema and domain: migration 001 with the 2.1-equivalent model (users, role
       permissions, sessions, login attempts, techs, shift list and shift changes, categories,
       tools, units, assignments, movements + transfers with append-only trigger, controls +
       items with unique original per tech/period and finalized-immutable trigger, alert
       resolutions, audit log, settings). Pure domain ported from 2.1 (pools from transfers,
       periods, effective control, alerts) with unit tests.
-- [ ] E1.T3 Auth and users: argon2id, httpOnly session cookie with "Mantener la sesión",
+      Commit `53772d4`. Route: delegated writer. Test-first: RED observed (6 files failing on
+      missing modules), then GREEN. Evidence: `npm test` 41/41; `npm run test:db` 14/14
+      (migrations from empty, seed coherent with the ledger, append-only movements/transfers/
+      audit incl. TRUNCATE, finalized control + items immutable, unique original control,
+      id/pool/legajo/unit-code constraints, one reception per pending return, DB TZ).
+- [x] E1.T3 Auth and users: argon2id, httpOnly session cookie with "Mantener la sesión",
       CSRF token, server-side progressive lockout (5 failures, 30 s doubling, max 15 min),
       admin creates/deactivates/resets users (forced change), roles admin/gerencia/supervisor/
       responsable/consulta with configurable permissions, permission check on every endpoint.
+      Commit `9e78e57`. Route: delegated writer. Evidence: `npm test` 45/45; `npm run test:db`
+      30/30 (16 auth: login ok/generic errors, strict schemas, lockout 30 s -> 60 s -> max
+      900 s persisted across app restart, unknown users lock too, CSRF token + Origin +
+      Sec-Fetch-Site, forced change flow, admin-only users with If-Match 409, last-admin and
+      self-deactivate guards, permission defaults + overrides, idle/absolute expiry);
+      `node tests/e2e/run.mjs t4` 3/3 (2.1 suite untouched).
 - [ ] E1.T4 API for every 2.1 operation: CRUD (techs, tools, units, categories, turnos),
       movements with server-side stock validation, controls (draft, finalize, correction),
       alert resolutions, audit, permissions; schema validation; `version` + `If-Match` -> 409;
@@ -121,6 +139,30 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 
 ## Progress
 - 2026-11-07: first delivery (no code) approved with adjustments; E1.T0 done.
+- 2026-11-07: E1.T1-E1.T3 done (server scaffold, schema + domain, auth and users).
+
+## Stage 1 implementation notes (E1.T1-E1.T3)
+- Embedded PG runs through the bundled `initdb`/`pg_ctl` of `embedded-postgres`
+  (`server/scripts/lib/embedded-pg.js`): `postgres.exe` refuses to start from an elevated
+  Windows console, `pg_ctl` starts it with a restricted token. Same package and binaries.
+- Dev DB: `npm run db:start` / `db:stop` (cluster in `.pgdata/`, port from `DATABASE_URL`,
+  default 54329); `db:migrate` and `db:reset` start it temporarily when it is down.
+  Integration tests: temp cluster per test file, or a fresh database per file on
+  `TEST_DATABASE_URL` (CI `postgres:16` service).
+- DB text limits follow the 2.1 SCHEMA (accept everything a 2.1 `.txt` accepts); API input
+  uses the UI limits (LIM). Ledger/history tables (movements, transfers, control items,
+  audit, shift changes) have no FKs so references survive logical deletes; live-state tables
+  do. Controls are written draft -> items -> finalize (trigger blocks item writes on a
+  finalized control).
+- Faithful 2.1 quirk kept: inventory message "Solo hay N en en reparación." (POOL label).
+- Sessions: idle 12 h / absolute 24 h; "Mantener la sesión" 30 days; expired sessions are
+  deleted when used (no periodic sweep yet).
+- Wrong current password on change-password also counts toward the lockout.
+- Dev users (seed): admin, gerencia, supervisor, responsable, responsable2, consulta, all
+  with `panol-dev-1234` (documented in `.env.example`).
 
 ## Next step
-- E1.T1 Server scaffold (delegated writer).
+- E1.T4 API for every 2.1 operation (reuses `planMovement` + `applyMovementPlan`,
+  `saveControl`, `requirePerm`).
+- Follow-ups: periodic cleanup of expired sessions and old login attempts; generate the
+  Compose `postgres` tag from `server/pg-version.json` in E1.T8.
