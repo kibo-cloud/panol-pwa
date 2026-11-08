@@ -10,3 +10,6 @@ privado/
 node_modules/
 dist/
 tests/e2e/out/
+
+# Base local de desarrollo (embedded-postgres)
+.pgdata/

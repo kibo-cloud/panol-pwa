@@ -1,71 +1,88 @@
-# Panol — control de herramientas (PWA)
+# Panol 3 — control de herramientas (servidor + PWA)
 
 Contexto del proyecto para Claude Code. Leer antes de trabajar aca; el protocolo general
-esta en `../CLAUDE.md`. Detalle funcional para el usuario en `LEEME.md`.
+esta en `../CLAUDE.md`. Pedido completo en `docs/PEDIDO-v3.md` (no se modifica sin consultar).
+Guia de diseno obligatoria: `docs/diseno/panol-guia-de-diseno.md`.
+Feature en curso: `odd/tasks/v3-servidor.md`.
 
 ## Que es
 
-PWA estatica para controlar herramientas por tecnico: controles semanales, entregas,
-reposiciones, inventario, alertas, reportes y usuarios con PIN (admin, responsable, consulta).
-Todo se guarda en el dispositivo (IndexedDB, base `panol`, clave `data`) y se comparte entre
-equipos con un archivo `.txt` (Combinar o Reemplazar todo).
+Sistema web multiusuario para controlar herramientas de Mantenimiento (Villa D'agri):
+plantillas por supervisor, controles por cantidad con limpieza, entregas y reposiciones,
+cajas compartidas por linea, compras aprobadas por Gerencia, novedades, existencia por tecnico,
+impresion de auditoria. Corre en un VPS; la PWA sigue instalable. `main` tiene la 2.1.0
+(solo correcciones) hasta que la v3 se apruebe.
 
 ## Stack (no negociable)
 
-- Un solo `index.html` con todo el CSS y el JS en linea (estilo denso, sin build, sin
-  dependencias en tiempo de ejecucion), `sw.js`, `manifest.webmanifest` e `icons/`.
-- Excel y PDF: `xlsx 0.18.5` y `jspdf 2.5.1` desde cdnjs, cargados a demanda con SRI
-  (`SRI` junto a `loadScript`). Si se cambia una version, recalcular el sha512 del archivo.
-- CSP en un `<meta>` de `index.html`: el script en linea se permite por su sha256.
-  **Despues de editar el `<script>`, correr `node tests/csp-hash.mjs`** (o la app queda en blanco).
-- Texto de usuario siempre con `esc()`; ids y numeros que vienen de un archivo se validan con
-  el esquema (`SCHEMA`, `checkData`) antes de tocar `S`.
+- Backend: Node 22 LTS + Fastify, PostgreSQL 16, migraciones SQL versionadas en
+  `server/migrations/` (nunca editar una migracion ya aplicada; agregar una nueva).
+- Arquitectura hexagonal: `server/src/domain` (puro, sin I/O), `application` (casos de uso),
+  `adapters/{http,pg,sse}`, `importers/{txt-v2,xlsm}`.
+- Frontend: Vite + JS en modulos por feature (`web/src/features/*`), sin framework.
+  `web/src/api` es el unico acceso a datos. CSP con `script-src 'self'`.
+- Dependencias de runtime minimas y fijadas en `package-lock.json`; xlsx y jspdf servidos
+  desde el propio servidor con SRI.
+- Base local: `embedded-postgres` (misma version mayor y menor que la imagen `postgres` del
+  Compose), datos en `.pgdata/` (ignorada). `npm run db:reset` carga datos inventados.
+- Despliegue (escrito y validado en CI, todavia sin VPS): Docker Compose (`app`, `postgres`,
+  `caddy`, `backup`). Secretos solo en `.env`; al repo va `.env.example`.
+
+## Reglas que no se rompen
+
+- El inventario sale siempre de `movement_transfers`; `movements` y `audit_log` son solo-agregar.
+- Un control finalizado no se modifica: se corrige con un registro nuevo (`supersedes`).
+- Un control original por poseedor y periodo (indice unico parcial).
+- Mover un tecnico de plantilla cierra un rango en `tech_plantilla_history`; no borra nada.
+  Cada control guarda `plantilla_id_snapshot`.
+- Anular = contramovimiento. Eliminar = baja logica; definitivo solo sin historial.
+- Permisos en cada endpoint; validacion por esquema en el servidor (tipos, limites, ISO).
+  En importaciones, fecha vacia solo en campos opcionales (se guarda nula); obligatoria vacia
+  es un error del informe.
+- Edicion concurrente con `version` + `If-Match`; conflicto -> 409 y aviso, nunca pisar.
+- Seguridad: CSP estricta, SRI, `esc()` en todo texto de usuario, CSRF, HTTPS + HSTS,
+  argon2id, bloqueo progresivo de login en el servidor. Sin correo: el restablecimiento de
+  contrasena lo hace un admin y obliga a cambiarla en el siguiente ingreso.
+- Zona horaria `America/Argentina/Buenos_Aires` en el servidor y en la base; periodos y
+  fechas de control se calculan con la fecha local.
+- Una sola solicitud de compra abierta por asignacion o unidad; los controles siguientes se
+  vinculan a la existente.
+- Gerencia decide compras y ve en modo consulta; por defecto no hace controles, entregas ni
+  administracion (configurable en permisos). Basta una aprobacion de cualquier Gerencia.
+
+## Datos reales
+
+`privado/` nunca se sube ni alimenta fixtures. Antes de cada commit, `git status` sin nada de
+`privado/`. Las pruebas usan datos inventados (Excel de prueba generado por script).
 
 ## Version
 
-- App `2.1.0`: `VERSION` en `sw.js` (`panol-v2.1.0`) y el texto "Pañol 2.1.0" de la vista Mas.
-- Formato del `.txt`: `version: 2` (compatible con 2.0.0). Los borrados viajan en
-  `data.deleted` (`'coleccion/id' -> fecha`), que 2.0.0 ignora.
-- Copias de cada version entregada en `versiones/` (no se editan).
+- App `3.0.0-dev` en la rama `v3-servidor`. La 2.1.0 queda en `versiones/panol v2.1.0`.
+- El importador acepta `.txt` `version: 2` (incluye `data.deleted`); *Descargar .txt* queda
+  como copia de seguridad.
 
-## Datos y reglas clave
+## Ramas y PR
 
-- `put`/`patch` sellan `updatedAt`; `del` deja marca en `DEL`. Combinar (`mergeInto`): gana la
-  fecha mas nueva, empate queda lo local, un borrado mas nuevo elimina.
-- Abrir un `.txt` exige admin con sesion iniciada, salvo primer uso sin usuarios (`canImport`).
-  Reemplazar nunca deja el equipo sin admin activo. Limite 20 MB.
-- PIN: `pbkdf2$210000$<hex>`; `sha256:` y `fnv:` de 2.0.0 se aceptan y se actualizan al ingresar.
-  Bloqueo progresivo por equipo en IndexedDB `pinLocks` (no viaja en el `.txt`).
-- Guardado: en la tarea siguiente, flush en `pagehide`, copia de seguridad `panol-unsaved` en
-  localStorage si una escritura pudo quedar cortada (se combina al arrancar y se borra apenas
-  se escribe en IndexedDB). Reemplazar deja marcas de borrado para todo lo que descarta.
-- `put`/`patch` validan contra el mismo esquema (`guardRec`); los formularios tienen `maxlength`
-  (`LIM`). Registros invalidos al cargar van a IndexedDB `quarantine` con aviso visible.
-- Fechas ISO-8601 obligatorias al importar; al combinar, fechas a mas de un dia en el futuro
-  cuentan como ahora.
+- Un PR por etapa contra `v3-servidor`, desde `v3/etapa-N-<tema>`. CI (GitHub Actions) en
+  verde antes de pedir revision. El PR dice que se hizo, como probarlo y el resultado de las
+  pruebas. `v3-servidor` se integra a `main` solo con aprobacion del usuario.
 
 ## Como correr
 
-`python -m http.server 8080` en la carpeta y abrir `http://localhost:8080` (el SW necesita
-`http(s)`; con doble clic funciona pero sin instalacion ni modo sin conexion).
+- `npm install`, `npm run db:reset`, `npm run dev` (servidor + Vite en local).
+- Detalle de instalar, actualizar y restaurar en el VPS: `LEEME.md`.
 
 ## Como probar
 
 | Comando | Que hace |
 |---|---|
-| `node tests/e2e/run.mjs` | E2E completo: servidor propio + Edge/Chrome headless por CDP, sin npm (Node 22+) |
-| `node tests/e2e/run.mjs <filtro>` | solo specs cuyo nombre contiene el filtro (p. ej. `t3`) |
-| `node tests/csp-hash.mjs --check` | verifica que la CSP coincide con el script en linea |
-| `node tests/e2e/make-fixtures.mjs` | regenera `tests/e2e/fixtures/` (la de 2.0.0 sale del commit `11296b1`) |
-
-- `PANOL_BROWSER=<ruta>` fuerza el navegador. Cada spec usa un contexto nuevo (IndexedDB vacio).
-- Specs en `tests/e2e/specs/` (una por tarea de `odd/tasks/security-hardening.md`); helpers en
-  `tests/e2e/app.mjs`. Capturas y archivos temporales en `tests/e2e/out/` (ignorado).
-- La spec de Excel/PDF se salta sin conexion. El archivo de 21 MB hace lenta la spec `t1`.
-- Headless no responde `showOpenFilePicker`: el harness lo anula y usa el `<input type=file>`.
+| `npm test` | unitarias de dominio y aplicacion (`node --test`) |
+| `npm run test:db` | integracion contra PostgreSQL (embedded en local, `postgres:16` en CI) |
+| `node tests/e2e/run.mjs [filtro]` | E2E por CDP contra el servidor con base sembrada |
 
 ## Convenciones
 
-- Commits Conventional Commits en ingles, sin atribucion de IA. Rama por feature.
+- Conventional Commits en ingles, sin atribucion de IA.
 - Textos de la app en espanol rioplatense; comentarios del codigo en espanol.
-- Saltos de linea LF (`.gitattributes`); los fixtures `.txt` se guardan tal cual.
+- Saltos de linea LF (`.gitattributes`).
+- Mobile first, Inter, sin sombras, estados con icono + texto + color (guia de diseno).

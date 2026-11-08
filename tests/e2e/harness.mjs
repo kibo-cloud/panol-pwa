@@ -1,5 +1,6 @@
-// Zero-dependency E2E harness: static server + headless Edge/Chrome over the
-// Chrome DevTools Protocol (Node >= 22 ships a global WebSocket).
+// Zero-dependency E2E harness: headless Edge/Chrome over the Chrome DevTools Protocol
+// (Node >= 22 ships a global WebSocket). The Pañol server itself is started by server.mjs;
+// the static server below only serves the 2.0.0 baseline for make-fixtures.mjs.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -22,9 +23,8 @@ const TYPES = {
   '.txt': 'text/plain; charset=utf-8'
 };
 
-// Static server. `srv.root` can be swapped (e.g. to serve the 2.0.0 baseline) and
-// `srv.offline = true` drops every connection, like a device without network.
-export function startServer(root = ROOT) {
+// Static server (make-fixtures.mjs). `srv.offline = true` drops every connection.
+export function startStaticServer(root = ROOT) {
   const srv = { root, offline: false };
   const server = http.createServer((req, res) => {
     if (srv.offline) { req.socket.destroy(); return; }
@@ -108,11 +108,22 @@ export async function launchBrowser() {
   const proc = spawn(findBrowser(), [
     '--headless=new', '--remote-debugging-port=0', '--user-data-dir=' + dir,
     '--no-first-run', '--no-default-browser-check', '--disable-extensions',
-    '--disable-background-networking', '--disable-sync', 'about:blank'
-  ], { stdio: 'ignore' });
+    '--disable-background-networking', '--disable-sync',
+    // PANOL_BROWSER_ARGS: opciones extra (p. ej. --no-sandbox en el runner de CI).
+    ...(process.env.PANOL_BROWSER_ARGS || '').split(/\s+/).filter(Boolean), 'about:blank'
+  ], { stdio: ['ignore', 'ignore', 'pipe'] });
+  // Se guarda la cola de stderr para explicar un arranque fallido; se consume siempre para no trabar el pipe.
+  let stderrTail = '';
+  let exited = null;
+  proc.stderr.on('data', (d) => { stderrTail = (stderrTail + d).slice(-3000); });
+  proc.on('exit', (code, signal) => { exited = code ?? signal; });
   const portFile = path.join(dir, 'DevToolsActivePort');
-  for (let i = 0; i < 150 && !fs.existsSync(portFile); i++) await sleep(100);
-  if (!fs.existsSync(portFile)) throw new Error('browser did not start (no DevToolsActivePort)');
+  // No se corta la espera cuando el proceso sale: en Windows msedge.exe delega en otro proceso y sale con 0.
+  for (let i = 0; i < 300 && !fs.existsSync(portFile); i++) await sleep(100);
+  if (!fs.existsSync(portFile)) {
+    try { proc.kill(); } catch { /* ignore */ }
+    throw new Error('browser did not start (no DevToolsActivePort)' + (exited !== null ? ', exit ' + exited : ', timeout 30 s') + '\n' + stderrTail);
+  }
   let port = '';
   for (let i = 0; i < 20 && !port; i++) { try { port = fs.readFileSync(portFile, 'utf8').split('\n')[0].trim(); } catch { await sleep(100); } }
   const v = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
@@ -192,9 +203,10 @@ export async function openPage(browser, srv, { context } = {}) {
       }
       throw new Error('timeout: ' + label);
     },
-    // Waits until the app finished booting (data loaded and first render done).
-    async ready() {
-      await page.waitFor("typeof B!=='undefined'&&B.mode==='local'&&!!document.querySelector('#view')&&!document.querySelector('#view .loading')", 15000, 'app ready');
+    // Waits until the app finished booting: login screen, password change or the app chrome
+    // (data loaded, first render done and no action in progress).
+    async ready(timeout = 15000) {
+      await page.waitFor("!!document.querySelector('#view')&&!document.querySelector('#view .loading')&&!document.body.classList.contains('busy')&&(!!document.querySelector('#a-user,#c-cur')||!!document.querySelector('#side nav'))", timeout, 'app ready');
       await sleep(80);
     },
     // Clicks the first visible element matching sel (optionally containing text), as a user gesture.

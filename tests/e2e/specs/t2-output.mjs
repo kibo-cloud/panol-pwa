@@ -1,49 +1,59 @@
-// T2: output hardening — CSP, escaping of user input, SRI on the cdnjs libraries.
-import fs from 'node:fs';
-import path from 'node:path';
-import crypto from 'node:crypto';
-import { ROOT, sleep } from '../harness.mjs';
-import { assert, eq, setupAdmin, loadDemo, ROUTES } from '../app.mjs';
+// T2: output hardening — CSP, escaping of user input, SRI on the Excel/PDF libraries.
+// v3: the CSP is an HTTP header (no meta, no inline script hash; tests/csp-hash.mjs retired)
+// and xlsx/jspdf are served by the app itself from /vendor/ with SRI (no cdnjs, no network).
+import { sleep } from '../harness.mjs';
+import { assert, eq, loginAs, loadDemo, state, ROUTES } from '../app.mjs';
+import { CSP } from '../../../server/src/adapters/http/web-routes.js';
 
 const EVIL = '<img src=x onerror="window.__xss=7">';
 
 export const tests = [
   {
-    name: 'CSP meta is present and allows the inline script by hash',
-    async fn(page) {
-      const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8').replace(/\r\n?/g, '\n');
-      const m = /<script>([\s\S]*?)<\/script>/.exec(html);
-      const hash = 'sha256-' + crypto.createHash('sha256').update(m[1], 'utf8').digest('base64');
-      const csp = await page.eval("(document.querySelector('meta[http-equiv=\"Content-Security-Policy\"]')||{}).content||''");
-      assert(csp.includes("object-src 'none'") && csp.includes("base-uri 'self'"), 'CSP directives: ' + csp);
-      assert(csp.includes(`'${hash}'`), `CSP must allow the inline script hash ${hash} (run: node tests/csp-hash.mjs)`);
-      assert(!/script-src[^;]*'unsafe-inline'/.test(csp), 'no unsafe-inline scripts');
-      eq(await page.eval("typeof ACT"), 'object', 'inline script ran under the CSP');
+    name: 'CSP header is exact on pages, assets and API, with no inline code',
+    async fn(page, { srv }) {
+      assert(!/unsafe-inline|unsafe-eval/.test(CSP) && CSP.includes("script-src 'self'") && CSP.includes("object-src 'none'"), 'CSP directives: ' + CSP);
+      for (const p of ['/', '/index.html', '/sw.js', '/manifest.webmanifest', '/api/health', '/tecnicos']) {
+        const r = await fetch(srv.base + p);
+        eq(r.headers.get('content-security-policy'), CSP, 'CSP header on ' + p);
+        eq(r.headers.get('x-content-type-options'), 'nosniff', 'nosniff on ' + p);
+      }
+      eq(await page.count('meta[http-equiv="Content-Security-Policy"]'), 0, 'no CSP meta (it is a header)');
+      eq(await page.count('script:not([src])'), 0, 'no inline scripts');
+      eq(await page.count('[style]:not([data-css])'), 0, 'no inline style attributes outside data-css');
+      const html = await (await fetch(srv.base + '/')).text();
+      assert(!/<script(?![^>]*\bsrc=)[^>]*>/.test(html) && !/\son[a-z]+=/i.test(html), 'built index.html has no inline script or handlers');
+      assert(await page.eval("!!document.getElementById('a-user')"), 'app booted under the CSP');
+      await loginAs(page);
+      for (const r of ROUTES) await page.hash('#' + r);
+      eq((await page.eval('window.__csp')).length, 0, 'no CSP violations on any route');
     }
   },
   {
     name: 'markup typed in forms is shown as text',
     async fn(page) {
-      await setupAdmin(page);
+      await loginAs(page);
       await page.hash('#config');
       await page.act('catNew'); await page.type('#f-cn', EVIL); await page.modalBtn('Crear');
       await page.act('toolNew'); await page.type('#f-tn', EVIL + ' herr'); await page.type('#f-td', EVIL); await page.type('#f-ts', '3'); await page.modalBtn('Crear herramienta');
       await page.hash('#tecnicos');
       await page.act('techNew'); await page.type('#f-name', EVIL + ' tec'); await page.type('#f-leg', '"><svg onload=window.__xss=8>'); await page.modalBtn('Crear técnico');
-      const techId = await page.eval('Object.keys(S.techs)[0]');
-      const toolId = await page.eval('Object.keys(S.tools)[0]');
-      assert(techId && toolId, 'records created');
-      for (const r of [...ROUTES, 'tecnico-' + techId, 'herramienta-' + toolId]) {
+      const st = await state(page);
+      const techId = Object.keys(st.techs)[0];
+      const toolId = Object.keys(st.tools)[0];
+      assert(techId && toolId && Object.keys(st.categories).length === 1, 'records created');
+      eq(st.techs[techId].name, EVIL + ' tec', 'stored as typed');
+      for (const r of [...ROUTES, 'tecnico-' + techId, 'herramienta-' + toolId, 'control-' + techId]) {
         await page.hash('#' + r);
         eq(await page.eval('window.__xss'), undefined, 'window.__xss on #' + r);
       }
+      await page.hash('#tecnicos');
+      assert((await page.text('#view')).includes('<img src=x'), 'markup visible as text');
     }
   },
   {
-    name: 'Excel and PDF export load their libraries with SRI',
-    online: true,
+    name: 'Excel and PDF export load their libraries from /vendor/ with SRI',
     async fn(page) {
-      await setupAdmin(page);
+      await loginAs(page);
       await loadDemo(page);
       await page.hash('#reportes');
       await page.act('exportXlsx');
@@ -54,9 +64,14 @@ export const tests = [
       await page.waitFor("window.__blobs.length>1&&!document.body.classList.contains('busy')", 30000, 'pdf blob');
       const p = await page.lastBlob(true);
       eq(p.head, '%PDF', 'pdf header');
-      const scripts = await page.eval("[...document.querySelectorAll('script[src*=cdnjs]')].map((s)=>({i:s.integrity,c:s.crossOrigin}))");
-      eq(scripts.length, 2, 'two cdnjs scripts');
-      for (const s of scripts) { assert(/^sha512-/.test(s.i), 'integrity set'); eq(s.c, 'anonymous', 'crossOrigin'); }
+      const scripts = await page.eval("[...document.querySelectorAll('script[src]')].filter((s)=>s.src.includes('/vendor/')).map((s)=>({u:new URL(s.src).pathname,i:s.integrity,c:s.crossOrigin}))");
+      eq(scripts.length, 2, 'two vendor scripts: ' + JSON.stringify(scripts));
+      for (const s of scripts) {
+        assert(/^\/vendor\/(xlsx|jspdf)-[\d.]+\./.test(s.u), 'served by the app: ' + s.u);
+        assert(/^sha384-[A-Za-z0-9+/=]{64}$/.test(s.i), 'integrity set: ' + s.i);
+        eq(s.c, 'anonymous', 'crossOrigin');
+      }
+      eq(await page.count('script[src*="cdnjs"]'), 0, 'no CDN');
       await sleep(200);
     }
   }

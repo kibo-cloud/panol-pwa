@@ -219,12 +219,14 @@ Transiciones discretas: 150–200 ms con `ease-out` en el color de fondo y el bo
 
 Español rioplatense con voseo ("Ingresá", "Completá", "Describí el problema"). Frases cortas y concretas. Los botones dicen la acción ("Registrar reposición", "Confirmar cambio a Tarde"). Las fechas van en formato corto ("6 nov 2026 · 14:32").
 
-## 9. Datos: todo en el teléfono
+## 9. Datos: centralizados en el servidor (v3)
 
-- Sin nube ni backend: la información se guarda en el almacenamiento local del dispositivo (por ejemplo IndexedDB, mediante Dexie o similar) y se pide almacenamiento persistente (`navigator.storage.persist()`).
-- La app funciona sin conexión (PWA instalable con service worker).
-- **Copia de seguridad** (en Menú): permite exportar todos los datos a un archivo y restaurarlos desde ese archivo. Hace falta para cambiar de teléfono o recuperarse si se borran los datos del navegador.
-- Los usuarios, roles y permisos viven en ese mismo teléfono.
+- Los datos viven en un servidor propio (API + base PostgreSQL). Todos los equipos ven la misma información, y los cambios de otros usuarios aparecen sin recargar.
+- Se ingresa con usuario y contraseña. Los usuarios, roles y permisos se administran en el servidor.
+- La PWA sigue siendo instalable. Sin conexión muestra un aviso visible y guarda en el dispositivo solo el borrador del control en curso, que se envía al volver la conexión.
+- Si dos personas editan lo mismo, la app avisa del conflicto en lugar de pisar el cambio.
+- **Copia de seguridad** (en Menú): *Descargar .txt* sigue disponible como respaldo manual. La copia principal la hace el servidor todos los días.
+- Todo lo visual de esta guía (tokens, componentes, pantallas, tono) no cambia.
 
 ## 10. Lo que no lleva
 

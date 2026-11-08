@@ -6,7 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { ROOT, FIX, startServer, launchBrowser, openPage, sleep } from './harness.mjs';
+import { ROOT, FIX, startStaticServer, launchBrowser, openPage, sleep } from './harness.mjs';
 
 const BASELINE = '11296b1';
 const HEAD = 'PAÑOL · archivo de datos\r\nGuardalo, compartilo o abrilo desde la app Pañol. No lo edites a mano.\r\n';
@@ -46,12 +46,12 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'panol-baseline-'));
 const tar = spawnSync('git', ['-C', ROOT, 'archive', '--format=tar', '-o', path.join(tmp, 'b.tar'), BASELINE]);
 if (tar.status) throw new Error('git archive failed: ' + tar.stderr);
 spawnSync('tar', ['-xf', 'b.tar'], { cwd: tmp });
-const srv = await startServer(tmp);
+const srv = await startStaticServer(tmp);
 const browser = await launchBrowser();
 try {
   const page = await openPage(browser, srv);
   await page.goto('/');
-  await page.ready();
+  await page.waitFor("typeof B!=='undefined'&&B.mode==='local'", 15000, '2.0.0 app ready');
   const txt = await page.eval(`(async () => {
     const id = 'u' + uid(), salt = uid();
     await put('users', id, { name: 'Ana Admin', role: 'admin', active: true, salt, pinHash: await hashPin('1234', salt), createdAt: nowISO(), updatedAt: nowISO() });

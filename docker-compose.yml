@@ -1,0 +1,111 @@
+# Pañol 3 en el VPS: app (Fastify), PostgreSQL, Caddy (HTTPS automático) y copias de
+# seguridad diarias. Pasos completos en LEEME.md.
+#
+# Variables (archivo .env junto a este, nunca al repositorio):
+#   DOMAIN             dominio público, p. ej. panol.ejemplo.com.ar (el DNS apunta al VPS)
+#   ACME_EMAIL         correo para Let's Encrypt (avisos de vencimiento del certificado)
+#   POSTGRES_DB        nombre de la base (por defecto panol)
+#   POSTGRES_USER      dueño de las tablas: migraciones y copias (por defecto panol_owner)
+#   POSTGRES_PASSWORD  contraseña del dueño (obligatoria; solo letras y números, p. ej.
+#                      `openssl rand -hex 24`, porque va dentro de una URL)
+#   APP_DB_PASSWORD    contraseña del rol panol_app con el que la app atiende (obligatoria,
+#                      distinta de la anterior; mismo formato)
+#   BACKUP_HOUR        hora local de la copia diaria, 0-23 (por defecto 3)
+#   KEEP_DAILY / KEEP_WEEKLY / KEEP_MONTHLY   copias que se conservan (7 / 4 / 6)
+# Copia fuera del VPS (opcional): archivo .env.offsite con BACKUP_REMOTE y RCLONE_CONFIG_*
+# (ver LEEME.md). Sin ese archivo la copia queda solo en el volumen `backups`.
+#
+# La imagen de postgres tiene que coincidir con server/pg-version.json (`composeImage`);
+# una prueba unitaria falla si difieren.
+name: panol
+
+x-tz: &tz
+  TZ: America/Argentina/Buenos_Aires
+
+services:
+  postgres:
+    image: postgres:16.14
+    restart: unless-stopped
+    environment:
+      <<: *tz
+      PGTZ: America/Argentina/Buenos_Aires
+      POSTGRES_DB: ${POSTGRES_DB:-panol}
+      POSTGRES_USER: ${POSTGRES_USER:-panol_owner}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD en .env}
+    command: ["postgres", "-c", "timezone=America/Argentina/Buenos_Aires", "-c", "log_timezone=America/Argentina/Buenos_Aires"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build: .
+    image: panol-app:local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *tz
+      NODE_ENV: production
+      APP_ORIGIN: https://${DOMAIN:?Falta DOMAIN en .env}
+      # Dos credenciales: la app atiende como panol_app (sin privilegios de dueño; el servidor
+      # se niega a atender como superusuario o dueño) y migra al arrancar con el dueño.
+      DATABASE_URL: postgres://panol_app:${APP_DB_PASSWORD:?Falta APP_DB_PASSWORD en .env}@postgres:5432/${POSTGRES_DB:-panol}
+      MIGRATION_DATABASE_URL: postgres://${POSTGRES_USER:-panol_owner}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-panol}
+      # Detrás de Caddy: protocolo e IP del cliente desde X-Forwarded-*.
+      TRUST_PROXY: "true"
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2.11.8-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      <<: *tz
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?Falta ACME_EMAIL en .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  backup:
+    build:
+      context: .
+      dockerfile: deploy/backup/Dockerfile
+    image: panol-backup:local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - path: .env.offsite
+        required: false
+    environment:
+      <<: *tz
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB:-panol}
+      PGUSER: ${POSTGRES_USER:-panol_owner}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      BACKUP_HOUR: ${BACKUP_HOUR:-3}
+      KEEP_DAILY: ${KEEP_DAILY:-7}
+      KEEP_WEEKLY: ${KEEP_WEEKLY:-4}
+      KEEP_MONTHLY: ${KEEP_MONTHLY:-6}
+    volumes:
+      - backups:/backups
+
+volumes:
+  pgdata:
+  backups:
+  caddy_data:
+  caddy_config:

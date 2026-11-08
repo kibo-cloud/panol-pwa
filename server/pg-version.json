@@ -1,0 +1,5 @@
+{
+  "postgres": "16.14",
+  "embeddedPostgres": "16.14.0-beta.17",
+  "composeImage": "postgres:16.14"
+}
