@@ -108,7 +108,9 @@ export async function launchBrowser() {
   const proc = spawn(findBrowser(), [
     '--headless=new', '--remote-debugging-port=0', '--user-data-dir=' + dir,
     '--no-first-run', '--no-default-browser-check', '--disable-extensions',
-    '--disable-background-networking', '--disable-sync', 'about:blank'
+    '--disable-background-networking', '--disable-sync',
+    // PANOL_BROWSER_ARGS: opciones extra (p. ej. --no-sandbox en el runner de CI).
+    ...(process.env.PANOL_BROWSER_ARGS || '').split(/\s+/).filter(Boolean), 'about:blank'
   ], { stdio: 'ignore' });
   const portFile = path.join(dir, 'DevToolsActivePort');
   for (let i = 0; i < 150 && !fs.existsSync(portFile); i++) await sleep(100);

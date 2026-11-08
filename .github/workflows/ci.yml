@@ -1,0 +1,151 @@
+# CI de Pañol 3: unitarias, integración contra PostgreSQL, Compose (build + humo + copia y
+# restauración) y E2E con Chrome. La versión de postgres sale de server/pg-version.json (una
+# prueba unitaria falla si este archivo, el Compose o la imagen de copias difieren).
+name: CI
+
+on:
+  push:
+    branches: [v3-servidor, 'v3/**']
+  pull_request:
+    branches: [v3-servidor, 'v3/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TZ: America/Argentina/Buenos_Aires
+
+jobs:
+  unit:
+    name: Unitarias
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  integration:
+    name: Integración (PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16.14
+        env:
+          POSTGRES_PASSWORD: panol-ci
+          TZ: America/Argentina/Buenos_Aires
+          PGTZ: America/Argentina/Buenos_Aires
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:panol-ci@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:db
+
+  compose:
+    name: Compose (build, humo, copia y restauración)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPOSE: docker compose -f docker-compose.yml -f docker-compose.ci.yml
+    steps:
+      - uses: actions/checkout@v4
+      - name: .env de prueba (localhost, contraseñas al azar)
+        run: |
+          {
+            echo "DOMAIN=localhost"
+            echo "ACME_EMAIL=ci@example.com"
+            echo "POSTGRES_DB=panol"
+            echo "POSTGRES_USER=panol_owner"
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"
+            echo "APP_DB_PASSWORD=$(openssl rand -hex 24)"
+          } > .env
+          grep -v PASSWORD .env
+      - run: $COMPOSE config --quiet
+      - run: $COMPOSE build
+      - run: $COMPOSE up -d
+      - name: Esperar /api/health (directo y por Caddy con HTTPS)
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3000/api/health; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:3000/api/health
+          curl -fsSk --retry 10 --retry-delay 2 --retry-all-errors https://localhost/api/health
+          curl -fsSkI https://localhost/ | tee /tmp/headers.txt
+          grep -qi '^strict-transport-security: max-age=31536000' /tmp/headers.txt
+          grep -qi "^content-security-policy: default-src 'self'; script-src 'self'" /tmp/headers.txt
+          curl -fsS -o /dev/null -w '%{http_code} %{redirect_url}\n' http://localhost/ | grep -q '^308 https://localhost/'
+      - name: Dos credenciales (la app atiende como panol_app, migra con el dueño)
+        run: |
+          $COMPOSE exec -T app node -e "const a=new URL(process.env.DATABASE_URL).username,m=new URL(process.env.MIGRATION_DATABASE_URL).username;console.log(a,m);process.exit(a==='panol_app'&&m!==a?0:1)"
+      - name: Primer administrador (npm run admin:create)
+        run: $COMPOSE exec -T app npm run admin:create -- ciadmin "Admin CI" | grep -q 'Contraseña temporal'
+      - name: Copia y restauración
+        run: |
+          set -a; . ./.env; set +a
+          sh scripts/backup/ci-test.sh
+      - name: Logs
+        if: failure()
+        run: $COMPOSE logs --no-color --tail 200
+      - name: Bajar el Compose
+        if: always()
+        run: $COMPOSE down -v
+
+  e2e:
+    name: E2E (Chrome)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16.14
+        env:
+          POSTGRES_PASSWORD: panol-ci
+          TZ: America/Argentina/Buenos_Aires
+          PGTZ: America/Argentina/Buenos_Aires
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:panol-ci@127.0.0.1:5432/postgres
+      # Chrome preinstalado en la imagen del runner. Sin sandbox: Ubuntu 24.04 restringe los
+      # espacios de nombres de usuario que usa el sandbox de Chrome (máquina efímera de CI).
+      PANOL_BROWSER: /usr/bin/google-chrome
+      PANOL_BROWSER_ARGS: --no-sandbox
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-out
+          path: tests/e2e/out/
+          retention-days: 7
