@@ -24,6 +24,14 @@ test('cobertura vigente o programada, y terminada', () => {
   assert.equal(coverageOf([R('a', 'x', null)], '2026-03-01'), null);
 });
 
+test('una cobertura cortada por un cambio definitivo ya no cuenta (como el servidor)', () => {
+  // Cobertura [03-05, 03-12) cortada el 03-08 por un cambio definitivo a "tarde": la cobertura
+  // termina el 03-08, la vuelta original queda anulada y "tarde" es el rango abierto.
+  const cut = [R('r1', 'manana', null, '2026-03-05'), R('r2', 'noche', '2026-03-05', '2026-03-08', { temporary: true }),
+    R('r3', 'manana', '2026-03-12', '2026-03-12'), R('r4', 'tarde', '2026-03-08', null)];
+  assert.equal(coverageOf(cut, '2026-03-06'), null);
+});
+
 test('informes: foto del control, si no historial al fin del período, si no la actual', () => {
   assert.equal(periodEndDay({ y: 2026, m: 2, w: 4 }), '2026-02-28');
   assert.equal(periodEndDay({ y: 2026, m: 3, w: 2 }), '2026-03-14');

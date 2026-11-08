@@ -20,7 +20,10 @@ export function coverageOf(ranges, day) {
   const open = sorted.find((r) => r.validTo == null);
   if (!open || open.validFrom == null) return null;
   const c = sorted.find((r) => r.temporary && !isVoid(r) && r.validTo === open.validFrom && day < r.validTo);
-  return c ? { plantillaId: c.plantillaId, from: c.validFrom, until: c.validTo, returnTo: open.plantillaId, started: c.validFrom <= day } : null;
+  // Igual que el servidor: una cobertura ya cortada por un cambio definitivo no cuenta (el corte
+  // deja anulada la vuelta original, un rango que empieza después del fin acortado).
+  if (c && sorted.some((r) => r.validFrom != null && r.validFrom > c.validTo)) return null;
+  return c ?{ plantillaId: c.plantillaId, from: c.validFrom, until: c.validTo, returnTo: open.plantillaId, started: c.validFrom <= day } : null;
 }
 
 // Último día (fecha local) de la semana de un período (como el servidor).
