@@ -3,7 +3,8 @@
 import { esc } from './dom.js';
 import { icon } from './icons.js';
 import { ST, MSHORT } from '../state/constants.js';
-import { S, derive, can, who, toolName } from '../state/store.js';
+import { S, derive, can, who, toolName, holderName } from '../state/store.js';
+import { holderKey } from '../state/plantillas.js';
 import { fdt, mlabel, pkeyOf, wrange, pnumOf } from '../state/period.js';
 
 export const nf = (n) => Number(n || 0).toLocaleString('es-AR');
@@ -14,6 +15,10 @@ export function initials(n) { return String(n || '?').trim().split(/\s+/).slice(
 const LIGHT_LABEL = { ok: 'Todo en buen estado', warn: 'Tiene herramientas para cambio', bad: 'Tiene faltantes', pend: 'Sin controlar' };
 export function avatar(name, light, lg) { return `<span class="av ${lg ? 'lg' : ''}">${esc(initials(name))}${light ? `<span class="sem ${light}" role="img" aria-label="${LIGHT_LABEL[light]}"></span>` : ''}</span>`; }
 export const SHIFT_IC = (i) => ['sun', 'sunset', 'moon'][i] || 'clock';
+// Texto del turno actual de una plantilla (los migrados de 2.1 ya dicen "Turno ...").
+export const turnoText = (l) => (!l ? 'Sin turno' : /^turno /i.test(l) ? l : 'Turno ' + l);
+// Ícono de una plantilla según su turno actual (dato informativo).
+export const plIcon = (p) => { const l = String((p && p.currentShiftLabel) || '').toLowerCase(); return /mañana|manana|día|dia/.test(l) ? 'sun' : /tarde/.test(l) ? 'sunset' : /noche/.test(l) ? 'moon' : 'users'; };
 export function sbar(s) { const t = s.bueno + s.cambio + s.faltante + s.pendiente; if (!t) return '<div class="sbar" aria-hidden="true"></div>'; return `<div class="sbar" role="img" aria-label="${s.bueno} en buen estado, ${s.cambio} para cambio, ${s.faltante} faltantes, ${s.pendiente} sin controlar">${['bueno', 'cambio', 'faltante', 'pendiente'].filter((k) => s[k]).map((k) => `<span class="${ST[k].cls}" data-css="flex:${s[k]}"></span>`).join('')}</div>`; }
 export function cnts(s) { if (!s.total) return '<span class="s">Sin herramientas asignadas</span>'; return `<span class="legend-dots"><span class="ld"><b data-css="color:var(--ok-ink)">${s.bueno}</b>ok</span><span class="ld"><b data-css="color:var(--warn-ink)">${s.cambio}</b>cam.</span><span class="ld"><b data-css="color:var(--bad-ink)">${s.faltante}</b>falt.</span>${s.pendiente ? `<span class="ld"><b>${s.pendiente}</b>sin ctrl.</span>` : ''}</span>`; }
 const CTL_ST = { done: ['ok', 'Controlado', 'ok'], draft: ['warn', 'Incompleto', 'pencil'], pend: ['pend', 'Pendiente', 'clock'], fut: ['pend', 'Próximo', 'cal'] };
@@ -40,22 +45,24 @@ export function lineChart(labels, series) {
 export const field = (label, inner, id = '') => `<div class="field">${label ? `<label ${id ? `for="${esc(id)}"` : ''}>${label}</label>` : ''}${inner}</div>`;
 export const emptyBox = (t, s = '', a = '') => `<div class="empty"><b>${t}</b>${s}${a ? `<div data-css="margin-top:12px">${a}</div>` : ''}</div>`;
 export function optList(items, sel, ph) { return (ph ? `<option value="">${esc(ph)}</option>` : '') + items.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(sel) ? 'selected' : ''}>${esc(l)}</option>`).join(''); }
-export function techOptions(sel, ph = 'Elegí un técnico') { const d = derive(); return `<option value="">${esc(ph)}</option>` + d.shifts.map((s) => { const ts = d.activeTechs.filter((t) => t.shiftId === s.id); return ts.length ? `<optgroup label="${esc(s.name)}">${ts.map((t) => `<option value="${esc(t.id)}" ${t.id === sel ? 'selected' : ''}>${esc(t.name)} (${esc(t.legajo)})</option>`).join('')}</optgroup>` : ''; }).join(''); }
+// Técnicos activos agrupados por plantilla; con cajas = true agrega las cajas compartidas
+// (valor `caja:<id>`).
+export function techOptions(sel, ph = 'Elegí un técnico', cajas = false) { const d = derive(); return `<option value="">${esc(ph)}</option>` + (cajas && d.activeCajas.length ? `<optgroup label="Cajas compartidas">${d.activeCajas.map((k) => `<option value="caja:${esc(k.id)}" ${'caja:' + k.id === sel ? 'selected' : ''}>${esc(k.name)}</option>`).join('')}</optgroup>` : '') + d.shifts.map((s) => { const ts = d.activeTechs.filter((t) => t.shiftId === s.id); return ts.length ? `<optgroup label="${esc(s.name)}">${ts.map((t) => `<option value="${esc(t.id)}" ${t.id === sel ? 'selected' : ''}>${esc(t.name)} (${esc(t.legajo)})</option>`).join('')}</optgroup>` : ''; }).join(''); }
 const MV_TAG = { entrega_inicial: ['Entrega', ''], adicional: ['Adicional', ''], reposicion: ['Reposición', 'warn'], devolucion: ['Devolución', 'ok'], retiro: ['Retiro', 'pend'], ingreso: ['Ingreso', 'ok'], reparado: ['Reparación', 'ok'], baja: ['Baja', 'bad'], recupero: ['Recupero', 'ok'], recepcion: ['Recepción', 'ok'] };
 export function mvRow(m) {
-  const t = S.techs[m.techId]; const tn = toolName(m.toolId); const tg = MV_TAG[m.type] || [m.type, ''];
+  const tn = toolName(m.toolId); const tg = MV_TAG[m.type] || [m.type, ''];
   const uc = (id) => (id && S.units[id] ? S.units[id].code : '');
   const title = m.type === 'reposicion' && (m.oldUnitId || m.newUnitId) ? `${tn} ${uc(m.oldUnitId) || ''} → ${uc(m.newUnitId) || 'nueva'}` : `${tn}${uc(m.unitId) ? ' ' + uc(m.unitId) : ''}${m.qty > 1 ? ` ×${m.qty}` : ''}`;
-  const meta = [t ? t.name : '', fdt(m.at), who(m.by)].filter(Boolean).join(' · ');
+  const meta = [holderName(m), fdt(m.at), who(m.by)].filter(Boolean).join(' · ');
   return `<div class="row"><span class="tag ${tg[1]}">${esc(tg[0])}</span><div class="grow"><div class="t">${esc(title)}</div><div class="s">${esc(meta)}</div>${m.reason || m.notes ? `<div class="s">${esc([m.reason, m.notes].filter(Boolean).join('. '))}</div>` : ''}</div>${demoChip(m)}</div>`;
 }
 export const mvList = (l) => (l.length ? `<div class="list">${l.map(mvRow).join('')}</div>` : `<div class="list">${emptyBox('Sin movimientos registrados', 'Las entregas, devoluciones y reposiciones aparecen acá.')}</div>`);
 const AL_IC = { faltante: 'x', cambio: 'wrench', consecutiva: 'alert', devolucion: 'swap', pendiente: 'clock' };
 function alertAction(a) {
-  if (a.type === 'pendiente' && can('controls_do')) return `<a class="btn sm" href="#control-${esc(a.techId)}">Controlar</a>`;
-  if ((a.type === 'cambio' || a.type === 'consecutiva' || a.type === 'faltante') && can('movements_do')) return `<button class="btn sm" data-act="goRepo" data-t="${esc(a.techId)}" data-a="${esc(a.asgId)}">Registrar reposición</button>`;
+  if (a.type === 'pendiente' && can('controls_do')) return `<a class="btn sm" href="${esc(a.href)}">Controlar</a>`;
+  if ((a.type === 'cambio' || a.type === 'consecutiva' || a.type === 'faltante') && can('movements_do')) return `<button class="btn sm" data-act="goRepo" data-t="${esc(holderKey(a))}" data-a="${esc(a.asgId)}">Registrar reposición</button>`;
   if (a.type === 'devolucion' && can('movements_do')) return `<button class="btn sm" data-act="recvPending" data-m="${esc(a.movId)}">Recibir devolución</button>`;
-  return `<a class="btn sm" href="${esc(a.href)}">Ver ficha</a>`;
+  return `<a class="btn sm" href="${esc(a.cajaId ? '#caja-' + a.cajaId : '#tecnico-' + a.techId)}">Ver ficha</a>`;
 }
 export function alertRow(a, full) {
   const cls = a.sev >= 3 ? 'bad' : a.sev === 2 ? 'warn' : 'pend';

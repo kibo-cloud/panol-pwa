@@ -69,17 +69,24 @@ describe('técnicos', () => {
     assert.equal((await api.call('admin', 'PATCH', '/api/techs/nadie', { name: 'Nadie Nunca' }, ifMatch(1))).statusCode, 404);
   });
 
+  // Etapa 2: el cambio de turno de 2.1 delega en mover de plantilla (historial de pertenencia;
+  // shift_changes ya no se escribe).
   test('cambio de turno: shift_change, guarda historial y auditoría', async () => {
     const [t] = await api.q("SELECT version FROM techs WHERE id = 't-ana'");
     assert.equal((await api.call('responsable', 'POST', '/api/techs/t-ana/shift-change', { to: 'noche' }, ifMatch(t.version))).statusCode, 403);
     const r = await api.call('supervisor', 'POST', '/api/techs/t-ana/shift-change', { to: 'noche', note: 'Rotación' }, ifMatch(t.version));
     assert.equal(r.statusCode, 200);
     assert.equal(r.json().tech.shiftId, 'noche');
-    const [sc] = await api.q("SELECT * FROM shift_changes WHERE tech_id = 't-ana'");
-    assert.equal(sc.from_shift_id, 'manana');
-    assert.equal(sc.to_name, 'Turno noche');
-    assert.equal(sc.created_by, 'u-supervisor');
-    const [a] = await audits('shift_change');
+    assert.equal(r.json().tech.version, t.version + 1);
+    assert.equal(r.json().shiftChange.from, 'manana');
+    assert.equal(r.json().shiftChange.toName, 'Turno noche');
+    assert.equal(await api.q("SELECT 1 FROM shift_changes WHERE tech_id = 't-ana'").then((x) => x.length), 0);
+    const h = await api.q("SELECT plantilla_id, valid_from::text, valid_to::text, reason, created_by FROM tech_plantilla_history WHERE tech_id = 't-ana' ORDER BY valid_from NULLS FIRST");
+    assert.equal(h.length, 2);
+    assert.equal(h[0].plantilla_id, 'manana');
+    assert.equal(h[0].valid_to, h[1].valid_from);
+    assert.deepEqual([h[1].plantilla_id, h[1].valid_to, h[1].reason, h[1].created_by], ['noche', null, 'Rotación', 'u-supervisor']);
+    const [a] = await audits('tech_move');
     assert.match(a.detail, /Turno mañana a Turno noche/);
     assert.equal((await api.call('supervisor', 'POST', '/api/techs/t-ana/shift-change', { to: 'nada' }, ifMatch(t.version + 1))).statusCode, 422);
   });
@@ -95,13 +102,17 @@ describe('turnos, categorías, herramientas y unidades', () => {
     assert.equal((await api.call('admin', 'POST', '/api/shifts', { name: 'turno FRANCO' })).statusCode, 409);
     const ren = await api.call('admin', 'PATCH', `/api/shifts/${s.id}`, { name: 'Turno fin de semana' }, ifMatch(s.version));
     assert.equal(ren.json().shift.name, 'Turno fin de semana');
-    const [m] = await api.q("SELECT version FROM shifts WHERE id = 'tarde'");
+    // Etapa 2: los turnos son plantillas; borrar un turno = archivar la plantilla (baja lógica).
+    const [m] = await api.q("SELECT version FROM plantillas WHERE id = 'tarde'");
     const busy = await api.call('admin', 'DELETE', '/api/shifts/tarde', undefined, ifMatch(m.version));
     assert.equal(busy.statusCode, 409);
-    assert.equal(busy.json().message, 'El turno tiene técnicos.');
+    assert.equal(busy.json().message, 'La plantilla tiene técnicos.');
     assert.equal((await api.call('admin', 'DELETE', `/api/shifts/${s.id}`, undefined, ifMatch(s.version))).statusCode, 409);
     assert.equal((await api.call('admin', 'DELETE', `/api/shifts/${s.id}`, undefined, ifMatch(s.version + 1))).statusCode, 200);
-    assert.equal((await api.q('SELECT 1 FROM shifts WHERE id = $1', [s.id])).length, 0);
+    assert.equal((await api.q('SELECT 1 FROM plantillas WHERE id = $1 AND archived_at IS NOT NULL', [s.id])).length, 1);
+    const st = (await api.call('admin', 'GET', '/api/state')).json();
+    assert.ok(!st.shifts.some((x) => x.id === s.id));
+    assert.ok(st.plantillas[s.id].archivedAt);
   });
 
   test('categorías: única, no se borra con herramientas', async () => {

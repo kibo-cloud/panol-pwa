@@ -1,5 +1,7 @@
 // Técnicos, cambios de turno, turnos, categorías, herramientas y unidades (equivalente a las
 // acciones techNew/techEdit/techActive/shiftChange/shift*/cat*/tool* de 2.1).
+// Desde la etapa 2 los turnos son plantillas: las rutas de turnos y el cambio de turno de 2.1
+// siguen funcionando y delegan en las plantillas (application/plantillas.js).
 import * as repo from '../adapters/pg/catalog-repo.js';
 import { loadInventoryContext, applyMovementPlan } from '../adapters/pg/inventory-repo.js';
 import { DomainError } from '../domain/errors.js';
@@ -8,13 +10,15 @@ import { planMovement } from '../domain/movements.js';
 import { localDateISO } from '../domain/period.js';
 import { newId } from './ids.js';
 import { withTransaction, checkVersion, onUnique, record, notifyChange } from './common.js';
+import * as plantillas from './plantillas.js';
+import { insertRange } from '../adapters/pg/plantilla-repo.js';
 
 const rule = (msg, code = 'invalid_input', status = 422) => new DomainError(msg, code, status);
 const changed = (set, cur) => Object.fromEntries(Object.entries(set).filter(([k, v]) => v !== undefined && v !== cur[k]));
 
-async function shiftNameOf(c, id) {
-  const s = id ? await repo.getRow(c, 'shifts', id) : null;
-  return s ? s.name : 'Sin turno';
+async function plantillaNameOf(c, id) {
+  const s = id ? await repo.getRow(c, 'plantillas', id) : null;
+  return s ? s.name : 'Sin plantilla';
 }
 
 // ---------------------------------------------------------------- técnicos
@@ -33,12 +37,17 @@ export async function createTech(db, actor, input) {
   return withTransaction(db, async (c) => {
     await repo.lockName(c, 'techs.legajo');
     await assertLegajoFree(c, legajo, null);
-    let shiftId = input.shiftId || null;
-    if (shiftId && !(await repo.getRow(c, 'shifts', shiftId))) throw rule('Elegí un turno válido.', 'invalid_shift');
-    if (!shiftId) shiftId = (await c.query('SELECT id FROM shifts ORDER BY sort_order, id LIMIT 1')).rows[0]?.id ?? null;
-    const row = await repo.insertRow(c, 'techs', newId('t'), { name, legajo, shiftId, active: true, alta, by: actor.id }).catch(legajoUnique(legajo));
-    await record(c, actor, { action: 'tech_create', entity: 'techs', id: row.id, version: row.version, event: 'create', detail: `Alta de técnico ${name} (legajo ${legajo}) en ${await shiftNameOf(c, shiftId)}` });
-    return row;
+    // Plantilla pedida (`plantillaId`, o `shiftId` de 2.1) o la primera activa.
+    let pid = input.plantillaId || input.shiftId || null;
+    if (pid) {
+      const p = await repo.getRow(c, 'plantillas', pid);
+      if (!p || p.archivedAt) throw rule('Elegí una plantilla válida.', 'invalid_plantilla');
+    } else pid = (await c.query('SELECT id FROM plantillas WHERE archived_at IS NULL ORDER BY sort_order, id LIMIT 1')).rows[0]?.id ?? null;
+    const row = await repo.insertRow(c, 'techs', newId('t'), { name, legajo, active: true, alta, by: actor.id }).catch(legajoUnique(legajo));
+    // Primer rango de pertenencia: desde siempre (la plantilla vale para todos sus controles).
+    if (pid) await insertRange(c, { id: newId('ph'), techId: row.id, plantillaId: pid, validFrom: null, validTo: null, reason: 'Alta del técnico' }, { actorId: actor.id });
+    await record(c, actor, { action: 'tech_create', entity: 'techs', id: row.id, version: row.version, event: 'create', detail: `Alta de técnico ${name} (legajo ${legajo}) en ${await plantillaNameOf(c, pid)}` });
+    return plantillas.withMembership(c, row);
   });
 }
 
@@ -57,7 +66,7 @@ export async function updateTech(db, actor, id, input, version) {
     if (input.alta !== undefined) set.alta = cleanDay(input.alta, 'La fecha de alta');
     if (input.active !== undefined) set.active = input.active;
     const diff = changed(set, cur);
-    if (!Object.keys(diff).length) return cur;
+    if (!Object.keys(diff).length) return plantillas.withMembership(c, cur);
     const row = await repo.updateRow(c, 'techs', id, diff).catch(legajoUnique(set.legajo));
     if (diff.name !== undefined || diff.legajo !== undefined || diff.alta !== undefined) {
       await record(c, actor, { action: 'tech_edit', entity: 'techs', id, version: row.version, detail: `Edición de técnico ${row.name} (legajo ${row.legajo})` });
@@ -65,73 +74,38 @@ export async function updateTech(db, actor, id, input, version) {
     if (diff.active !== undefined) {
       await record(c, actor, { action: row.active ? 'tech_activate' : 'tech_deactivate', entity: 'techs', id, version: row.version, detail: `${row.active ? 'Reactivación' : 'Desactivación'} de técnico ${row.name}` });
     }
-    return row;
+    return plantillas.withMembership(c, row);
   });
 }
 
+// Cambio de turno de 2.1 = mover de plantilla desde la fecha indicada (hoy si falta). La
+// respuesta conserva la forma de 2.1 (`shiftChange`) y agrega el rango nuevo.
 export async function changeShift(db, actor, techId, input, version) {
   return withTransaction(db, async (c) => {
-    const t = checkVersion(await repo.getRow(c, 'techs', techId, { lock: true }), version, 'No se encontró el técnico.');
-    if (t.active === false) throw rule('El técnico está inactivo.', 'inactive_tech');
-    const to = input.to ? await repo.getRow(c, 'shifts', input.to) : null;
-    if (!to) throw rule('Elegí el turno nuevo.', 'invalid_shift');
-    const fromName = await shiftNameOf(c, t.shiftId);
-    const sc = await repo.insertRow(c, 'shiftChanges', newId('s'), {
-      techId, from: t.shiftId, to: to.id, fromName, toName: to.name,
-      effectiveFrom: cleanDay(input.effectiveFrom, 'La fecha desde') || localDateISO(), note: cleanText(input.note, 'La nota'), at: new Date(), by: actor.id,
-    });
-    const tech = await repo.updateRow(c, 'techs', techId, { shiftId: to.id });
-    await record(c, actor, { action: 'shift_change', entity: 'techs', id: techId, version: tech.version, detail: `Cambio de turno de ${t.name}: ${fromName} a ${to.name}` });
-    return { tech, shiftChange: sc };
+    // applyMove bloquea la plantilla destino y después el técnico, y controla la versión.
+    const r = await plantillas.applyMove(c, actor, techId, {
+      plantillaId: input.to, from: cleanDay(input.effectiveFrom, 'La fecha desde') || localDateISO(), reason: cleanText(input.note, 'La nota') || 'Cambio de turno',
+    }, { version });
+    const range = r.ranges[0];
+    const shiftChange = { id: range.id, techId, from: r.fromPlantillaId, to: r.toPlantillaId, fromName: r.fromName, toName: r.toName, effectiveFrom: range.validFrom, note: range.reason, at: range.createdAt, by: range.by };
+    return { tech: r.tech, shiftChange, range };
   });
 }
 
-// ---------------------------------------------------------------- turnos
+// ---------------------------------------------------------------- turnos (= plantillas)
 async function assertUniqueName(c, name, table, exceptId, message) {
   const { rows } = await c.query(`SELECT 1 FROM ${table} WHERE lower(name) = lower($1) AND id IS DISTINCT FROM $2 LIMIT 1`, [name, exceptId]);
   if (rows[0]) throw rule(message, 'duplicate', 409);
 }
 
-export async function createShift(db, actor, input) {
-  const name = cleanName(input.name);
-  return withTransaction(db, async (c) => {
-    await repo.lockName(c, 'shifts.name');
-    await assertUniqueName(c, name, 'shifts', null, 'Ya existe ese turno.');
-    const order = (await c.query('SELECT coalesce(max(sort_order), 0) + 1 AS n FROM shifts')).rows[0].n;
-    const row = await repo.insertRow(c, 'shifts', newId('r'), { name, order, by: actor.id });
-    await record(c, actor, { action: 'shift_create', entity: 'shifts', id: row.id, version: row.version, event: 'create', detail: `Alta de turno ${name}` });
-    return row;
-  });
-}
+// Forma de un turno de 2.1 (id, nombre, orden, versión) a partir de una plantilla.
+const asShift = (p) => ({ id: p.id, name: p.name, order: p.order, version: p.version, createdAt: p.createdAt, updatedAt: p.updatedAt, by: p.by });
 
-export async function updateShift(db, actor, id, input, version) {
-  return withTransaction(db, async (c) => {
-    const cur = checkVersion(await repo.getRow(c, 'shifts', id, { lock: true }), version, 'No se encontró el turno.');
-    const set = {};
-    if (input.name !== undefined) {
-      set.name = cleanName(input.name);
-      await repo.lockName(c, 'shifts.name');
-      await assertUniqueName(c, set.name, 'shifts', id, 'Ya existe ese turno.');
-    }
-    if (input.order !== undefined) set.order = input.order;
-    const diff = changed(set, cur);
-    if (!Object.keys(diff).length) return cur;
-    const row = await repo.updateRow(c, 'shifts', id, diff);
-    const detail = diff.name ? `Turno renombrado: ${cur.name} a ${row.name}` : `Orden del turno ${row.name}: ${row.order}`;
-    await record(c, actor, { action: diff.name ? 'shift_rename' : 'shift_reorder', entity: 'shifts', id, version: row.version, detail });
-    return row;
-  });
-}
-
+export const createShift = async (db, actor, input) => asShift(await plantillas.createPlantilla(db, actor, { name: cleanName(input.name) }));
+export const updateShift = async (db, actor, id, input, version) => asShift(await plantillas.updatePlantilla(db, actor, id, input, version));
 export async function deleteShift(db, actor, id, version) {
-  return withTransaction(db, async (c) => {
-    const cur = checkVersion(await repo.getRow(c, 'shifts', id, { lock: true }), version, 'No se encontró el turno.');
-    if ((await c.query('SELECT 1 FROM techs WHERE shift_id = $1 LIMIT 1', [id])).rows[0]) throw rule('El turno tiene técnicos.', 'shift_has_techs', 409);
-    if ((await c.query('SELECT count(*)::int AS n FROM shifts')).rows[0].n <= 1) throw rule('Tiene que quedar al menos un turno.', 'last_shift', 409);
-    await repo.deleteRow(c, 'shifts', id);
-    await record(c, actor, { action: 'shift_delete', entity: 'shifts', id, event: 'delete', detail: `Baja de turno ${cur.name}` });
-    return { ok: true };
-  });
+  await plantillas.archivePlantilla(db, actor, id, version);
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------- categorías

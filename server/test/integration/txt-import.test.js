@@ -141,14 +141,22 @@ describe('reemplazar (migración inicial)', () => {
     assert.equal(await count('movement_transfers'), 5);
     const [m] = await q("SELECT at FROM movements WHERE id = 'm21e1'");
     assert.equal(m.at.toISOString(), '2026-09-02T09:00:00.000Z');
-    const [t] = await q("SELECT alta, legajo, shift_id FROM techs WHERE id = 't21b'");
-    assert.deepEqual(t, { alta: null, legajo: '2102', shift_id: 'rotativo' });
+    const [t] = await q("SELECT alta, legajo, plantilla_on(id, current_date) AS plantilla FROM techs WHERE id = 't21b'");
+    assert.deepEqual(t, { alta: null, legajo: '2102', plantilla: 'rotativo' });
+    // Etapa 2: los turnos son plantillas y el cambio de turno sc21 pasa al historial.
+    const h = await q("SELECT id, plantilla_id, valid_from::text AS f, valid_to::text AS t, created_at FROM tech_plantilla_history WHERE tech_id = 't21b' ORDER BY valid_from NULLS FIRST");
+    assert.deepEqual(h.map((r) => [r.plantilla_id, r.f, r.t]), [['manana', null, '2026-09-01'], ['rotativo', '2026-09-01', null]]);
+    assert.equal(h[1].id, 'sc21');
+    assert.equal(await count('shift_changes'), 0);
     assert.equal((await q("SELECT until FROM assignments WHERE id = 'a21m'"))[0].until, null);
     const ctl = await q("SELECT id, status, imported, started_at FROM controls ORDER BY id");
     assert.deepEqual(ctl.map((c) => [c.id, c.status, c.imported]), [['c21d', 'borrador', true], ['c21f', 'finalizado', true]]);
     assert.equal(ctl[0].started_at, null);
     assert.equal(await count('control_items', "control_id = 'c21f'"), 2);
-    assert.deepEqual((await q('SELECT id FROM shifts ORDER BY sort_order')).map((s) => s.id), ['manana', 'tarde', 'rotativo']);
+    assert.deepEqual((await q('SELECT id FROM plantillas WHERE archived_at IS NULL ORDER BY sort_order')).map((s) => s.id), ['manana', 'tarde', 'rotativo']);
+    assert.equal(await count('plantillas', "id = 'noche' AND archived_at IS NOT NULL"), 1);
+    // Foto de la plantilla en los controles importados (c21f: t21a en manana).
+    assert.equal((await q("SELECT plantilla_id_snapshot AS p FROM controls WHERE id = 'c21f'"))[0].p, 'manana');
     assert.deepEqual(await q('SELECT role, perm, allowed FROM role_permissions ORDER BY role'), [{ role: 'consulta', perm: 'reports_export', allowed: false }, { role: 'responsable', perm: 'shift_change', allowed: true }]);
     const users = await q('SELECT id, username, password_hash, must_change_password, legacy_pin_hash FROM users ORDER BY id COLLATE "C"');
     assert.deepEqual(users.map((u) => u.id), ['u-imp', 'u21admin', 'u21cons', 'u21resp']);
@@ -253,7 +261,8 @@ describe('combinar', () => {
     assert.deepEqual(dry.changes.alertRes.delete.ids, ['cambio-a21m-c21f']);
     assert.deepEqual(dry.conflicts.map((c) => c.collection + '/' + c.id).sort(), ['controls/c21f', 'movements/m21i1']);
     assert.equal(await count('alert_resolutions', "key = 'cambio-a21m-c21f'"), 0);
-    assert.equal(await count('shift_changes', "id = 'sc21'"), 1);
+    // Etapa 2: el cambio de turno vive en el historial de pertenencia (nunca se borra).
+    assert.equal(await count('tech_plantilla_history', "id = 'sc21'"), 1);
     assert.equal(await count('movements', "id = 'm21i1'"), 1);
   });
 

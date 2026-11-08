@@ -57,13 +57,17 @@ export const PERMS = [
   ['controls_do', 'Realizar controles'],
   ['movements_do', 'Registrar entregas, devoluciones y reposiciones'],
   ['techs_edit', 'Crear, editar y desactivar técnicos'],
-  ['shift_change', 'Cambiar técnicos de turno'],
+  ['shift_change', 'Mover técnicos de plantilla'],
   ['tools_edit', 'Crear y editar herramientas y categorías'],
   ['inventory_edit', 'Ajustar inventario: ingresos, reparaciones y bajas'],
   ['alerts_resolve', 'Marcar alertas como resueltas'],
   ['shifts_edit', 'Administrar turnos'],
   ['reports_export', 'Exportar informes'],
   ['demo_manage', 'Cargar o borrar datos de demostración'],
+  // Etapa 2: plantillas por supervisor, rotación y líneas/cajas (admin por defecto).
+  ['plantillas_edit', 'Administrar plantillas: crear, renombrar, supervisor y archivar'],
+  ['plantilla_rotate', 'Rotar cualquier plantilla (el supervisor siempre rota la suya)'],
+  ['lineas_edit', 'Administrar líneas, sectores y cajas compartidas'],
 ];
 export const PERM_KEYS = PERMS.map(([k]) => k);
 

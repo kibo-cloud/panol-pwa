@@ -1,5 +1,6 @@
 // Entregas y reposiciones (igual que 2.1). El servidor valida stock y arma las
-// transferencias; cada envío lleva su Idempotency-Key.
+// transferencias; cada envío lleva su Idempotency-Key. Etapa 2: el poseedor puede ser un
+// técnico o una caja compartida (valor `caja:<id>` en el formulario).
 import { $, esc, setHTML } from '../../ui/dom.js';
 import { icon } from '../../ui/icons.js';
 import { VIEWS, UI, render, freshMv } from '../../ui/registry.js';
@@ -9,7 +10,8 @@ import { act, toast, UErr } from '../../ui/feedback.js';
 import { pageHead, field, optList, techOptions, stChip, mvList } from '../../ui/components.js';
 import { gateUI } from '../tecnicos/view.js';
 import { api, newIdempotencyKey } from '../../api/index.js';
-import { S, derive, can, refresh, toolName } from '../../state/store.js';
+import { S, derive, can, refresh, toolName, holderName } from '../../state/store.js';
+import { holderKey, holderBody } from '../../state/plantillas.js';
 import { ST, REASONS } from '../../state/constants.js';
 import { fdate } from '../../state/period.js';
 
@@ -21,7 +23,7 @@ function stepper(v, max) { return `<div class="stepper"><button type="button" da
 function mvForm() {
   const d = derive(); const m = UI.mv;
   let h = `<div class="seg" role="tablist" data-css="margin-bottom:10px">${[['entrega_inicial', 'Entrega inicial'], ['reposicion', 'Reposición'], ['adicional', 'Adicional'], ['devolucion', 'Devolución'], ['retiro', 'Retiro']].map(([k, l]) => `<button role="tab" aria-selected="${m.type === k}" class="${m.type === k ? 'on' : ''}" data-act="mvType" data-v="${esc(k)}">${l}</button>`).join('')}</div><p class="muted sm" data-css="margin:0 0 14px">${MV_HELP[m.type]}</p>`;
-  h += field('Técnico que recibe o devuelve', `<select id="mvtech" data-ch="mvTech">${techOptions(m.techId)}</select>`, 'mvtech');
+  h += field('Técnico o caja que recibe o devuelve', `<select id="mvtech" data-ch="mvTech">${techOptions(m.techId, 'Elegí un técnico o una caja', true)}</select>`, 'mvtech');
   if (m.type === 'entrega_inicial' || m.type === 'adicional') {
     const tools = d.tools.filter((t) => t.active !== false);
     h += field('Herramienta', `<select id="mvtool" data-ch="mvTool">${optList(tools.map((t) => [t.id, `${t.name}${t.serialized ? ' (por código)' : ''}`]), m.toolId, 'Elegí una herramienta')}</select>`, 'mvtool');
@@ -31,13 +33,13 @@ function mvForm() {
     }
   } else if (m.techId) {
     const list = d.asgByTech[m.techId] || [];
-    if (!list.length) h += '<p class="hint">Este técnico no tiene herramientas asignadas.</p>';
+    if (!list.length) h += `<p class="hint">${String(m.techId).startsWith('caja:') ? 'Esta caja' : 'Este técnico'} no tiene herramientas asignadas.</p>`;
     else {
       const lab = (a) => { const s = d.stateOf[a.id]; const u = a.unitId && S.units[a.unitId]; return `${toolName(a.toolId)}${u ? ' ' + u.code : ''}${a.qty > 1 ? ' ×' + a.qty : ''}, ${(ST[s ? s.state : 'pendiente']).label.toLowerCase()}`; };
       const sorted = m.type === 'reposicion' ? list.slice().sort((a, b) => { const r = (x) => ({ faltante: 0, cambio: 1 }[(d.stateOf[x.id] || {}).state] ?? 2); return r(a) - r(b); }) : list;
       h += field('Herramienta asignada', `<select id="mvasg" data-ch="mvAsg">${optList(sorted.map((a) => [a.id, lab(a)]), m.asgId, 'Elegí la herramienta')}</select>`, 'mvasg');
       const a = S.assignments[m.asgId];
-      if (a && a.active && a.techId === m.techId) {
+      if (a && a.active && holderKey(a) === m.techId) {
         const s = d.stateOf[m.asgId]; const tool = S.tools[a.toolId] || {};
         if (m.type === 'reposicion') {
           const u = a.unitId && S.units[a.unitId]; let entra = '';
@@ -65,9 +67,9 @@ VIEWS.entregas = () => {
   const d = derive(); const f = UI.mvFilter;
   const movs = d.movs.filter((m) => f === 'all' || m.type === f || (f === 'inv' && ['ingreso', 'reparado', 'baja', 'recupero', 'recepcion'].includes(m.type)));
   const pend = d.pendingReturns;
-  return pageHead('Entregas y reposiciones', 'Cada movimiento actualiza asignaciones e inventario sin borrar el historial') +
+  return pageHead('Entregas y reposiciones', 'Cada movimiento actualiza asignaciones e inventario sin borrar el historial', { acts: can('movements_do') ? `<button class="btn pri" data-act="asgNew">${icon('plus', 16)}Asignar herramienta</button>` : '' }) +
   `<div class="two" data-css="margin-top:0">${can('movements_do') ? `<section class="card" id="mvform">${mvForm()}</section>` : '<section class="card"><p class="muted" data-css="margin:0">Tu perfil no puede registrar movimientos. Podés consultar el historial.</p></section>'}
-  <section><div class="card" data-css="margin-bottom:12px"><div class="srow"><h2 class="si">Pendientes de devolución</h2><span class="chip ${pend.length ? 'bad' : ''}">${pend.length}</span></div>${pend.length ? `<div class="list">${pend.map((m) => `<div class="row"><div class="grow"><div class="t">${esc(toolName(m.toolId))}${m.oldUnitId && S.units[m.oldUnitId] ? ' ' + esc(S.units[m.oldUnitId].code) : ''}${m.qty > 1 ? ' ×' + m.qty : ''}</div><div class="s">${esc((S.techs[m.techId] || {}).name || '')}, repuesta el ${fdate(m.at)}</div></div>${can('movements_do') ? `<button class="btn sm" data-act="recvPending" data-m="${esc(m.id)}">Recibir</button>` : ''}</div>`).join('')}</div>` : '<p class="muted sm" data-css="margin:0">No hay herramientas pendientes de devolución.</p>'}</div>
+  <section><div class="card" data-css="margin-bottom:12px"><div class="srow"><h2 class="si">Pendientes de devolución</h2><span class="chip ${pend.length ? 'bad' : ''}">${pend.length}</span></div>${pend.length ? `<div class="list">${pend.map((m) => `<div class="row"><div class="grow"><div class="t">${esc(toolName(m.toolId))}${m.oldUnitId && S.units[m.oldUnitId] ? ' ' + esc(S.units[m.oldUnitId].code) : ''}${m.qty > 1 ? ' ×' + m.qty : ''}</div><div class="s">${esc(holderName(m))}, repuesta el ${fdate(m.at)}</div></div>${can('movements_do') ? `<button class="btn sm" data-act="recvPending" data-m="${esc(m.id)}">Recibir</button>` : ''}</div>`).join('')}</div>` : '<p class="muted sm" data-css="margin:0">No hay herramientas pendientes de devolución.</p>'}</div>
   <div class="srow"><h2 class="si">Historial de movimientos</h2></div>
   <div class="fchips" data-css="margin-bottom:10px">${[['all', 'Todos'], ['entrega_inicial', 'Iniciales'], ['reposicion', 'Reposiciones'], ['adicional', 'Adicionales'], ['devolucion', 'Devoluciones'], ['retiro', 'Retiros'], ['inv', 'Inventario']].map(([k, l]) => `<button class="fchip ${f === k ? 'on' : ''}" data-act="mvFilter" data-v="${esc(k)}">${l}</button>`).join('')}</div>
   ${mvList(movs.slice(0, 80))}${movs.length > 80 ? `<p class="muted sm">Mostrando los 80 más recientes de ${movs.length}.</p>` : ''}</section></div>`;
@@ -90,8 +92,10 @@ IN.mvQty = (v) => { UI.mv.qty = v; }; IN.mvReason = (v) => { UI.mv.reason = v; }
 
 // Arma el pedido para POST /api/movements a partir del formulario (sin campos vacíos).
 export function movementBody(m) {
-  const tech = S.techs[m.techId]; if (!tech || tech.active === false) throw new UErr('Elegí un técnico activo.');
-  const b = { type: m.type, techId: m.techId, reason: (m.reason || '').trim(), notes: (m.notes || '').trim() };
+  const isCaja = String(m.techId || '').startsWith('caja:');
+  const holder = isCaja ? S.cajas[m.techId.slice(5)] : S.techs[m.techId];
+  if (!holder || holder.active === false || holder.archivedAt) throw new UErr('Elegí un técnico activo o una caja.');
+  const b = { type: m.type, ...holderBody(m.techId), reason: (m.reason || '').trim(), notes: (m.notes || '').trim() };
   const qty = () => { const q = parseInt(m.qty, 10); if (!(q >= 1)) throw new UErr('Indicá una cantidad válida.'); return q; };
   if (m.type === 'entrega_inicial' || m.type === 'adicional') {
     const tool = S.tools[m.toolId]; if (!tool || tool.active === false) throw new UErr('Elegí una herramienta activa.');
@@ -99,7 +103,7 @@ export function movementBody(m) {
     if (tool.serialized) { if (!m.unitId) throw new UErr('Elegí una unidad disponible.'); b.unitId = m.unitId; } else b.qty = qty();
     return b;
   }
-  const a = S.assignments[m.asgId]; if (!a || !a.active || a.techId !== m.techId) throw new UErr('Elegí una herramienta asignada al técnico.');
+  const a = S.assignments[m.asgId]; if (!a || !a.active || holderKey(a) !== m.techId) throw new UErr(`Elegí una herramienta asignada ${isCaja ? 'a la caja' : 'al técnico'}.`);
   b.asgId = m.asgId;
   if (m.type === 'reposicion') { b.returned = !!m.returned; if (m.returned) b.oldDest = m.oldDest || 'reparacion'; if ((S.tools[a.toolId] || {}).serialized) { if (!m.newUnitId) throw new UErr('Elegí la unidad nueva que recibe.'); b.newUnitId = m.newUnitId; } }
   if (m.type === 'devolucion') { b.cond = m.cond || 'disponible'; if (!a.unitId && (a.qty || 1) > 1) b.qty = qty(); }
@@ -123,7 +127,7 @@ ACT.mvSubmit = async () => {
 ACT.recvPending = (ds) => {
   const mv = S.movements[ds.m]; if (!mv || !gateUI('movements_do')) return;
   let last = null;
-  openModal({ title: 'Recibir herramienta pendiente', render: (st) => `<p class="muted" data-css="margin-top:0">${esc(toolName(mv.toolId))}${mv.oldUnitId && S.units[mv.oldUnitId] ? ' ' + esc(S.units[mv.oldUnitId].code) : ''}, de ${esc((S.techs[mv.techId] || {}).name || '')}.</p>${field('¿En qué condición vuelve?', `<div class="opts">${[['reparacion', 'Necesita reparación'], ['disponible', 'Buen estado, vuelve a disponible'], ['baja', 'Dar de baja (perdida o inservible)']].map(([v, l]) => `<button type="button" class="opt ${st.dest === v ? 'on' : ''}" data-act="mset" data-k="dest" data-v="${esc(v)}">${l}</button>`).join('')}</div>`)}${field('Observaciones', `<input id="f-rn" type="text" maxlength="2000" data-mi="notes" value="${esc(st.notes || '')}">`, 'f-rn')}`,
+  openModal({ title: 'Recibir herramienta pendiente', render: (st) => `<p class="muted" data-css="margin-top:0">${esc(toolName(mv.toolId))}${mv.oldUnitId && S.units[mv.oldUnitId] ? ' ' + esc(S.units[mv.oldUnitId].code) : ''}, de ${esc(holderName(mv))}.</p>${field('¿En qué condición vuelve?', `<div class="opts">${[['reparacion', 'Necesita reparación'], ['disponible', 'Buen estado, vuelve a disponible'], ['baja', 'Dar de baja (perdida o inservible)']].map(([v, l]) => `<button type="button" class="opt ${st.dest === v ? 'on' : ''}" data-act="mset" data-k="dest" data-v="${esc(v)}">${l}</button>`).join('')}</div>`)}${field('Observaciones', `<input id="f-rn" type="text" maxlength="2000" data-mi="notes" value="${esc(st.notes || '')}">`, 'f-rn')}`,
     actions: [{ label: 'Cancelar', close: true }, { label: 'Registrar', kind: 'pri', run: async (st) => {
       if (derive().pendingReturns.every((x) => x.id !== ds.m)) throw new UErr('Ya fue registrada.');
       const body = { type: 'recepcion', resolvesMovementId: ds.m, cond: st.dest || 'reparacion', notes: (st.notes || '').trim() }; const sig = JSON.stringify(body);

@@ -1,7 +1,8 @@
 // Informe por mes/semana, turno y técnico (portado de computeReport() de 2.1). Usa el resultado
 // de deriveState(). Las fechas se comparan con la hora local de la empresa.
 import { MONTHS } from './constants.js';
-import { pad, pnumOf, parsePkey, weekRange, zonedDate, daysIn, plabel } from './period.js';
+import { pad, pnumOf, parsePkey, weekRange, zonedDate, daysIn, plabel, localDateISO } from './period.js';
+import { reportPlantillaOf } from './plantillas.js';
 
 export const prevMonth = (y, m) => (m > 1 ? { y, m: m - 1 } : { y: y - 1, m: 12 });
 export const monthRange = (y, m) => [zonedDate(y, m, 1), zonedDate(y, m, daysIn(y, m), 23, 59, 59, 999)];
@@ -19,24 +20,36 @@ const inPeriod = (pkey, y, m, weeks) => {
 };
 
 // f: { ym: 'YYYY-MM', w: 'all'|'1'..'4', shift: 'all'|id, tech: 'all'|id }
+// La plantilla de cada técnico es la del período (foto del último control, o el historial al
+// final del período), así un informe viejo no cambia cuando alguien se mueve de plantilla.
+// `plantilla` es otro nombre del filtro `shift`.
 export function computeReport(d, filters = {}) {
   const f = {
     ym: filters.ym || `${d.cur.y}-${pad(d.cur.m)}`,
     w: filters.w || 'all',
-    shift: filters.shift || 'all',
+    shift: filters.plantilla || filters.shift || 'all',
     tech: filters.tech || 'all',
   };
   const [y, m] = f.ym.split('-').map(Number);
   const weeks = f.w === 'all' ? [1, 2, 3, 4] : [+f.w];
   const range = f.w === 'all' ? monthRange(y, m) : weekRange({ y, m, w: +f.w });
   const started = weeks.filter((w) => pnumOf({ y, m, w }) <= d.curNum);
-  const shiftName = (id) => (d.shiftById[id] ? d.shiftById[id].name : 'Sin turno');
+  const byId = d.plantillaById || d.shiftById;
+  const shiftName = (id) => (byId[id] ? byId[id].name : 'Sin turno');
   const recovered = (x) => x.from === 'faltante' && x.to !== 'faltante';
+  const endDay = localDateISO(range[1]);
+  const today = d.today || endDay;
+  const day = endDay < today ? endDay : today;
 
-  const ts = d.activeTechs.filter((t) => (f.shift === 'all' || t.shiftId === f.shift) && (f.tech === 'all' || t.id === f.tech));
-  const rows = ts.map((t) => {
+  const lastOf = (t) => {
     const cs = (d.effByTech[t.id] || []).filter((c) => c.period.y === y && c.period.m === m && weeks.includes(c.period.w));
-    const last = cs[cs.length - 1];
+    return { cs, last: cs[cs.length - 1] };
+  };
+  const plOf = (t) => reportPlantillaOf(t, { lastControl: lastOf(t).last, hist: d.plantillaHist, day });
+  const ts = d.activeTechs.filter((t) => (f.tech === 'all' || t.id === f.tech) && (f.shift === 'all' || plOf(t) === f.shift));
+  const rows = ts.map((t) => {
+    const { cs, last } = lastOf(t);
+    const pid = plOf(t);
     const cn = last ? last.counts : null;
     const i = d.techInfo[t.id];
     const ok = cn ? cn.bueno : i.bueno;
@@ -46,13 +59,16 @@ export function computeReport(d, filters = {}) {
     const repos = d.movs.filter((x) => x.techId === t.id && x.type === 'reposicion' && inRange(x.at, range)).length;
     const recup = d.transitions.filter((x) => x.techId === t.id && recovered(x) && inPeriod(x.pkey, y, m, weeks)).length;
     return {
-      id: t.id, name: t.name, legajo: t.legajo, shiftId: t.shiftId, shift: shiftName(t.shiftId), total: i.total,
+      id: t.id, name: t.name, legajo: t.legajo, shiftId: pid, plantillaId: pid, shift: shiftName(pid), total: i.total,
       bueno: ok, cambio: ch, faltante: fa, pct: den ? Math.round((ok / den) * 100) : null, ctl: cs.length, expected: started.length,
       repos, recup, fromControl: !!last,
     };
   });
 
-  const shifts = d.shifts.filter((s) => f.shift === 'all' || s.id === f.shift).map((s) => {
+  // Grupos: las plantillas activas y las archivadas que aparecen en el período.
+  const groups = [...d.shifts];
+  for (const r of rows) if (r.shiftId && !groups.some((g) => g.id === r.shiftId) && byId[r.shiftId]) groups.push(byId[r.shiftId]);
+  const shifts = groups.filter((s) => f.shift === 'all' || s.id === f.shift).map((s) => {
     const rs = rows.filter((r) => r.shiftId === s.id);
     const sum = (k) => rs.reduce((a, r) => a + r[k], 0);
     const den = sum('bueno') + sum('cambio') + sum('faltante');
@@ -95,5 +111,5 @@ export function computeReport(d, filters = {}) {
   const T = (k) => rows.reduce((a, r) => a + r[k], 0);
   const den = T('bueno') + T('cambio') + T('faltante');
   const totals = { techs: rows.length, total: T('total'), bueno: T('bueno'), cambio: T('cambio'), faltante: T('faltante'), pct: den ? Math.round((T('bueno') / den) * 100) : 0, repos: T('repos') };
-  return { f, y, m, rows, shifts, evo, label, started, totals };
+  return { f, y, m, rows, shifts, plantillas: shifts, evo, label, started, totals };
 }

@@ -2,10 +2,11 @@
 // si no hay conexión queda acá y se reenvía al volver, con su Idempotency-Key. La lógica es
 // pura (se prueba con un almacén en memoria); el adaptador de IndexedDB está al final.
 import { pkeyOf } from './period.js';
+import { holderBody } from './plantillas.js';
 
 export const DRAFT_STORE = 'panol-drafts';
 
-// Una clave por técnico y período (las correcciones llevan además el control corregido).
+// Una clave por poseedor (técnico, o `caja:<id>` para una caja compartida) y período (las correcciones llevan además el control corregido).
 export const draftKey = (techId, period, correctionOf = null) => `${techId}|${pkeyOf(period)}${correctionOf ? '|corr-' + correctionOf : ''}`;
 
 const payloadOf = (r) => JSON.stringify([r.controlId || null, r.version ?? null, r.correctionOf || null, r.techId, r.pkey, r.items]);
@@ -21,7 +22,7 @@ export function nextDraft(prev, { techId, period, correctionOf = null, controlId
 // Qué pedido corresponde: crear el control (todavía no existe en el servidor) o guardar el borrador.
 export function requestFor(rec) {
   if (!rec.controlId) {
-    const body = rec.correctionOf ? { correctionOf: rec.correctionOf, items: rec.items } : { techId: rec.techId, period: rec.period, items: rec.items };
+    const body = rec.correctionOf ? { correctionOf: rec.correctionOf, items: rec.items } : { ...holderBody(rec.techId), period: rec.period, items: rec.items };
     return { kind: 'create', body, idempotencyKey: rec.idemKey };
   }
   return { kind: 'save', id: rec.controlId, items: rec.items, version: rec.version, idempotencyKey: rec.idemKey };

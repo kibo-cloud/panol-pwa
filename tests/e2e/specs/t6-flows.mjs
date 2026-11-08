@@ -59,12 +59,12 @@ export const tests = [
       const h = Object.keys(st.tools)[0];
       const c = Object.values(st.derived.effective)[0];
       assert(c, 'an effective control in the demo data');
-      const routes = [...ROUTES, 'tecnico-' + t, 'herramienta-' + h, 'turno-' + st.shifts[0].id, 'control-' + t, 'controlver-' + c];
+      const routes = [...ROUTES, 'tecnico-' + t, 'herramienta-' + h, 'plantilla-' + st.shifts[0].id, 'control-' + t, 'controlver-' + c];
       await checkRoutes(page, routes, 1280);
       await checkRoutes(page, routes, 390);
       await page.viewport(1280);
       await page.hash('#admin');
-      for (const tab of ['users', 'shifts', 'data', 'audit']) {
+      for (const tab of ['users', 'config', 'data', 'audit']) {
         await page.click(`[data-act="adminTab"][data-v="${tab}"]`);
         await page.waitFor("!document.querySelector('#view .loading')", 10000, 'admin tab ' + tab);
         assert((await page.text('#view')).length > 50, 'admin tab ' + tab);

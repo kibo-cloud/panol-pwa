@@ -11,6 +11,7 @@ import { periodOf, prevP, pkeyOf, zonedDate, daysIn, localDateISO } from '../dom
 import { newId } from './ids.js';
 import { withTransaction, record } from './common.js';
 import { applyMovement } from './movements.js';
+import { insertRange } from '../adapters/pg/plantilla-repo.js';
 
 const CATS = [['el', 'Eléctricas'], ['me', 'Medición'], ['ma', 'Manuales']];
 const TOOLS = [
@@ -29,7 +30,7 @@ const PLAN = [
   [{}, {}],
 ];
 
-const DEMO_TABLES = ['techs', 'shift_changes', 'categories', 'tools', 'units', 'assignments', 'movements', 'controls', 'alert_resolutions'];
+const DEMO_TABLES = ['techs', 'shift_changes', 'tech_plantilla_history', 'categories', 'tools', 'units', 'assignments', 'movements', 'controls', 'alert_resolutions'];
 
 export async function hasDemo(q) {
   for (const t of DEMO_TABLES) if ((await q.query(`SELECT 1 FROM ${t} WHERE demo LIMIT 1`)).rows[0]) return true;
@@ -60,12 +61,15 @@ export async function loadDemo(db, actor, { now = new Date() } = {}) {
         await applyMovement(c, actor, { type: 'ingreso', toolId: t.id, qty: n, notes: 'Carga inicial (demo)' }, { demo: true });
       }
     }
-    const shifts = (await c.query('SELECT id FROM shifts ORDER BY sort_order, id')).rows.map((r) => r.id);
+    const shifts = (await c.query('SELECT id FROM plantillas WHERE archived_at IS NULL ORDER BY sort_order, id')).rows.map((r) => r.id);
     const techIds = [];
+    const techPl = {};
     for (const [name, leg, si] of TECHS) {
       const legajo = takenLeg.has(leg) ? `D${leg}` : leg;
-      const t = await repo.insertRow(c, 'techs', newId('t'), { name, legajo, shiftId: shifts.length ? shifts[si % shifts.length] : null, active: true, alta: localDateISO(now), demo: true, by: actor.id });
+      const t = await repo.insertRow(c, 'techs', newId('t'), { name, legajo, active: true, alta: localDateISO(now), demo: true, by: actor.id });
+      if (shifts.length) await insertRange(c, { id: newId('ph'), techId: t.id, plantillaId: shifts[si % shifts.length], validFrom: null, validTo: null, reason: 'Alta del técnico (demo)' }, { actorId: actor.id, demo: true });
       techIds.push(t.id);
+      techPl[t.id] = shifts.length ? shifts[si % shifts.length] : null;
     }
     const used = {};
     for (let ti = 0; ti < techIds.length; ti++) {
@@ -84,7 +88,7 @@ export async function loadDemo(db, actor, { now = new Date() } = {}) {
     const tools = Object.fromEntries(Object.entries(T).map(([name, t]) => [t.id, { name }]));
     const units = Object.fromEntries((await c.query('SELECT id, code FROM units WHERE demo')).rows.map((r) => [r.id, { code: r.code }]));
     for (let i = 0; i < techIds.length; i++) {
-      const tech = (await repo.getRow(c, 'techs', techIds[i]));
+      const tech = { ...(await repo.getRow(c, 'techs', techIds[i])), plantillaId: techPl[techIds[i]] };
       const asgs = (await c.query('SELECT id, tool_id, unit_id, qty FROM assignments WHERE tech_id = $1 AND active', [tech.id])).rows.map((r) => ({ id: r.id, toolId: r.tool_id, unitId: r.unit_id, qty: r.qty }));
       for (const [p, over] of [[p2, PLAN[i][0]], [p1, PLAN[i][1]]]) {
         const items = Object.fromEntries(asgs.map((a) => [a.id, over[tools[a.toolId].name] || { state: 'bueno', note: '' }]));
@@ -113,6 +117,13 @@ export async function clearDemo(db, actor) {
     }
     const del = async (sql) => (await c.query(sql)).rowCount;
     const n = {};
+    // Una caja real cuyo referente es un técnico demo queda sin referente (clave foránea simple):
+    // se audita en cada caja antes de borrar los técnicos.
+    const freed = (await c.query(`UPDATE cajas SET referente_tech_id = NULL WHERE referente_tech_id IN (${demoTechs}) RETURNING id, name, version`)).rows;
+    for (const cj of freed) {
+      await record(c, actor, { action: 'caja_edit', entity: 'cajas', id: cj.id, version: cj.version, detail: `Caja ${cj.name} sin referente: su referente era un técnico de demostración` });
+    }
+    n.cajasReferente = freed.length;
     n.controlItems = await del('DELETE FROM control_items WHERE control_id IN (SELECT id FROM controls WHERE demo)');
     n.controls = await del('DELETE FROM controls WHERE demo');
     // El rol de la app no puede borrar del libro: lo hace una función del dueño, solo para demo.
@@ -120,6 +131,8 @@ export async function clearDemo(db, actor) {
     n.assignments = await del(`DELETE FROM assignments WHERE demo OR tech_id IN (${demoTechs}) OR tool_id IN (${demoTools})`);
     n.units = await del(`DELETE FROM units WHERE demo OR tool_id IN (${demoTools})`);
     n.shiftChanges = await del(`DELETE FROM shift_changes WHERE demo OR tech_id IN (${demoTechs})`);
+    // Pertenencia a plantillas: los rangos de técnicos demo son demo (el trigger solo deja borrar esos).
+    n.plantillaHistory = await del('DELETE FROM tech_plantilla_history WHERE demo');
     n.alertRes = await del(`DELETE FROM alert_resolutions WHERE demo OR tech_id IN (${demoTechs})`);
     n.techs = await del('DELETE FROM techs WHERE demo');
     n.tools = await del('DELETE FROM tools WHERE demo');

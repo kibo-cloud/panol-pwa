@@ -1,14 +1,16 @@
 // Controles semanales (portado de derive/ckDoc/ckFinish de 2.1).
 import { pkeyOf, pnumOf } from './period.js';
+import { holderKey } from './lineas.js';
 
-// Control efectivo por técnico y período: el finalizado más reciente (una corrección gana al
-// original). También el borrador más reciente y qué control reemplaza a cuál.
+// Control efectivo por poseedor (técnico o caja) y período: el finalizado más reciente (una
+// corrección gana al original). También el borrador más reciente y qué control reemplaza a
+// cuál. Clave: `<técnico>|<período>` (como en 2.1) o `caja:<caja>|<período>`.
 export function effectiveControls(controls) {
   const eff = {};
   const drafts = {};
   const supersededBy = {};
   for (const c of controls) {
-    const k = c.techId + '|' + c.pkey;
+    const k = holderKey(c) + '|' + c.pkey;
     if (c.status === 'finalizado') {
       if (!eff[k] || (eff[k].finishedAt || '') < (c.finishedAt || '')) eff[k] = c;
       if (c.supersedes) supersededBy[c.supersedes] = c.id;
@@ -33,7 +35,7 @@ export function controlHistory(effList) {
       (hist[aid] || (hist[aid] = [])).push({ state: it.state, controlId: c.id, pkey: c.pkey, pnum: c.pnum });
       const ps = prev ? prev.state : null;
       if (ps !== it.state && (it.state !== 'bueno' || ps)) {
-        transitions.push({ techId: c.techId, asgId: aid, toolId: it.toolId, toolName: it.toolName, unitCode: it.unitCode, from: ps, to: it.state, pkey: c.pkey, pnum: c.pnum, at: c.finishedAt, controlId: c.id, note: it.note });
+        transitions.push({ techId: c.techId, ...(c.cajaId ? { cajaId: c.cajaId } : {}), asgId: aid, toolId: it.toolId, toolName: it.toolName, unitCode: it.unitCode, from: ps, to: it.state, pkey: c.pkey, pnum: c.pnum, at: c.finishedAt, controlId: c.id, note: it.note });
       }
       stateOf[aid] = { state: it.state, note: it.note || '', controlId: c.id, at: c.finishedAt, pkey: c.pkey };
     }
@@ -54,8 +56,12 @@ export function validateFinalize(activeAssignments, items) {
 }
 
 // Documento del control: copia nombre, categoría y código al momento del control, y cuenta
-// por cantidad. Solo entran las asignaciones activas que tienen estado.
-export function buildControlDoc({ tech, period, assignments, items, tools, units, categories, status, correctionOf = null }) {
+// por cantidad. Solo entran las asignaciones activas que tienen estado. `plantillaId` es la
+// plantilla del técnico al hacerse el control (foto para los informes); `shiftId` la repite
+// por compatibilidad con 2.1.
+// Poseedor: `tech` o `caja` ({ id, name }); una caja no tiene plantilla.
+export function buildControlDoc({ tech = null, caja = null, period, assignments, items, tools, units, categories, status, correctionOf = null }) {
+  const holder = tech || caja;
   const out = {};
   const counts = { bueno: 0, cambio: 0, faltante: 0 };
   for (const a of assignments) {
@@ -77,9 +83,11 @@ export function buildControlDoc({ tech, period, assignments, items, tools, units
     counts[it.state] += a.qty || 1;
   }
   return {
-    techId: tech.id,
-    techName: tech.name || '',
-    shiftId: tech.shiftId || null,
+    techId: tech ? tech.id : null,
+    cajaId: caja ? caja.id : null,
+    techName: holder.name || '',
+    shiftId: tech ? tech.plantillaId ?? tech.shiftId ?? null : null,
+    plantillaId: tech ? tech.plantillaId ?? tech.shiftId ?? null : null,
     period: { y: period.y, m: period.m, w: period.w },
     pkey: pkeyOf(period),
     pnum: pnumOf(period),

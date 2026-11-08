@@ -2,12 +2,14 @@
 // instantánea (REPEATABLE READ) para que todas las colecciones sean coherentes entre sí.
 import { listRows, toApi } from './catalog-repo.js';
 import { loadControls } from './inventory-repo.js';
+import { loadHistory, groupByTech, currentMembership, loadRotations, loadSupervisorHistory, loadShiftLabels } from './plantilla-repo.js';
+import { shiftChangesFromHistory } from '../../domain/plantillas.js';
 
 const iso = (d) => (d instanceof Date ? d.toISOString() : d ?? null);
 const byId = (list) => Object.fromEntries(list.map(({ id, ...x }) => [id, x]));
 
 const MOVEMENT = (r) => ({
-  id: r.id, type: r.type, techId: r.tech_id, toolId: r.tool_id, qty: r.qty, unitId: r.unit_id, newAssignmentId: r.new_assignment_id,
+  id: r.id, type: r.type, techId: r.tech_id, cajaId: r.caja_id, toolId: r.tool_id, qty: r.qty, unitId: r.unit_id, newAssignmentId: r.new_assignment_id,
   oldAssignmentId: r.old_assignment_id, oldUnitId: r.old_unit_id, newUnitId: r.new_unit_id, oldState: r.old_state, returned: r.returned,
   oldDest: r.old_dest, condition: r.condition, linkedControlId: r.linked_control_id, resolvesMovementId: r.resolves_movement_id,
   reason: r.reason || '', notes: r.notes || '', at: iso(r.at), by: r.created_by, demo: r.demo, transfers: [],
@@ -22,10 +24,34 @@ export async function loadMovementsFull(q) {
   return movs;
 }
 
-export async function readState(q) {
-  const shifts = (await listRows(q, 'shifts', 'ORDER BY sort_order, id')).map(({ createdAt, updatedAt, by, ...s }) => s);
+// Plantillas, pertenencia y cambios de plantilla. `shifts` (plantillas activas con la forma de
+// los turnos de 2.1), `techs[].shiftId` (plantilla actual) y `shiftChanges` (derivados del
+// historial) se mantienen por compatibilidad con 2.1.
+export async function readPlantillas(q) {
+  const plantillas = await listRows(q, 'plantillas', 'ORDER BY sort_order, id');
   const techs = await listRows(q, 'techs', 'ORDER BY id');
-  const shiftChanges = await listRows(q, 'shiftChanges', 'ORDER BY at, id');
+  const membership = await currentMembership(q);
+  for (const t of techs) {
+    t.plantillaId = membership[t.id] ?? null;
+    t.shiftId = t.plantillaId;
+  }
+  const techIds = new Set(techs.map((t) => t.id));
+  const history = (await loadHistory(q)).filter((r) => techIds.has(r.techId));
+  const names = Object.fromEntries(plantillas.map((p) => [p.id, p.name]));
+  return {
+    plantillas,
+    shifts: plantillas.filter((p) => !p.archivedAt).map((p) => ({ id: p.id, name: p.name, order: p.order, version: p.version })),
+    techs,
+    history,
+    shiftChanges: shiftChangesFromHistory(groupByTech(history), names),
+  };
+}
+
+export async function readState(q) {
+  const P = await readPlantillas(q);
+  const { shifts, techs, shiftChanges } = P;
+  const lineas = await listRows(q, 'lineas', 'ORDER BY sort_order, id');
+  const cajas = await listRows(q, 'cajas', 'ORDER BY id');
   const categories = await listRows(q, 'categories', 'ORDER BY id');
   const tools = await listRows(q, 'tools', 'ORDER BY id');
   const units = await listRows(q, 'units', 'ORDER BY id');
@@ -37,7 +63,14 @@ export async function readState(q) {
   return {
     shifts,
     techs: byId(techs),
-    shiftChanges: byId(shiftChanges),
+    shiftChanges,
+    plantillas: byId(P.plantillas),
+    plantillaHistory: groupByTech(P.history),
+    plantillaRotations: await loadRotations(q),
+    plantillaSupervisors: await loadSupervisorHistory(q),
+    shiftLabels: (await loadShiftLabels(q)).labels,
+    lineas: byId(lineas),
+    cajas: byId(cajas),
     categories: byId(categories),
     tools: byId(tools),
     units: byId(units),

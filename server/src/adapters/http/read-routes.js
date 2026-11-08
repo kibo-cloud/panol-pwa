@@ -6,7 +6,7 @@ import { badRequest } from './errors.js';
 export function registerReadRoutes(app) {
   const { db } = app;
 
-  app.get('/api/state', async () => read.getState(db));
+  app.get('/api/state', async (req) => read.getState(db, { user: req.session.user }));
   app.get('/api/inventory', async () => read.getInventory(db));
   app.get('/api/alerts', async () => read.getAlerts(db));
   app.get('/api/integrity', async () => read.getIntegrity(db));
@@ -17,13 +17,14 @@ export function registerReadRoutes(app) {
         ym: { type: 'string', pattern: '^\\d{4}-(0[1-9]|1[0-2])$' },
         w: { type: 'string', enum: ['all', '1', '2', '3', '4'] },
         shift: S.id,
+        plantilla: S.id,
         tech: S.id,
       }),
     },
   }, async (req) => read.getReport(db, req.query));
 
   app.get('/api/controls', {
-    schema: { querystring: obj({ techId: S.id, status: { type: 'string', enum: ['borrador', 'finalizado'] } }) },
+    schema: { querystring: obj({ techId: S.id, cajaId: S.id, plantillaId: S.id, status: { type: 'string', enum: ['borrador', 'finalizado'] } }) },
   }, async (req) => ({ controls: await read.listControls(db, req.query) }));
 
   app.get('/api/controls/:id', { schema: { params: idParams } }, async (req, reply) => {

@@ -350,6 +350,8 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 - 2026-11-08: E1.T7 done (E2E on the v3 server, 35 specs) and E1.T8 done (Docker, Compose,
   backups, CI workflow, LEEME); first CI run pending.
 - 2026-11-08: E1.T9 done: CI green after runner-only fixes; stage 1 PR opened.
+- 2026-11-08: E2.T1 done (plantillas backend) and E2.T2 done (líneas, sectores, cajas backend).
+- 2026-11-08: coverage rule fix, E2.T3 done (frontend) and E2.T4 specs done (43/43 local); CI + PR pending.
 
 ## Stage 1 implementation notes (E1.T1-E1.T3)
 - Embedded PG runs through the bundled `initdb`/`pg_ctl` of `embedded-postgres`
@@ -424,9 +426,289 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 - Follow-ups: the old 2.1 E2E suite still targets root `index.html` (E1.T7); CSV keeps 2.1's
   quoting (no spreadsheet-formula guard).
 
+## Decisions on the stage 1 PR points (2026-11-08, user delegated: "toma las mejores decisiones")
+- Default permissions (supervisor = responsable + `shift_change`; gerencia = read-only +
+  `reports_export`), off-VPS copy via rclone to an S3-compatible bucket (B2 or R2),
+  usernames derived from names, session timings, temp password shown once: kept as proposed.
+- Demo clear: kept (only demo-flagged rows, through a restricted function; audit never deleted).
+- `.txt` export without credential hashes: kept (security over 2.1 round-trip for users).
+- `.env.example`: unchanged (reads blocked by a user deny rule); variables documented in
+  `LEEME.md` and `docker-compose.yml`.
+- PR #1 merge stays with the user. Stage 2 is stacked: `v3/etapa-2-plantillas` branches from
+  `v3/etapa-1-servidor`, its PR targets `v3/etapa-1-servidor` until #1 is merged, then it is
+  rebased onto `v3-servidor`.
+
+## Stage 2 decisions (parent, within PEDIDO §2.2–§2.3)
+- Effective plantilla of a tech on a date = the `tech_plantilla_history` range covering it
+  (no overlap via exclusion constraint). Temporary coverage = a range with `valid_to` and
+  `temporary=true`; after `valid_to` the tech is back in the base range automatically (derived
+  by date, no cron job).
+- "Turno actual" of a plantilla is informative: a label from a configurable list (default
+  Mañana, Tarde, Noche), changed once per plantilla and stored in `plantilla_rotations`.
+  Supervisor changes go to `plantilla_supervisor_history` (date, actor).
+- Permissions: `shift_change` keeps its key and now means "mover técnicos de plantilla";
+  new `plantillas_edit` (create, rename, supervisor, archive; admin by default) and
+  `plantilla_rotate` (admin; a supervisor may always rotate their own plantilla).
+- Migration of 2.1 turnos: each shift becomes a plantilla with the shift's name, no
+  supervisor (assignable later), current shift label = its name; `techs.shiftId` and
+  `shiftChanges` become history ranges. `.txt` v2 stays importable; v2 export maps plantillas
+  to `config.turnos` and current membership to `techs.shiftId`.
+- Cajas compartidas: a holder is a tech XOR a caja (CHECK); controls and assignments
+  generalise to the holder; one original control per holder and period. Referente = a tech.
+- Line on missing/broken tools stays in stage 4 (optional, never blocks).
+- Coverage rule (E2.T3, commit `82f72e7`): a permanent move of a tech who is in (or scheduled
+  for) a temporary coverage is allowed from the coverage start onwards: the coverage range is
+  shortened to the move date (void if it never started), the automatic return range is voided
+  (closed at its own start) and the target becomes the new open range; audit detail says the
+  coverage ended and the return was cancelled. A new coverage (`until`) while one is still
+  running is refused (422 `coverage_active`, "tiene una cobertura temporal hasta el …").
+  Migration 007 lets the history trigger lower `valid_to` of a temporary range only (never
+  below `valid_from`); other closed ranges stay immutable. Move-selected checks the plantilla
+  the tech is in today (during a coverage, the coverage plantilla).
+
+## Stage 2 tasks (branch `v3/etapa-2-plantillas`)
+- [x] E2.T1 Backend plantillas: migration (plantillas, history tables with exclusion
+      constraint, rotations, supervisor history, shift labels setting, control
+      `plantilla_id_snapshot`), data migration from shifts, domain (effective plantilla by
+      date, coverage return), API (CRUD, rotate, change supervisor, move one tech, move
+      selected techs in one transaction, coverage with return date, history), permissions,
+      SSE, audit, `.txt` import/export mapping; unit + integration tests.
+      Route: delegated writer. Code: migration `005_plantillas.sql`, `domain/plantillas.js`,
+      `adapters/pg/plantilla-repo.js`, `application/plantillas.js`, `adapters/http/plantilla-routes.js`;
+      catalog (techs, legacy turnos and shift change delegate to plantillas), controls (snapshot),
+      state, report, seed, demo, `.txt` repo. Test-first: `unit/plantillas.test.js` RED (missing
+      module) then GREEN; permissions unit test RED (2 failing on the new keys) then GREEN;
+      `plantillas-migration.test.js` found a real bug RED (`by` is a reserved alias in the
+      PL/pgSQL record) then GREEN; the other integration tests were written with the code.
+      Evidence: `npm test` 109 pass + 1 expected failure (`web/test/constants.test.js`: the
+      web PERMS list lacks the 3 new keys; `web/` is the frontend writer's surface);
+      `npm run test:db` 112/112 (new `plantillas-api` 15: exclusion 23P01, append-only trigger
+      (only closing an open range), app role cannot TRUNCATE/UPDATE/DELETE the append-only
+      tables, create with default name "Plantilla de <supervisor>", supervisor must have role
+      supervisor, If-Match 428/409, archive only without members, move one (version bump, ETag,
+      audit, NOTIFY, same-day re-move voids the range, no move before the last change),
+      move-selected atomic rollback + idempotent replay, coverage with automatic return by date,
+      rotation (supervisor own only, consulta/gerencia/responsable 403), supervisor history,
+      snapshot on create and on finalize, report keeps the control snapshot after a move,
+      "Mi plantilla", shift labels; `plantillas-migration` 3: shifts -> plantillas, shift
+      changes -> ranges (same day keeps the last, missing source shift = gap, local date of
+      `at` when no effective date), snapshot backfill on finalized controls that stay immutable;
+      `plantillas-txt` 3: export turnos/shiftId/shiftChanges from plantillas and history,
+      import of a new turno + shift change -> plantilla + range, deleted turno -> archived
+      plantilla, export -> dry-run = 0 changes; adapted: catalog (shift change and turnos now
+      on plantillas), txt-import (membership and plantillas instead of `techs.shift_id`/`shifts`),
+      auth (permission map has the 3 new keys)).
+- [x] E2.T2 Backend líneas, sectores y cajas: catalog, cajas with referente, holder
+      generalisation for assignments, movements and controls, single-form "alta" of an
+      assignment to a tech or a caja; tests.
+      Route: delegated writer. Code: migration `006_lineas_cajas.sql`, `domain/lineas.js`,
+      `application/lineas.js`, `adapters/http/lineas-routes.js`; holder generalisation in
+      `domain/{movements,controls,alerts,derive,integrity}.js`, `application/{controls,alerts,read}.js`,
+      `adapters/pg/{catalog,inventory,state,txt}-repo.js`, movement/control route schemas.
+      Test-first: `unit/holders.test.js` RED (missing module), then GREEN (one wrong regex in
+      the test itself fixed); `integration/cajas-api.test.js` written before the code but not run
+      RED separately. Evidence: `npm test` 117 pass + 1 expected failure (web PERMS parity, as in E2.T1); `npm run test:db` 121/121 (new
+      `cajas-api` 9: lineas_edit only (supervisor/responsable/consulta/gerencia 403), unique
+      names, If-Match 428/409, caja needs an active línea and an active referente, DB CHECK
+      exactly one holder on assignments/controls (23514), single-form alta by quantity
+      (entrega inicial then adicional, idempotent replay, stock check 422) and by several units
+      (all or nothing; units held by the caja), alta to a tech with the same endpoint, caja
+      control through `/api/controls` with `cajaId` (409 second original, tech and caja same
+      period allowed, partial unique index 23505), finalize, `derived.effective`/`cajaInfo`/
+      faltante alert with `cajaId`, alert resolution stores `caja_id`, devolución from the caja
+      and integrity clean, archive rules (caja with tools 409, línea with active cajas 409,
+      archived caja refuses alta and control), `.txt` export without caja rows and export ->
+      dry-run = 0 changes). Stage 1 tests unchanged.
+- [x] E2.T3 Frontend: Plantillas module replacing Turnos (list, plantilla view based on
+      `Turno.dc.html`, select + "Mover seleccionados", "Cambiar de plantilla" from the tech
+      sheet based on `CambioTurno.dc.html`, coverage with return date, rotation, supervisor
+      change, history), "Mi plantilla" first for supervisors with their alerts, grouping by
+      plantilla in panel, filters, reports; Líneas/Sectores/Cajas screens; design guide.
+      Commits `82f72e7` (backend coverage rule, see Stage 2 decisions) and `9c8084d`.
+      Route: delegated writer. Code: `web/src/state/plantillas.js` (pure: date ranges,
+      coverage, report plantilla, grouping, selection, form validation), `features/plantillas/
+      {view,move}.js`, `features/lineas/view.js` (catalog, caja sheet, "Asignar herramienta"),
+      derive/store/drafts/control/entregas generalised to the holder key (`<techId>` or
+      `caja:<id>`, alerts now taken from the server), admin Configuración (shift labels),
+      PERMS + labels, routes (`#plantillas`, `#plantilla-<id>`, `#lineas`, `#caja-<id>`,
+      `#control-caja:<id>`; `#turnos`/`#turno-<id>` kept as aliases). `shifts_edit` stays in the
+      web list for parity but is hidden in the matrix. Test-first: coverage rule RED observed
+      (unit `move_before_last` thrown; 2 integration tests failing) then GREEN; web pure modules
+      written with their tests (no separate RED run). Evidence: `npm test` 131/131 (constants
+      parity fixed; new `web/test/plantillas.test.js` 11, router + drafts caja cases);
+      `npm run test:db` 123/123; `npm run build` ok, `web/dist/index.html` with 0 inline
+      script/style/handlers.
+- [x] E2.T4 E2E: move one and several techs, coverage return, rotation, supervisor view,
+      caja assignment + control, `.txt` migration of turnos to plantillas; existing specs
+      adapted; CI green; PR.
+      Done except CI/PR (parent): commit `d694dcd`. Route: delegated writer. Adapted: route
+      list (`plantillas`, `lineas`), `plantilla-<id>` detail, admin tab `config`. New
+      `t9-plantillas` (8): move one from the tech sheet (history + report keeps the control
+      snapshot, UI and `/api/reports`), "Mover seleccionados" 2 of 3 in one step (audit 2),
+      past coverage back in base + coverage from the sheet + second coverage refused (sheet and
+      422) + permanent move cancels the return, rotation and supervisor change recorded and the
+      supervisor sees Mi plantilla/alerts first and cannot rotate another plantilla (UI, forged
+      click, 403), consulta/gerencia cannot move or rotate, línea + caja + one-form assignment +
+      caja control finalized, 2.0.0 `.txt` turnos as plantillas, every route incl. new ones at
+      1280/390. Evidence: `PANOL_E2E_BUILD=1 npm run test:e2e` 43 passed, 0 failed, 0 skipped
+      (326 s; no console/CSP errors). Found and fixed while writing specs: tech/tool ids missing
+      from `S.*[id]` objects in the new sheets.
+- [x] E2.V1 Correction of the independent stage 2 review (PASS with issues). Route: delegated
+      writer (6 items over domain, application, pg adapters, importer and a migration).
+      1. Coverage checked against today: `planMove` takes `today` (local date); the coverage
+         path applies only when the coverage is running or scheduled (`validTo > today`), the
+         move falls before its end, and it was not already cut (a cut leaves the voided return
+         starting after the shortened coverage end). Otherwise the normal `move_before_last`
+         floor. RED: 2 unit (past coverage voided the lived return; cut coverage voided the
+         permanent range) + 2 integration (200 instead of 422) -> GREEN.
+      2. One `applyMovePlan` (plantilla-repo: shorten, close, inserts) used by `applyMove` and
+         the `.txt` import; every import move (incl. the final "from today") is skipped and
+         counted on a DomainError; apply response `report.membershipSkipped`, audit says
+         "cambios de plantilla omitidos". RED: active coverage -> 500 (23P01); scheduled
+         coverage -> 422 aborting the import -> GREEN (coverage ends today / skipped + counted).
+      3. Demo clear nulls `cajas.referente_tech_id` of demo techs first (audit `caja_edit`,
+         `deleted.cajasReferente`). RED 500 (FK) -> GREEN.
+      4. Lock order plantilla (target) then tech everywhere (`applyMove` incl. version check,
+         `moveTech`, legacy `changeShift`; move-selected locks the target once before the
+         loop); PG 40P01/40001 -> 409 `{error:'retry'}` in the shared handler. RED: two-connection
+         test (external lock on the target, move-selected + move-one) -> 500 deadlock; unit
+         mapping test failing -> GREEN (200 + 422 `same_plantilla`, no deadlock).
+      5. `.txt` range ids that already exist in the history get a new id (`freeRangeId`, both
+         the move and the no-history path). RED 409 `import_conflict` (not 500 as reported) ->
+         GREEN.
+      6. Migration `008_plantillas_unique_name.sql`: `plantillas_dedupe_active_names()` (suffix
+         " (n)" by sort_order, id; audited) + partial unique index `plantillas_active_name_key`
+         on `lower(name)` for active rows; API maps 23505 to 409 `duplicate`, import apply to 409
+         `duplicate_plantilla_name`, dry-run reports `shifts.name` "nombre de plantilla
+         repetido". RED (no index, no report error) -> GREEN. Note: `lower()` follows the DB
+         locale (non-ASCII capitals such as Ñ may not fold), same as the existing API check.
+      Evidence: `npm test` 136/136; `npm run test:db` 132/132; `PANOL_E2E_BUILD=1 npm run test:e2e` 43/0/0 (318 s). Commit `624b097`
+      (`fix(server): ...`, docs amended). Follow-up: `web/src/state/plantillas.js` `coverageOf`/`validateMove`
+      still mirror the old rule client-side (web/ outside this surface; the server decides).
+
+## Stage 2 implementation notes (E2.T1)
+- Membership: `tech_plantilla_history` ranges `[valid_from, valid_to)` with
+  `EXCLUDE USING gist (tech_id WITH =, daterange(...) WITH &&)` (`btree_gist`). `valid_from`
+  NULL = "since always" (the first range of every tech, so old controls also find a
+  plantilla); `valid_to` NULL = open. A range with `valid_from = valid_to` is void (a second
+  move on the same day closes the first one at its own start; nothing is deleted). The only
+  UPDATE allowed is closing an open range; DELETE only for demo rows during demo clear.
+  SQL helpers: `plantilla_on(tech, day)`, `period_end(y, m, w)`,
+  `plantilla_ranges_from_changes(current, changes jsonb)` (used by migration 005 and by the
+  `.txt` importer).
+- Move rules: from-date must not be before the start of the tech's last range; target must be
+  an active plantilla different from the current one; reason required; coverage = `until`
+  (exclusive return date: the tech is back in the base plantilla on `until`), stored as a
+  temporary range plus a re-opened base range, so "effective plantilla on D" is one lookup and
+  no job is needed. A move bumps the tech `version` (open edit forms see the change).
+- Control snapshot (`controls.plantilla_id_snapshot`, also mirrored in `shift_id` for 2.1):
+  plantilla on min(today, last day of the control's week), taken on create, on each draft
+  save and on finalize. Migration backfill used min(finished/updated date, week end), falling
+  back to the control's old `shift_id`.
+- Rotation: label must be in the configurable list (`app_settings` key
+  `plantillas.shift_labels`, default Mañana/Tarde/Noche); migrated plantillas keep their shift
+  name as current label; rotation date cannot be in the future. Supervisor change: role
+  supervisor and active (or null to remove), date not in the future.
+- Legacy routes kept and delegating (so the 2.1 UI keeps working until E2.T3): `/api/shifts`
+  POST/PATCH/DELETE = create/rename/archive plantilla (permission now `plantillas_edit`;
+  `shifts_edit` stays in the list only for stored overrides and is no longer checked);
+  `POST /api/techs/:id/shift-change` = move from `effectiveFrom` (today if empty), reason =
+  note or "Cambio de turno". `shifts` and `shift_changes` are no longer written (readable);
+  `techs.shift_id` is no longer written either.
+- `.txt` v2: export `config.turnos` = active plantillas, `techs.shiftId` = membership today,
+  `shiftChanges` = one per history range with a from-date (id = range id, names = current
+  plantilla names, temporary flag not represented). Import: new turno -> plantilla (an
+  archived one with the same id is re-activated), removed turno -> plantilla archived and its
+  members' open ranges closed today; techs without history get ranges from the file's shift
+  changes + shiftId; techs with history get new shift changes as moves (those dated before the
+  last range are skipped and counted in the import audit) and a move from today if the
+  file's shiftId differs. History is never deleted or edited by an import.
+
+## Stage 2 implementation notes (E2.T2)
+- Holder = tech XOR caja: `assignments` and `controls` have `CHECK (num_nonnulls(tech_id,
+  caja_id) = 1)`; `movements` and `units` at most one. Original control uniqueness is two
+  partial unique indexes (per tech, per caja). `controls_guard` also forbids changing
+  `caja_id` on a draft (and now compares `tech_id` with IS DISTINCT FROM).
+- Domain keys: effective controls/drafts use `<techId>|<pkey>` (unchanged) and
+  `caja:<cajaId>|<pkey>`; pending-control alert key for a caja is `pend-caja:<id>-<pkey>`;
+  other alert keys are unchanged (they use assignment/movement ids). A caja has no plantilla
+  (`plantillaId` null on its controls). Archived cajas get no alerts, altas or controls.
+- `.txt` v2 has no cajas: caja assignments, controls, movements and alert resolutions are
+  left out of the export (the v2 file's stock then omits what cajas hold), units go out
+  without the caja; an import never writes `caja_id`. Backups of v3 data are the pg_dump ones.
+
+## Stage 2 API notes (for the frontend writer)
+- `GET /api/state` (backward compatible, new keys): `plantillas` (by id, incl. archived:
+  name, supervisorUserId, currentShiftLabel, order, archivedAt, version), `plantillaHistory`
+  ({techId: ranges[]}: id, plantillaId, validFrom, validTo, temporary, reason, createdAt, by),
+  `plantillaRotations` (list: plantillaId, fromLabel, label, from, by), `plantillaSupervisors`
+  (list: plantillaId, fromUserId, supervisorUserId, from, by), `shiftLabels` and
+  `config.shiftLabels`, `techs[id].plantillaId` (= `shiftId`, membership today),
+  `derived.myPlantilla` = { plantillaIds (active plantillas supervised by the caller), techIds
+  (their active members today), alertKeys (open alerts of those techs) }. Unchanged shapes:
+  `shifts` (active plantillas as {id, name, order, version}), `config.turnos`, `shiftChanges`
+  (now derived from history; ids are range ids), `derived.shiftInfo` (per active plantilla).
+- Controls: new field `plantillaId` (snapshot); `GET /api/controls?plantillaId=` filters by it.
+- `GET /api/reports`: rows `shiftId`/`plantillaId` = plantilla of the period (control snapshot,
+  else history at period end, else current); new `plantillas` (same as `shifts`, may include
+  archived plantillas present in the period); `plantilla=` query alias of `shift=`.
+- Plantillas: `GET /api/plantillas` (with `members` count), `POST /api/plantillas` {name?,
+  supervisorUserId?, shiftLabel?, order?} (201 `{plantilla}`), `PATCH /api/plantillas/:id`
+  {name?, order?} + If-Match, `POST /api/plantillas/:id/archive` + If-Match (409 with members,
+  409 last one), `POST /api/plantillas/:id/rotate` {label, from?} + If-Match -> {plantilla,
+  rotation}, `POST /api/plantillas/:id/supervisor` {supervisorUserId|null, from?} + If-Match ->
+  {plantilla, change}, `GET /api/plantillas/:id/history` -> {plantilla, members (ranges),
+  rotations, supervisors}.
+- Moves (`shift_change`, Idempotency-Key accepted): `POST /api/techs/:id/move` {plantillaId,
+  from, reason, until?} (optional If-Match = tech version) -> {tech, ranges}; `POST
+  /api/plantillas/:id/move-selected` {techIds[1..200], targetPlantillaId, from, reason,
+  until?} -> {moved: [{techId, version, ranges}]}, all or nothing; a 422 names the tech
+  (`techId` in the body). `GET /api/techs/:id/plantilla-history` -> {techId, current, ranges}.
+- `POST /api/techs` accepts `plantillaId` (or the 2.1 `shiftId`); tech responses carry
+  `plantillaId`/`shiftId`. Shift change response adds `range`.
+- Shift labels: `GET /api/settings/shift-labels` -> {labels, version} + ETag; `PUT` {labels}
+  + If-Match (`plantillas_edit`).
+- Permissions: new keys `plantillas_edit`, `plantilla_rotate`, `lineas_edit` (admin only by
+  default); `shift_change` label is now "Mover técnicos de plantilla". The web PERMS list
+  (`web/src/state/constants.js`) must add the 3 keys (parity test).
+- SSE events: `plantillas` (create/update/delete/move) and `techs` (update on every move);
+  `lineas`, `cajas` (create/update/delete) and `movements` for altas.
+- Líneas/cajas (E2.T2, `lineas_edit`): `GET /api/lineas`, `POST /api/lineas` {name, kind:
+  'linea'|'sector', order?}, `PATCH /api/lineas/:id` + If-Match, `POST /api/lineas/:id/archive`
+  + If-Match (409 with active cajas); `GET /api/cajas`, `POST /api/cajas` {name, lineaId,
+  referenteTechId?}, `PATCH /api/cajas/:id` + If-Match, `POST /api/cajas/:id/archive` + If-Match
+  (409 with tools). `/api/state` adds `lineas` and `cajas` (by id) and `derived.cajaInfo`
+  (same shape as `techInfo`); `derived.effective`/`drafts` add `caja:<id>|<pkey>` keys.
+- Holder fields: assignments, units, movements, controls and alerts carry `cajaId` (null or
+  absent for techs); `techId` is null for a caja. Controls of a caja: `techName` is the caja
+  name at the time. `POST /api/movements` and `POST /api/controls` accept `cajaId` instead of
+  `techId` (both -> 422); `GET /api/controls?cajaId=`.
+- Alta (`movements_do`, Idempotency-Key): `POST /api/assignments` {holder: {techId}|{cajaId},
+  toolId, qty (by quantity) | unitIds[] (serialized), reason?} -> 201 {movements[],
+  assignments[]}; entrega inicial, or adicional when the holder already has that tool; all
+  units or none.
+
+- Stage 2 backend live check (after E2.T2): `NODE_ENV=development npm run db:reset` (migrations 005 and 006
+  applied, seed loaded), `node server/src/main.js` + curl: health ok, admin login 200, `POST /api/plantillas`
+  201, `POST /api/plantillas/manana/move-selected` (2 techs) 200, `GET /api/state` 200 with both techs in
+  the new plantilla; server and `db:stop` stopped. `npm run test:e2e` 35 passed, 0 failed (255 s; stage 1
+  specs untouched and still green thanks to the delegating legacy routes).
+
+## Stage 2 close (parent)
+- Web parity: `coverageOf` in `web/src/state/plantillas.js` now ignores a coverage already cut
+  by a permanent move, like the server's `activeCoverage` (RED 11/12 → GREEN 12/12 in
+  `web/test/plantillas.test.js`). Route: parent inline (one mechanical, understood file).
+- Decision: a `.txt` import that meets a scheduled coverage skips that membership change and
+  counts it in the report and audit (the planned coverage wins over an older file).
+- Verification before push: `npm test` 137/137; `PANOL_E2E_BUILD=1` E2E `t9` 8/8. Stage 2 CI
+  run 42487438456 (before E2.V1): 4 jobs green, E2E 43/43; final CI run on the PR.
+- RDD: risk high (4604 lines); native review not attempted at this size (refused with
+  `lens_context_budget_exceeded` in stage 1); fallback independent verifier: PASS with
+  issues, 5 findings + 1 pre-existing, all fixed in E2.V1.
+
 ## Next step
-- User review of the stage 1 PR (squash merge into `v3-servidor`). Then stage 2 (plantillas,
-  movimiento de técnicos y líneas) on `v3/etapa-2-plantillas` from the updated `v3-servidor`.
+- Stage 2 PR (stacked on PR #1). Engram mirror of this document: pending (multiple active
+  sessions). PR #1 awaits user review; after it is merged, rebase stage 2 onto `v3-servidor`.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);
   `/api/state` and movement planning load the full ledger (fine for stage 1 volumes);

@@ -11,16 +11,16 @@ import { S, obj, idParams, requireVersion, sendRow, actorOf, etag } from './rest
 import { badRequest } from './errors.js';
 import { MV_TYPES, ITEM_STATES, SCHEMA_LIM, LIM } from '../../domain/constants.js';
 
-function idempotencyKey(req) {
+export function idempotencyKey(req) {
   const k = req.headers['idempotency-key'];
   if (k === undefined) return undefined;
   if (!IDEMPOTENCY_KEY_RE.test(String(k))) throw badRequest('Idempotency-Key inválida (8 a 200 caracteres: letras, números, punto, guion, dos puntos o guion bajo).', 'invalid_idempotency_key');
   return String(k);
 }
 
-function sendResult(reply, r) {
+export function sendResult(reply, r) {
   if (r.replayed) reply.header('Idempotent-Replayed', 'true');
-  const row = r.body && r.body.control;
+  const row = r.body && (r.body.control || r.body.tech);
   if (row && row.version != null) reply.header('ETag', etag(row));
   return reply.code(r.status).send(r.body);
 }
@@ -45,7 +45,7 @@ export function registerOperationRoutes(app) {
     schema: {
       body: obj({
         type: { type: 'string', enum: MV_TYPES },
-        techId: S.id, toolId: S.id, unitId: S.id, asgId: S.id, newUnitId: S.id, resolvesMovementId: S.id,
+        techId: S.id, cajaId: S.id, toolId: S.id, unitId: S.id, asgId: S.id, newUnitId: S.id, resolvesMovementId: S.id,
         qty: S.int(1, 1000000), returned: S.bool, oldDest: S.pool, cond: S.pool, from: S.pool,
         codes: S.str(SCHEMA_LIM.text), reason: S.str(LIM.text), notes: S.str(LIM.text),
       }, ['type']),
@@ -55,7 +55,7 @@ export function registerOperationRoutes(app) {
   // ------------------------------------------------------------ controles
   app.post('/api/controls', {
     ...perm('controls_do'),
-    schema: { body: obj({ techId: S.id, period: S.period, correctionOf: S.id, items: itemsSchema }) },
+    schema: { body: obj({ techId: S.id, cajaId: S.id, period: S.period, correctionOf: S.id, items: itemsSchema }) },
   }, async (req, reply) => sendResult(reply, await controls.createControl(db, actorOf(req), req.body, ctx(req))));
 
   app.patch('/api/controls/:id', {

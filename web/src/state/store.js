@@ -3,8 +3,11 @@
 import { api, setCsrf } from '../api/index.js';
 import { deriveState } from './derive.js';
 
-const COLS = ['techs', 'shiftChanges', 'categories', 'tools', 'units', 'assignments', 'controls', 'movements', 'alertRes', 'users'];
-export const S = Object.fromEntries([...COLS.map((c) => [c, {}]), ['shifts', []], ['derived', null]]);
+const COLS = ['techs', 'shiftChanges', 'categories', 'tools', 'units', 'assignments', 'controls', 'movements', 'alertRes', 'users', 'plantillas', 'plantillaHistory', 'lineas', 'cajas'];
+// Listas (no objetos por id): plantillas activas con forma de turno 2.1, rotaciones, cambios de
+// supervisor y la lista de turnos configurable.
+const LISTS = ['shifts', 'plantillaRotations', 'plantillaSupervisors', 'shiftLabels'];
+export const S = Object.fromEntries([...COLS.map((c) => [c, {}]), ...LISTS.map((c) => [c, []]), ['derived', null]]);
 export const ME = { id: null, username: '', name: '', role: null, permissions: {}, mustChangePassword: false };
 export const B = { mode: 'loading', loaded: false, installEvt: null };
 
@@ -26,7 +29,7 @@ export function clearMe() {
 
 export function setState(st) {
   for (const c of COLS) S[c] = st[c] || {};
-  S.shifts = st.shifts || [];
+  for (const c of LISTS) S[c] = st[c] || [];
   S.derived = st.derived || null;
   B.loaded = true;
   version++;
@@ -49,6 +52,12 @@ export function derive() {
 export const myRole = () => ME.role || 'consulta';
 export function can(p) { if (myRole() === 'admin') return true; return !!(ME.permissions && ME.permissions[p]); }
 export function who(id) { if (!id) return '—'; const u = S.users[id]; if (!u) return 'Usuario eliminado'; return id === ME.id ? u.name + ' (vos)' : u.name; }
-export const shiftName = (id) => { const s = derive().shiftById[id]; return s ? s.name : 'Sin turno'; };
+export const shiftName = (id) => { const s = derive().plantillaById[id]; return s ? s.name : 'Sin plantilla'; };
+export const plantillaName = shiftName;
+export const cajaName = (id) => (S.cajas[id] || {}).name || 'Caja eliminada';
+// Nombre del poseedor de una asignación, control o movimiento (técnico o caja).
+export const holderName = (o) => (o && o.cajaId ? cajaName(o.cajaId) : (S.techs[o && o.techId] || {}).name || '');
+// Rota quien tiene plantilla_rotate o el supervisor de esa plantilla (como el servidor).
+export const canRotate = (p) => !!p && (can('plantilla_rotate') || (myRole() === 'supervisor' && p.supervisorUserId === ME.id));
 export const toolName = (id) => (S.tools[id] || {}).name || 'Herramienta eliminada';
 export const catName = (id) => (S.categories[id] || {}).name || 'Sin categoría';

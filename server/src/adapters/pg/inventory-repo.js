@@ -21,7 +21,7 @@ export async function loadPools(q) {
 }
 
 // Controles con sus ítems, en la forma que usa el dominio (como en 2.1).
-// Filtros opcionales: status, id (con lock: FOR UPDATE).
+// Filtros opcionales: status, id (con lock: FOR UPDATE). El poseedor es `techId` o `cajaId`.
 export async function loadControls(q, { status, id, lock = false } = {}) {
   const conds = [];
   const params = [];
@@ -40,7 +40,7 @@ export async function loadControls(q, { status, id, lock = false } = {}) {
   return rows.map((r) => {
     const period = { y: r.period_y, m: r.period_m, w: r.period_w };
     return {
-      id: r.id, techId: r.tech_id, techName: r.tech_name, shiftId: r.shift_id, period, pkey: pkeyOf(period), pnum: pnumOf(period), status: r.status,
+      id: r.id, techId: r.tech_id, cajaId: r.caja_id, techName: r.tech_name, shiftId: r.shift_id, plantillaId: r.plantilla_id_snapshot, period, pkey: pkeyOf(period), pnum: pnumOf(period), status: r.status,
       items: byCtl[r.id] || {}, counts: { bueno: r.count_bueno, cambio: r.count_cambio, faltante: r.count_faltante },
       correction: r.correction, supersedes: r.supersedes_id, startedAt: iso(r.started_at), finishedAt: iso(r.finished_at), updatedAt: iso(r.updated_at), version: r.version, by: r.created_by, demo: r.demo,
     };
@@ -50,7 +50,7 @@ export async function loadControls(q, { status, id, lock = false } = {}) {
 export async function loadMovements(q) {
   const { rows } = await q.query('SELECT * FROM movements ORDER BY at');
   return rows.map((r) => ({
-    id: r.id, type: r.type, techId: r.tech_id, toolId: r.tool_id, qty: r.qty, unitId: r.unit_id, oldUnitId: r.old_unit_id,
+    id: r.id, type: r.type, techId: r.tech_id, cajaId: r.caja_id, toolId: r.tool_id, qty: r.qty, unitId: r.unit_id, oldUnitId: r.old_unit_id,
     returned: r.returned, resolvesMovementId: r.resolves_movement_id, at: iso(r.at),
   }));
 }
@@ -59,18 +59,20 @@ export async function loadMovements(q) {
 export async function loadInventoryContext(q) {
   // En secuencia: un mismo cliente de pg no admite consultas en paralelo.
   const techs = await q.query('SELECT id, name, active FROM techs');
+  const cajas = await q.query('SELECT id, name, archived_at FROM cajas');
   const tools = await q.query('SELECT id, name, serialized, active, category_id FROM tools');
-  const units = await q.query('SELECT id, tool_id, code, status, tech_id FROM units');
-  const asgs = await q.query('SELECT id, tech_id, tool_id, unit_id, qty, active FROM assignments WHERE active');
+  const units = await q.query('SELECT id, tool_id, code, status, tech_id, caja_id FROM units');
+  const asgs = await q.query('SELECT id, tech_id, caja_id, tool_id, unit_id, qty, active FROM assignments WHERE active');
   const pools = await loadPools(q);
   const ctls = await loadControls(q, { status: 'finalizado' });
   const movs = await loadMovements(q);
   const { effList } = effectiveControls(ctls);
   return {
     techs: byId(techs.rows, (r) => ({ name: r.name, active: r.active })),
+    cajas: byId(cajas.rows, (r) => ({ name: r.name, archivedAt: iso(r.archived_at) })),
     tools: byId(tools.rows, (r) => ({ name: r.name, serialized: r.serialized, active: r.active, categoryId: r.category_id })),
-    units: byId(units.rows, (r) => ({ toolId: r.tool_id, code: r.code, status: r.status, techId: r.tech_id })),
-    assignments: byId(asgs.rows, (r) => ({ techId: r.tech_id, toolId: r.tool_id, unitId: r.unit_id, qty: r.qty, active: r.active })),
+    units: byId(units.rows, (r) => ({ toolId: r.tool_id, code: r.code, status: r.status, techId: r.tech_id, cajaId: r.caja_id })),
+    assignments: byId(asgs.rows, (r) => ({ techId: r.tech_id, cajaId: r.caja_id, toolId: r.tool_id, unitId: r.unit_id, qty: r.qty, active: r.active })),
     pools,
     stateOf: controlHistory(effList).stateOf,
     pendingReturns: pendingReturns(movs),
@@ -78,7 +80,9 @@ export async function loadInventoryContext(q) {
 }
 
 const ASG_COLS = { active: 'active', until: 'until', endReason: 'end_reason', replacedBy: 'replaced_by', endMovementId: 'end_movement_id', qty: 'qty' };
-const UNIT_COLS = { status: 'status', techId: 'tech_id' };
+const UNIT_COLS = { status: 'status', techId: 'tech_id', cajaId: 'caja_id' };
+// Una unidad cambia de manos: si el plan nombra al técnico y no a la caja, la caja queda vacía.
+const unitSet = (set) => ('techId' in set && !('cajaId' in set) ? { ...set, cajaId: null } : set);
 
 function updateSql(table, id, set, cols) {
   const keys = Object.keys(set);
@@ -92,11 +96,11 @@ export async function applyMovementPlan(client, plan, { actorId = null, auditId,
   const m = plan.movement;
   await client.query(
     `INSERT INTO movements (id, type, tech_id, tool_id, qty, unit_id, new_assignment_id, old_assignment_id, old_unit_id, new_unit_id,
-       old_state, returned, old_dest, condition, linked_control_id, resolves_movement_id, reason, notes, at, created_by, demo)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
+       old_state, returned, old_dest, condition, linked_control_id, resolves_movement_id, reason, notes, at, created_by, demo, caja_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
     [m.id, m.type, m.techId ?? null, m.toolId ?? null, m.qty ?? null, m.unitId ?? null, m.newAssignmentId ?? null, m.oldAssignmentId ?? null,
       m.oldUnitId ?? null, m.newUnitId ?? null, m.oldState ?? null, m.returned ?? null, m.oldDest ?? null, m.condition ?? null,
-      m.linkedControlId ?? null, m.resolvesMovementId ?? null, m.reason || null, m.notes || null, m.at, actorId, demo],
+      m.linkedControlId ?? null, m.resolvesMovementId ?? null, m.reason || null, m.notes || null, m.at, actorId, demo, m.cajaId ?? null],
   );
   // Unidades nuevas antes de las transferencias y asignaciones que las nombran.
   for (const u of plan.newUnits) {
@@ -108,11 +112,11 @@ export async function applyMovementPlan(client, plan, { actorId = null, auditId,
   for (const u of plan.assignmentUpdates) await client.query(updateSql('assignments', u.id, u.set, ASG_COLS));
   for (const a of plan.newAssignments) {
     await client.query(
-      'INSERT INTO assignments (id, tech_id, tool_id, unit_id, qty, active, since, movement_id, replaces, created_by, demo) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
-      [a.id, a.techId, a.toolId, a.unitId, a.qty, a.active, a.since, a.movementId, a.replaces, actorId, demo],
+      'INSERT INTO assignments (id, tech_id, tool_id, unit_id, qty, active, since, movement_id, replaces, created_by, demo, caja_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
+      [a.id, a.techId ?? null, a.toolId, a.unitId, a.qty, a.active, a.since, a.movementId, a.replaces, actorId, demo, a.cajaId ?? null],
     );
   }
-  for (const u of plan.unitUpdates) await client.query(updateSql('units', u.id, u.set, UNIT_COLS));
+  for (const u of plan.unitUpdates) await client.query(updateSql('units', u.id, unitSet(u.set), UNIT_COLS));
   if (plan.audit && auditId) {
     await client.query('INSERT INTO audit_log (id, action, entity, entity_id, detail, at, actor_id, ip) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)', [auditId, plan.audit.action, 'movements', m.id, plan.audit.detail, m.at, actorId, ip]);
   }
@@ -123,10 +127,10 @@ export async function applyMovementPlan(client, plan, { actorId = null, auditId,
 export async function saveControl(client, id, doc, { actorId = null, startedAt, finishedAt, demo = false } = {}) {
   await client.query(
     `INSERT INTO controls (id, tech_id, tech_name, shift_id, period_y, period_m, period_w, status, count_bueno, count_cambio, count_faltante,
-       correction, supersedes_id, started_at, created_by, demo)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,'borrador',$8,$9,$10,$11,$12,$13,$14,$15)`,
-    [id, doc.techId, doc.techName, doc.shiftId, doc.period.y, doc.period.m, doc.period.w, doc.counts.bueno, doc.counts.cambio, doc.counts.faltante,
-      doc.correction, doc.supersedes, startedAt ?? null, actorId, demo],
+       correction, supersedes_id, started_at, created_by, demo, plantilla_id_snapshot, caja_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'borrador',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+    [id, doc.techId ?? null, doc.techName, doc.shiftId, doc.period.y, doc.period.m, doc.period.w, doc.counts.bueno, doc.counts.cambio, doc.counts.faltante,
+      doc.correction, doc.supersedes, startedAt ?? null, actorId, demo, doc.plantillaId ?? null, doc.cajaId ?? null],
   );
   await insertItems(client, id, doc.items);
   if (doc.status === 'finalizado') {
@@ -151,7 +155,7 @@ export async function rewriteControl(client, id, doc, { finishedAt = null } = {}
   const fin = doc.status === 'finalizado';
   await client.query(
     `UPDATE controls SET tech_name = $2, shift_id = $3, count_bueno = $4, count_cambio = $5, count_faltante = $6,
-       status = $7, finished_at = $8 WHERE id = $1`,
-    [id, doc.techName, doc.shiftId, doc.counts.bueno, doc.counts.cambio, doc.counts.faltante, fin ? 'finalizado' : 'borrador', fin ? finishedAt : null],
+       status = $7, finished_at = $8, plantilla_id_snapshot = $9 WHERE id = $1`,
+    [id, doc.techName, doc.shiftId, doc.counts.bueno, doc.counts.cambio, doc.counts.faltante, fin ? 'finalizado' : 'borrador', fin ? finishedAt : null, doc.plantillaId ?? null],
   );
 }

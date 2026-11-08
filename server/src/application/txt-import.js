@@ -55,6 +55,7 @@ async function withSerializable(pool, fn) {
   } catch (err) {
     await c.query('ROLLBACK').catch(() => {});
     if (err.code === '40001' || err.code === '40P01') throw new DomainError('Otra persona modificó datos mientras se importaba. Revisá el informe de nuevo.', 'import_retry', 409);
+    if (err.code === '23505' && err.constraint === 'plantillas_active_name_key') throw new DomainError('La importación deja dos plantillas activas con el mismo nombre. Revisá el informe de nuevo.', 'duplicate_plantilla_name', 409);
     if (err.code === '23505' || err.code === '23503') throw new DomainError('La importación choca con datos del servidor (registro repetido o referencia rota). Revisá el informe de nuevo.', 'import_conflict', 409);
     throw err;
   } finally {
@@ -75,13 +76,13 @@ export async function applyImport(db, actor, text, { mode, token }) {
     const report = reportOf(p, { savedAt: file.savedAt });
     if (p.errors.length) throw withExtra(new DomainError('El archivo no se puede importar así: revisá los errores del informe.', 'import_invalid', 422), { report });
     if (!token || token !== p.token) throw withExtra(new DomainError('Los datos cambiaron desde la revisión. Revisá el informe nuevo antes de confirmar.', 'import_changed', 409), { report });
-    await applyImportPlan(c, p, { actorId: actor.id });
+    const applied = await applyImportPlan(c, p, { actorId: actor.id });
     const n = Object.entries(p.counts).filter(([, x]) => x.create + x.update + x.delete).map(([k, x]) => `${k} +${x.create} ~${x.update} -${x.delete}`).join(', ');
     await record(c, actor, {
       action: 'import_txt', entity: 'system', id: 'import', event: 'reload',
-      detail: `Importación .txt (${mode === 'replace' ? 'reemplazar' : 'combinar'}): ${n || 'sin cambios'}; ${p.conflicts.length} conflictos${file.savedAt ? `; archivo del ${file.savedAt}` : ''}`,
+      detail: `Importación .txt (${mode === 'replace' ? 'reemplazar' : 'combinar'}): ${n || 'sin cambios'}; ${p.conflicts.length} conflictos${applied.membershipSkipped ? `; ${applied.membershipSkipped} cambios de plantilla omitidos (anteriores al historial o durante una cobertura)` : ''}${file.savedAt ? `; archivo del ${file.savedAt}` : ''}`,
     });
-    return { applied: true, report };
+    return { applied: true, report: { ...report, membershipSkipped: applied.membershipSkipped } };
   });
 }
 

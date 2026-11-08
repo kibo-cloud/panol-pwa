@@ -3,6 +3,7 @@
 // (movimiento, transferencias, asignaciones y unidades). Los mensajes de error son los de 2.1.
 import { DomainError, tooLong } from './errors.js';
 import { LIM, MV, POOL } from './constants.js';
+import { sameHolder } from './lineas.js';
 
 const STOCK_TYPES = ['entrega_inicial', 'adicional', 'reposicion', 'devolucion', 'retiro', 'recepcion'];
 const INV_TYPES = ['ingreso', 'reparado', 'baja', 'recupero'];
@@ -21,7 +22,24 @@ const fail = (msg) => {
 };
 const unitCode = (ctx, id) => (id && ctx.units[id] ? ctx.units[id].code : '');
 
-// ctx: { techs, tools, units, assignments, pools, stateOf, pendingReturns }
+// Poseedor del movimiento: un técnico activo o una caja activa (etapa 2), nunca los dos.
+function holderOf(ctx, m) {
+  if (m.techId && m.cajaId) fail('Elegí un técnico o una caja, no los dos.');
+  if (m.cajaId) {
+    const k = (ctx.cajas || {})[m.cajaId];
+    if (!k || k.archivedAt) fail('Elegí una caja activa.');
+    return { techId: null, cajaId: m.cajaId, name: k.name, caja: true };
+  }
+  const t = ctx.techs[m.techId];
+  if (!t || t.active === false) fail('Elegí un técnico activo.');
+  return { techId: m.techId, cajaId: null, name: t.name, caja: false };
+}
+// Campos del poseedor en movimientos y asignaciones (la caja solo si es de una caja).
+const holderFields = (h) => ({ techId: h.techId, ...(h.cajaId ? { cajaId: h.cajaId } : {}) });
+// Unidad en manos del poseedor.
+const heldBy = (h) => (h.cajaId ? { techId: null, cajaId: h.cajaId } : { techId: h.techId });
+
+// ctx: { techs, cajas, tools, units, assignments, pools, stateOf, pendingReturns }
 // opts: { at: ISO, newId: (prefijo) => id }
 export function planMovement(ctx, m, { at, newId }) {
   requiredPermission(m.type);
@@ -34,16 +52,16 @@ export function planMovement(ctx, m, { at, newId }) {
   if (INV_TYPES.includes(m.type)) return planInventory(ctx, m, plan, { at, mid, notes, newId });
   if (m.type === 'recepcion') return planReception(ctx, m, plan, { at, mid, notes });
 
-  const tech = ctx.techs[m.techId];
-  if (!tech || tech.active === false) fail('Elegí un técnico activo.');
-  const activeOf = (techId) => Object.entries(ctx.assignments).filter(([, a]) => a.active && a.techId === techId);
+  const h = holderOf(ctx, m);
+  const activeOf = () => Object.entries(ctx.assignments).filter(([, a]) => a.active && sameHolder(a, h));
 
   if (m.type === 'entrega_inicial' || m.type === 'adicional') {
     const tool = ctx.tools[m.toolId];
     if (!tool || tool.active === false) fail('Elegí una herramienta activa.');
-    const has = activeOf(m.techId).some(([, a]) => a.toolId === m.toolId);
-    if (m.type === 'entrega_inicial' && has) fail('El técnico ya tiene esta herramienta. Usá Entrega adicional o Reposición.');
-    if (m.type === 'adicional' && !has) fail('El técnico todavía no tiene esta herramienta. Usá Entrega inicial.');
+    const has = activeOf().some(([, a]) => a.toolId === m.toolId);
+    const who = h.caja ? 'La caja' : 'El técnico';
+    if (m.type === 'entrega_inicial' && has) fail(`${who} ya tiene esta herramienta. Usá Entrega adicional o Reposición.`);
+    if (m.type === 'adicional' && !has) fail(`${who} todavía no tiene esta herramienta. Usá Entrega inicial.`);
     let qty = 1;
     let unitId = null;
     if (tool.serialized) {
@@ -57,17 +75,17 @@ export function planMovement(ctx, m, { at, newId }) {
       if (qty > disp) fail(`Solo hay ${disp} disponibles. Registrá un ingreso en Inventario.`);
     }
     const aid = newId('a');
-    plan.movement = { id: mid, type: m.type, techId: m.techId, toolId: m.toolId, qty, unitId, newAssignmentId: aid, reason, notes, at };
+    plan.movement = { id: mid, type: m.type, ...holderFields(h), toolId: m.toolId, qty, unitId, newAssignmentId: aid, reason, notes, at };
     plan.transfers.push({ toolId: m.toolId, qty, from: 'disponible', to: 'asignado', unitId });
-    plan.newAssignments.push({ id: aid, techId: m.techId, toolId: m.toolId, unitId, qty, active: true, since: at, movementId: mid, replaces: null });
-    if (unitId) plan.unitUpdates.push({ id: unitId, set: { status: 'asignado', techId: m.techId } });
-    plan.audit = { action: 'movement', detail: `${MV[m.type]}: ${tool.name}${unitId ? ' ' + unitCode(ctx, unitId) : ''}${qty > 1 ? ' ×' + qty : ''} a ${tech.name}` };
+    plan.newAssignments.push({ id: aid, ...holderFields(h), toolId: m.toolId, unitId, qty, active: true, since: at, movementId: mid, replaces: null });
+    if (unitId) plan.unitUpdates.push({ id: unitId, set: { status: 'asignado', ...heldBy(h) } });
+    plan.audit = { action: 'movement', detail: `${MV[m.type]}: ${tool.name}${unitId ? ' ' + unitCode(ctx, unitId) : ''}${qty > 1 ? ' ×' + qty : ''} a ${h.name}` };
     return plan;
   }
 
   const a0 = ctx.assignments[m.asgId];
   const a = a0 ? { id: m.asgId, ...a0 } : null;
-  if (!a || !a.active || a.techId !== m.techId) fail('Elegí una herramienta asignada al técnico.');
+  if (!a || !a.active || !sameHolder(a, h)) fail(h.caja ? 'Elegí una herramienta asignada a la caja.' : 'Elegí una herramienta asignada al técnico.');
   const tool = ctx.tools[a.toolId] || { name: 'Herramienta' };
   const st = ctx.stateOf[a.id];
 
@@ -87,19 +105,19 @@ export function planMovement(ctx, m, { at, newId }) {
     const dest = m.returned ? oldDest : 'pendiente';
     const naid = newId('a');
     plan.movement = {
-      id: mid, type: 'reposicion', techId: m.techId, toolId: a.toolId, qty, oldAssignmentId: a.id, newAssignmentId: naid,
+      id: mid, type: 'reposicion', ...holderFields(h), toolId: a.toolId, qty, oldAssignmentId: a.id, newAssignmentId: naid,
       oldUnitId: a.unitId || null, newUnitId, oldState: st ? st.state : 'pendiente', returned: !!m.returned, oldDest: dest,
       linkedControlId: st ? st.controlId : null, reason, notes, at,
     };
     plan.transfers.push({ toolId: a.toolId, qty, from: 'asignado', to: dest, unitId: a.unitId || null });
     plan.transfers.push({ toolId: a.toolId, qty, from: 'disponible', to: 'asignado', unitId: newUnitId });
     plan.assignmentUpdates.push({ id: a.id, set: { active: false, until: at, endReason: 'reposicion', replacedBy: naid, endMovementId: mid } });
-    plan.newAssignments.push({ id: naid, techId: m.techId, toolId: a.toolId, unitId: newUnitId, qty, active: true, since: at, movementId: mid, replaces: a.id });
-    if (a.unitId) plan.unitUpdates.push({ id: a.unitId, set: { status: dest, techId: dest === 'pendiente' ? m.techId : null } });
-    if (newUnitId) plan.unitUpdates.push({ id: newUnitId, set: { status: 'asignado', techId: m.techId } });
+    plan.newAssignments.push({ id: naid, ...holderFields(h), toolId: a.toolId, unitId: newUnitId, qty, active: true, since: at, movementId: mid, replaces: a.id });
+    if (a.unitId) plan.unitUpdates.push({ id: a.unitId, set: { status: dest, ...(dest === 'pendiente' ? heldBy(h) : { techId: null }) } });
+    if (newUnitId) plan.unitUpdates.push({ id: newUnitId, set: { status: 'asignado', ...heldBy(h) } });
     plan.audit = {
       action: 'movement',
-      detail: `Reposición: ${tool.name} a ${tech.name}${a.unitId ? `, sale ${unitCode(ctx, a.unitId)}` : ''}${newUnitId ? `, entra ${unitCode(ctx, newUnitId)}` : ''}. Anterior: ${dest === 'pendiente' ? 'pendiente de devolución' : POOL[dest].toLowerCase()}`,
+      detail: `Reposición: ${tool.name} a ${h.name}${a.unitId ? `, sale ${unitCode(ctx, a.unitId)}` : ''}${newUnitId ? `, entra ${unitCode(ctx, newUnitId)}` : ''}. Anterior: ${dest === 'pendiente' ? 'pendiente de devolución' : POOL[dest].toLowerCase()}`,
     };
     return plan;
   }
@@ -112,12 +130,12 @@ export function planMovement(ctx, m, { at, newId }) {
   }
   const dest = m.type === 'retiro' ? 'retirado' : m.cond || 'disponible';
   if (m.type === 'devolucion' && !RETURN_COND.includes(dest)) fail('Elegí la condición de lo devuelto.');
-  plan.movement = { id: mid, type: m.type, techId: m.techId, toolId: a.toolId, qty, oldAssignmentId: a.id, unitId: a.unitId || null, condition: dest, reason, notes, at };
+  plan.movement = { id: mid, type: m.type, ...holderFields(h), toolId: a.toolId, qty, oldAssignmentId: a.id, unitId: a.unitId || null, condition: dest, reason, notes, at };
   plan.transfers.push({ toolId: a.toolId, qty, from: 'asignado', to: dest, unitId: a.unitId || null });
   if (qty >= (a.qty || 1)) plan.assignmentUpdates.push({ id: a.id, set: { active: false, until: at, endReason: m.type, endMovementId: mid } });
   else plan.assignmentUpdates.push({ id: a.id, set: { qty: (a.qty || 1) - qty } });
   if (a.unitId) plan.unitUpdates.push({ id: a.unitId, set: { status: dest, techId: null } });
-  plan.audit = { action: 'movement', detail: `${MV[m.type]}: ${tool.name}${a.unitId ? ' ' + unitCode(ctx, a.unitId) : ''}${qty > 1 ? ' ×' + qty : ''} de ${tech.name}, a ${POOL[dest].toLowerCase()}` };
+  plan.audit = { action: 'movement', detail: `${MV[m.type]}: ${tool.name}${a.unitId ? ' ' + unitCode(ctx, a.unitId) : ''}${qty > 1 ? ' ×' + qty : ''} de ${h.name}, a ${POOL[dest].toLowerCase()}` };
   return plan;
 }
 
@@ -127,7 +145,7 @@ function planReception(ctx, m, plan, { at, mid, notes }) {
   const dest = m.cond || 'reparacion';
   if (!RETURN_COND.includes(dest)) fail('Elegí en qué condición vuelve.');
   const toolName = (ctx.tools[mv.toolId] || {}).name || 'Herramienta';
-  plan.movement = { id: mid, type: 'recepcion', techId: mv.techId, toolId: mv.toolId, qty: mv.qty, unitId: mv.oldUnitId || null, resolvesMovementId: mv.id, condition: dest, notes, at };
+  plan.movement = { id: mid, type: 'recepcion', techId: mv.techId ?? null, ...(mv.cajaId ? { cajaId: mv.cajaId } : {}), toolId: mv.toolId, qty: mv.qty, unitId: mv.oldUnitId || null, resolvesMovementId: mv.id, condition: dest, notes, at };
   plan.transfers.push({ toolId: mv.toolId, qty: mv.qty, from: 'pendiente', to: dest, unitId: mv.oldUnitId || null });
   if (mv.oldUnitId) plan.unitUpdates.push({ id: mv.oldUnitId, set: { status: dest, techId: null } });
   plan.audit = { action: 'movement', detail: `Devolución pendiente recibida: ${toolName}, a ${POOL[dest].toLowerCase()}` };

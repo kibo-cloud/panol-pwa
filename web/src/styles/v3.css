@@ -3,3 +3,31 @@
 .netwrap .banner{margin-bottom:0}
 @media (min-width:1024px){.netwrap{padding:16px 32px 0}}
 body.auth .netwrap{max-width:400px}
+
+/* Etapa 2: plantillas, selección de técnicos, cambio de plantilla, líneas y cajas. */
+.g1{display:grid;gap:10px}
+.plcard .t{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+.plmeta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.plopt{min-height:56px}
+.plopt .t{display:block;font-weight:600}
+.plopt .s{display:block;font-size:12px;color:var(--ink2)}
+.opt[disabled]{background:var(--surface2);color:var(--ink2);cursor:not-allowed}
+.opt[disabled]::before{border-style:dashed}
+.tc-row{display:flex;align-items:center;gap:4px;min-width:0}
+.tc-row .tc-h{min-width:0}
+.selbox{width:44px;height:44px;display:grid;place-items:center;flex:none;margin-left:-10px;cursor:pointer}
+.selbox input{width:22px;height:22px;margin:0;accent-color:var(--pri)}
+.card.tc.sel{border-color:var(--pri);background:var(--pri-soft2)}
+.selbar{position:sticky;bottom:92px;z-index:20;display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:10px 12px;margin-bottom:12px}
+.selbar .btn{min-height:44px}
+@media (min-width:1024px){.selbar{bottom:16px}}
+.kept{margin-top:14px;background:var(--ok-tint);border:1px solid var(--ok-edge);border-radius:12px;padding:10px 12px}
+.kept h3{margin:0 0 6px;font-size:13px;font-weight:600;color:var(--ok-ink)}
+.kept-i{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--label);padding:2px 0}
+.okd{width:20px;height:20px;border-radius:50%;background:var(--ok-soft);color:var(--ok-ink);display:grid;place-items:center;flex:none}
+.covnote{display:flex;align-items:center;gap:4px;color:var(--warn-ink);margin-top:2px}
+.tile.sm{width:36px;height:36px;border-radius:10px}
+.unitpick{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:2px 10px}
+.labels{display:grid;gap:8px;max-width:480px}
+.lblrow{display:flex;align-items:center;gap:8px}
+.lblrow input{flex:1;min-width:0}

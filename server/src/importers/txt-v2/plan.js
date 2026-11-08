@@ -242,6 +242,13 @@ export function planImport(server, file, { mode, actorId, now = new Date() }) {
     }
   };
   unique('techs', (r) => r.legajo, 'legajo', 'legajo repetido');
+  // Turnos = plantillas activas: nombre único sin distinguir mayúsculas (índice de la migración 008).
+  const seenShift = new Map();
+  for (const [id, s] of Object.entries(fshifts)) {
+    const k = String(s.name ?? '').toLowerCase();
+    if (seenShift.has(k)) err('shifts', id, 'name', `nombre de plantilla repetido (${s.name})`);
+    else seenShift.set(k, id);
+  }
   unique('units', (r) => r.code.toLowerCase(), 'code', 'código de unidad repetido');
   unique('controls', (r) => (r.correction ? null : stableJson([r.techId, r.period])), 'period', 'ya hay un control original de ese técnico en ese período', (r) => `${r.period.y}-${r.period.m}-${r.period.w}`);
   unique('movements', (r) => (r.type === 'recepcion' && r.resolvesMovementId ? r.resolvesMovementId : null), 'resolvesMovementId', 'esa devolución pendiente ya fue recibida');

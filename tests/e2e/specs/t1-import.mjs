@@ -46,7 +46,7 @@ export const tests = [
       await loginAs(page);
       const r = await importFile(page, fixture('xss-text.txt'), 'replace');
       assert(r.opened && !r.err, 'xss-text.txt is a valid file: ' + r.err);
-      await visitAll(page, ['tecnico-t1', 'herramienta-h1', 'turno-manana', 'control-t1', 'admin']);
+      await visitAll(page, ['tecnico-t1', 'herramienta-h1', 'plantilla-manana', 'control-t1', 'admin']);
       await page.hash('#tecnicos');
       assert((await page.text('#view')).includes('<img'), 'payload shown as text');
       await page.hash('#herramienta-h1');

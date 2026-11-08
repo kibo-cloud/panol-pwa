@@ -51,9 +51,14 @@ export async function seed(pool, { now = new Date(), config } = {}) {
     for (const [id, username, name, role] of USERS) {
       await c.query('INSERT INTO users (id, username, name, role, password_hash, must_change_password) VALUES ($1,$2,$3,$4,$5,false)', [id, username, name, role, hash]);
     }
-    for (const [id, name, legajo, shift, active = true] of TECHS) {
-      await c.query('INSERT INTO techs (id, name, legajo, shift_id, active, alta) VALUES ($1,$2,$3,$4,$5,$6)', [id, name, legajo, shift, active, at(120).slice(0, 10)]);
+    for (const [id, name, legajo, plantilla, active = true] of TECHS) {
+      await c.query('INSERT INTO techs (id, name, legajo, active, alta) VALUES ($1,$2,$3,$4,$5)', [id, name, legajo, active, at(120).slice(0, 10)]);
+      // Pertenencia a la plantilla (los turnos de 2.1 migrados): un rango desde siempre.
+      await c.query("INSERT INTO tech_plantilla_history (id, tech_id, plantilla_id, reason) VALUES ($1,$2,$3,'Alta del técnico')", [`ph-${id}`, id, plantilla]);
     }
+    // Plantilla con supervisor (el supervisor de desarrollo) para "Mi plantilla".
+    await c.query("UPDATE plantillas SET supervisor_user_id = 'u-supervisor' WHERE id = 'manana'");
+    await c.query("INSERT INTO plantilla_supervisor_history (id, plantilla_id, supervisor_user_id, effective_from) VALUES ('ps-seed-manana', 'manana', 'u-supervisor', current_date)");
     for (const [id, name] of CATEGORIES) await c.query('INSERT INTO categories (id, name) VALUES ($1,$2)', [id, name]);
     for (const [id, name, cat, serialized] of TOOLS) {
       await c.query('INSERT INTO tools (id, name, category_id, serialized) VALUES ($1,$2,$3,$4)', [id, name, cat, serialized]);
@@ -89,10 +94,10 @@ export async function seed(pool, { now = new Date(), config } = {}) {
     const prev = prevP(cur);
     const anaAsg = asgOf('t-ana');
     const anaItems = Object.fromEntries(anaAsg.map((a, i) => [a.id, i === 0 ? { state: 'cambio', note: 'Mordaza gastada' } : { state: 'bueno' }]));
-    const done = buildControlDoc({ tech: { id: 't-ana', name: 'Ana Prueba', shiftId: 'manana' }, period: prev, assignments: anaAsg, items: anaItems, tools: ctx.tools, units: ctx.units, categories: cats, status: 'finalizado' });
+    const done = buildControlDoc({ tech: { id: 't-ana', name: 'Ana Prueba', plantillaId: 'manana' }, period: prev, assignments: anaAsg, items: anaItems, tools: ctx.tools, units: ctx.units, categories: cats, status: 'finalizado' });
     await saveControl(c, `c-t-ana-${pkeyOf(prev)}`, done, { startedAt: at(8), finishedAt: at(7) });
     const brunoAsg = asgOf('t-bruno');
-    const draft = buildControlDoc({ tech: { id: 't-bruno', name: 'Bruno Ejemplo', shiftId: 'tarde' }, period: cur, assignments: brunoAsg, items: { [brunoAsg[0].id]: { state: 'bueno' } }, tools: ctx.tools, units: ctx.units, categories: cats, status: 'borrador' });
+    const draft = buildControlDoc({ tech: { id: 't-bruno', name: 'Bruno Ejemplo', plantillaId: 'tarde' }, period: cur, assignments: brunoAsg, items: { [brunoAsg[0].id]: { state: 'bueno' } }, tools: ctx.tools, units: ctx.units, categories: cats, status: 'borrador' });
     await saveControl(c, `c-t-bruno-${pkeyOf(cur)}`, draft, { startedAt: at(0) });
     summary.controls = 2;
   });

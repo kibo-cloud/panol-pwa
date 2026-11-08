@@ -1,9 +1,9 @@
-// Administración: usuarios y permisos (solo admin, en el servidor), turnos, datos e
-// integridad, y auditoría paginada.
+// Administración: usuarios y permisos (solo admin, en el servidor), configuración (lista de
+// turnos de las plantillas), datos e integridad, y auditoría paginada.
 import { esc } from '../../ui/dom.js';
 import { icon } from '../../ui/icons.js';
 import { VIEWS, UI, render } from '../../ui/registry.js';
-import { ACT } from '../../ui/actions.js';
+import { ACT, IN } from '../../ui/actions.js';
 import { openModal, modalRerender, MOD, confirmBox } from '../../ui/modal.js';
 import { toast, act, UErr, tooLong, errMsg } from '../../ui/feedback.js';
 import { pageHead, emptyBox, avatar, field } from '../../ui/components.js';
@@ -11,12 +11,13 @@ import { hooks } from '../../ui/app.js';
 import { gateUI } from '../tecnicos/view.js';
 import { api } from '../../api/index.js';
 import { S, ME, derive, can, who, myRole, refresh, toolName } from '../../state/store.js';
-import { ROLES, ROLE_KEYS, PERMS, POOL, LIM } from '../../state/constants.js';
+import { ROLES, ROLE_KEYS, PERMS, PERMS_HIDDEN, POOL, LIM } from '../../state/constants.js';
+import { validateShiftLabels } from '../../state/plantillas.js';
 import { fdate, fdt } from '../../state/period.js';
 import { parseRoute } from '../../ui/router.js';
 
 // Datos que solo ve un administrador: se piden al abrir la pestaña.
-const AD = { users: null, perms: null, pending: {}, audit: null, loading: {} };
+const AD = { users: null, perms: null, pending: {}, audit: null, labels: null, loading: {} };
 const isAdm = () => myRole() === 'admin';
 
 async function load(what, force) {
@@ -26,12 +27,14 @@ async function load(what, force) {
     if (what === 'users') AD.users = (await api.users()).users;
     if (what === 'perms') AD.perms = await api.permissions();
     if (what === 'audit') AD.audit = await api.audit();
+    if (what === 'labels') { const r = await api.shiftLabels(); AD.labels = r; if (!UI.cfgLabels || !UI.cfgLabels.dirty) UI.cfgLabels = { list: r.labels.slice(), version: r.version, dirty: false }; }
   } catch (e) { toast(errMsg(e), 'err'); } finally { AD.loading[what] = false; render(); }
 }
 // Si otro administrador cambia algo mientras la pestaña está abierta, se vuelve a pedir.
 hooks.afterState.push(() => {
   if (parseRoute(location.hash).name !== 'admin' || !isAdm()) return;
   if (UI.adminTab === 'users') { load('users', true); load('perms', true); }
+  if (UI.adminTab === 'config') load('labels', true);
 });
 const loading = '<div class="loading"><div class="spin"></div>Cargando…</div>';
 
@@ -50,13 +53,20 @@ const pendingCount = () => Object.values(AD.pending).reduce((a, o) => a + Object
 function permMatrix() {
   if (!AD.perms) return loading;
   const n = pendingCount();
-  return `<div class="twrap"><table class="tbl matrix"><thead><tr><th>Permiso</th>${ROLE_KEYS.map((r) => `<th>${ROLES[r]}</th>`).join('')}</tr></thead><tbody>${PERMS.map(([k, l]) => `<tr><td>${l}</td>${ROLE_KEYS.map((r) => { const v = permValue(r, k); return `<td><button class="sw ${v ? 'on' : ''}" ${r === 'admin' ? 'disabled' : ''} data-act="permToggle" data-r="${esc(r)}" data-k="${esc(k)}" role="switch" aria-checked="${v}" aria-label="${l} para ${ROLES[r]}"></button></td>`; }).join('')}</tr>`).join('')}</tbody></table></div>
+  return `<div class="twrap"><table class="tbl matrix"><thead><tr><th>Permiso</th>${ROLE_KEYS.map((r) => `<th>${ROLES[r]}</th>`).join('')}</tr></thead><tbody>${PERMS.filter(([k]) => !PERMS_HIDDEN.includes(k)).map(([k, l]) => `<tr><td>${l}</td>${ROLE_KEYS.map((r) => { const v = permValue(r, k); return `<td><button class="sw ${v ? 'on' : ''}" ${r === 'admin' ? 'disabled' : ''} data-act="permToggle" data-r="${esc(r)}" data-k="${esc(k)}" role="switch" aria-checked="${v}" aria-label="${l} para ${ROLES[r]}"></button></td>`; }).join('')}</tr>`).join('')}</tbody></table></div>
   <div class="toolbar" data-css="margin-top:12px"><span class="s">${n ? `${n} ${n === 1 ? 'cambio sin guardar' : 'cambios sin guardar'}` : 'Sin cambios sin guardar'}</span><button class="btn sm" data-act="permDiscard" ${n ? '' : 'disabled'}>Descartar</button><button class="btn sm pri" data-act="permSave" ${n ? '' : 'disabled'}>Guardar cambios</button></div>`;
 }
 
-function shiftsTab() {
-  const d = derive();
-  return `<div class="srow"><h2 class="si">Turnos</h2>${can('shifts_edit') ? '<button class="btn sm pri" data-act="shiftNew">Nuevo turno</button>' : ''}</div><div class="list">${d.shifts.map((s) => { const n = d.techs.filter((t) => t.shiftId === s.id).length; return `<div class="row"><div class="grow"><div class="t">${esc(s.name)}</div><div class="s">${n} técnicos</div></div>${can('shifts_edit') ? `<button class="btn sm" data-act="shiftRename" data-s="${esc(s.id)}">Renombrar</button>${n ? '' : `<button class="btn sm danger" data-act="shiftDel" data-s="${esc(s.id)}">Eliminar</button>`}` : ''}</div>`; }).join('')}</div>`;
+// Configuración: lista de turnos (rótulos informativos) para cambiar el turno de las plantillas.
+function configTab() {
+  const ed = can('plantillas_edit');
+  load('labels');
+  const L = UI.cfgLabels;
+  if (!L) return loading;
+  const n = L.list.length;
+  return `<div class="card"><h2 class="si">Turnos de las plantillas</h2><p class="muted sm" data-css="margin:6px 0 12px">El turno actual de cada plantilla es un dato informativo. Al cambiarlo se elige de esta lista y queda en el historial. Las plantillas se administran en Plantillas.</p>
+  ${ed ? `<div class="labels">${L.list.map((l, i) => `<div class="lblrow"><input id="lbl-${i}" type="text" maxlength="120" data-in="cfgLabel" data-i="${i}" value="${esc(l)}" aria-label="Turno ${i + 1}"><button class="icon-btn" data-act="cfgLabelDel" data-i="${i}" aria-label="Quitar ${esc(l || 'turno')}" ${n <= 1 ? 'disabled' : ''}>${icon('x', 18)}</button></div>`).join('')}</div>
+  <div class="toolbar" data-css="margin-top:12px"><button class="btn sm" data-act="cfgLabelAdd" ${n >= 20 ? 'disabled' : ''}>${icon('plus', 16)}Agregar turno</button><span class="s grow">${L.dirty ? 'Cambios sin guardar' : 'Sin cambios sin guardar'}</span><button class="btn sm" data-act="cfgLabelReset" ${L.dirty ? '' : 'disabled'}>Descartar</button><button class="btn sm pri" data-act="cfgLabelSave" ${L.dirty ? '' : 'disabled'}>Guardar cambios</button></div>` : `<div class="list">${L.list.map((l) => `<div class="row"><div class="grow"><div class="t">${esc(l)}</div></div></div>`).join('')}</div><p class="muted sm">Tu perfil puede ver la lista pero no modificarla.</p>`}</div>`;
 }
 
 export function integrity() {
@@ -68,7 +78,7 @@ export function integrity() {
     if (t.serialized) { for (const k of ['disponible', 'asignado', 'reparacion', 'retirado', 'pendiente', 'baja']) { const n = (d.unitsByTool[t.id] || []).filter((u) => u.status === k).length; if (n !== p[k]) out.push({ sev: 'warn', t: `${t.name}: unidades y movimientos difieren`, s: `${POOL[k]}: ${n} unidades contra ${p[k]} según movimientos.` }); } }
   }
   for (const u of d.units) { const c = (u.code || '').toLowerCase(); if (codes[c]) out.push({ sev: 'bad', t: 'Código duplicado', s: u.code }); codes[c] = 1; }
-  for (const a of d.activeAsg) { const t = S.techs[a.techId]; if (!t) out.push({ sev: 'bad', t: 'Asignación sin técnico', s: toolName(a.toolId) }); else if (t.active === false) out.push({ sev: 'warn', t: `${t.name} está inactivo y tiene herramientas`, s: `${toolName(a.toolId)}: registrá la devolución o el retiro.` }); }
+  for (const a of d.activeAsg) { if (a.cajaId) { const k = S.cajas[a.cajaId]; if (!k) out.push({ sev: 'bad', t: 'Asignación sin caja', s: toolName(a.toolId) }); else if (k.archivedAt) out.push({ sev: 'warn', t: `${k.name} está archivada y tiene herramientas`, s: toolName(a.toolId) }); continue; } const t = S.techs[a.techId]; if (!t) out.push({ sev: 'bad', t: 'Asignación sin técnico', s: toolName(a.toolId) }); else if (t.active === false) out.push({ sev: 'warn', t: `${t.name} está inactivo y tiene herramientas`, s: `${toolName(a.toolId)}: registrá la devolución o el retiro.` }); }
   return out;
 }
 function dataTab() {
@@ -89,9 +99,9 @@ function auditTab() {
 
 VIEWS.admin = () => {
   const tab = UI.adminTab;
-  const tabs = [['users', 'Usuarios y permisos'], ['shifts', 'Turnos'], ['data', 'Datos e integridad'], ['audit', 'Auditoría']];
-  const body = tab === 'users' ? usersTab() : tab === 'shifts' ? shiftsTab() : tab === 'data' ? dataTab() : auditTab();
-  return pageHead('Administración', 'Usuarios, permisos, turnos y registros del sistema') + `<div class="tabs">${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="adminTab" data-v="${esc(k)}">${l}</button>`).join('')}</div>${body}`;
+  const tabs = [['users', 'Usuarios y permisos'], ['config', 'Configuración'], ['data', 'Datos e integridad'], ['audit', 'Auditoría']];
+  const body = tab === 'users' ? usersTab() : tab === 'config' || tab === 'shifts' ? configTab() : tab === 'data' ? dataTab() : auditTab();
+  return pageHead('Administración', 'Usuarios, permisos, configuración y registros del sistema') + `<div class="tabs">${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="adminTab" data-v="${esc(k)}">${l}</button>`).join('')}</div>${body}`;
 };
 ACT.adminTab = (ds) => { UI.adminTab = ds.v; if (location.hash !== '#admin') location.hash = '#admin'; else render(); };
 
@@ -155,20 +165,17 @@ ACT.permSave = async () => {
   if (r) { AD.perms = r; AD.pending = {}; await refresh().catch(() => {}); render(); }
 };
 
-// ------------------------------------------------------------------ turnos
-const validShift = (st, except) => { const n = (st.name || '').trim(); if (n.length < 2) throw new UErr('Ingresá un nombre.'); tooLong(n, LIM.name, 'El nombre'); if (derive().shifts.some((s) => s.id !== except && s.name.toLowerCase() === n.toLowerCase())) throw new UErr('Ya existe ese turno.'); return n; };
-ACT.shiftNew = () => { if (!gateUI('shifts_edit')) return; openModal({ title: 'Nuevo turno', render: (st) => field('Nombre', `<input id="f-sn" type="text" maxlength="120" data-mi="name" value="${esc(st.name || '')}" placeholder="Ej.: Turno fin de semana">`, 'f-sn'), actions: [{ label: 'Cancelar', close: true }, { label: 'Crear turno', kind: 'pri', run: async (st) => { await api.createShift({ name: validShift(st) }); await refresh(); toast('Turno creado'); } }] }); };
-ACT.shiftRename = (ds) => {
-  const s = derive().shiftById[ds.s]; if (!s || !gateUI('shifts_edit')) return;
-  const get = () => S.shifts.find((x) => x.id === ds.s) || null;
-  openModal({ title: 'Renombrar turno', rec: { get, version: s.version }, reload: (cur) => ({ name: cur.name }), render: (st) => field('Nombre', `<input id="f-sr" type="text" maxlength="120" data-mi="name" value="${esc(st.name || '')}">`, 'f-sr'), actions: [{ label: 'Cancelar', close: true }, { label: 'Guardar', kind: 'pri', run: async (st, m) => { await api.updateShift(ds.s, { name: validShift(st, ds.s) }, m.rec.version); await refresh(); toast('Turno actualizado'); } }] });
-  MOD.st = { name: s.name }; modalRerender();
-};
-ACT.shiftDel = async (ds) => {
-  const s = derive().shiftById[ds.s]; if (!s || !gateUI('shifts_edit')) return;
-  if (Object.values(S.techs).some((t) => t.shiftId === ds.s)) { toast('El turno tiene técnicos.', 'err'); return; }
-  if (!await confirmBox('Eliminar turno', `Se elimina ${esc(s.name)}.`, 'Eliminar', 'danger')) return;
-  await act(async () => { await api.deleteShift(ds.s, s.version); await refresh(); }, 'Turno eliminado');
+// ------------------------------------------------------------------ turnos de las plantillas
+const L = () => UI.cfgLabels;
+IN.cfgLabel = (v, el) => { const x = L(); if (!x) return; x.list[+el.dataset.i] = v; x.dirty = true; render(); };
+ACT.cfgLabelAdd = () => { const x = L(); if (!x || x.list.length >= 20) return; x.list.push(''); x.dirty = true; render(); setTimeout(() => { const el = document.getElementById('lbl-' + (x.list.length - 1)); if (el) el.focus(); }, 0); };
+ACT.cfgLabelDel = (ds) => { const x = L(); if (!x || x.list.length <= 1) return; x.list.splice(+ds.i, 1); x.dirty = true; render(); };
+ACT.cfgLabelReset = () => { if (AD.labels) UI.cfgLabels = { list: AD.labels.labels.slice(), version: AD.labels.version, dirty: false }; render(); };
+ACT.cfgLabelSave = async () => {
+  const x = L(); if (!x || !gateUI('plantillas_edit')) return;
+  const v = validateShiftLabels(x.list); if (!v.ok) { toast(v.error, 'err'); return; }
+  const r = await act(() => api.setShiftLabels(v.labels, x.version), 'Turnos guardados');
+  if (r) { AD.labels = r; UI.cfgLabels = { list: r.labels.slice(), version: r.version, dirty: false }; await refresh().catch(() => {}); render(); }
 };
 
 // ------------------------------------------------------------------ auditoría

@@ -27,6 +27,10 @@ export function errorHandler(err, req, reply) {
     }
     return reply.code(err.status || 422).send(body);
   }
+  // Bloqueo mutuo o choque de serialización en PostgreSQL: nada quedó escrito, se puede reintentar.
+  if (err && (err.code === '40P01' || err.code === '40001')) {
+    return reply.code(409).send({ error: 'retry', message: 'Otra persona estaba guardando cambios al mismo tiempo. Probá de nuevo.' });
+  }
   if (err && err.validation) {
     return reply.code(400).send({ error: 'invalid_request', message: 'Los datos enviados no son válidos.' });
   }

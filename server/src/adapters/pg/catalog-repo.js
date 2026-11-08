@@ -5,20 +5,27 @@ const iso = (d) => (d instanceof Date ? d.toISOString() : d ?? null);
 
 const COMMON = { version: 'version', createdAt: 'created_at', updatedAt: 'updated_at', by: 'created_by' };
 export const TABLES = {
-  techs: { table: 'techs', key: 'id', cols: { name: 'name', legajo: 'legajo', shiftId: 'shift_id', active: 'active', alta: 'alta', demo: 'demo' } },
+  // La plantilla de un técnico sale del historial (tech_plantilla_history), no de techs.shift_id.
+  techs: { table: 'techs', key: 'id', cols: { name: 'name', legajo: 'legajo', active: 'active', alta: 'alta', demo: 'demo' } },
+  plantillas: {
+    table: 'plantillas', key: 'id',
+    cols: { name: 'name', supervisorUserId: 'supervisor_user_id', currentShiftLabel: 'current_shift_label', order: 'sort_order', archivedAt: 'archived_at' },
+  },
   shifts: { table: 'shifts', key: 'id', cols: { name: 'name', order: 'sort_order' } },
   categories: { table: 'categories', key: 'id', cols: { name: 'name', demo: 'demo' } },
   tools: { table: 'tools', key: 'id', cols: { name: 'name', description: 'description', categoryId: 'category_id', serialized: 'serialized', active: 'active', demo: 'demo' } },
-  units: { table: 'units', key: 'id', cols: { toolId: 'tool_id', code: 'code', status: 'status', techId: 'tech_id', demo: 'demo' } },
+  units: { table: 'units', key: 'id', cols: { toolId: 'tool_id', code: 'code', status: 'status', techId: 'tech_id', cajaId: 'caja_id', demo: 'demo' } },
+  lineas: { table: 'lineas', key: 'id', cols: { name: 'name', kind: 'kind', order: 'sort_order', archivedAt: 'archived_at' } },
+  cajas: { table: 'cajas', key: 'id', cols: { name: 'name', lineaId: 'linea_id', referenteTechId: 'referente_tech_id', archivedAt: 'archived_at' } },
   shiftChanges: {
     table: 'shift_changes', key: 'id',
     cols: { techId: 'tech_id', from: 'from_shift_id', to: 'to_shift_id', fromName: 'from_name', toName: 'to_name', effectiveFrom: 'effective_from', note: 'note', at: 'at', demo: 'demo' },
   },
-  alertRes: { table: 'alert_resolutions', key: 'key', cols: { type: 'type', title: 'title', text: 'text', techId: 'tech_id', note: 'note', at: 'at', demo: 'demo' } },
+  alertRes: { table: 'alert_resolutions', key: 'key', cols: { type: 'type', title: 'title', text: 'text', techId: 'tech_id', cajaId: 'caja_id', note: 'note', at: 'at', demo: 'demo' } },
   assignments: {
     table: 'assignments', key: 'id',
     cols: {
-      techId: 'tech_id', toolId: 'tool_id', unitId: 'unit_id', qty: 'qty', active: 'active', since: 'since', until: 'until', movementId: 'movement_id',
+      techId: 'tech_id', cajaId: 'caja_id', toolId: 'tool_id', unitId: 'unit_id', qty: 'qty', active: 'active', since: 'since', until: 'until', movementId: 'movement_id',
       replaces: 'replaces', endReason: 'end_reason', replacedBy: 'replaced_by', endMovementId: 'end_movement_id', demo: 'demo',
     },
   },
