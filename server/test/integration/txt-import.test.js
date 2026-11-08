@@ -150,7 +150,7 @@ describe('reemplazar (migración inicial)', () => {
     assert.equal(await count('control_items', "control_id = 'c21f'"), 2);
     assert.deepEqual((await q('SELECT id FROM shifts ORDER BY sort_order')).map((s) => s.id), ['manana', 'tarde', 'rotativo']);
     assert.deepEqual(await q('SELECT role, perm, allowed FROM role_permissions ORDER BY role'), [{ role: 'consulta', perm: 'reports_export', allowed: false }, { role: 'responsable', perm: 'shift_change', allowed: true }]);
-    const users = await q('SELECT id, username, password_hash, must_change_password, legacy_pin_hash FROM users ORDER BY id');
+    const users = await q('SELECT id, username, password_hash, must_change_password, legacy_pin_hash FROM users ORDER BY id COLLATE "C"');
     assert.deepEqual(users.map((u) => u.id), ['u-imp', 'u21admin', 'u21cons', 'u21resp']);
     for (const u of users.filter((x) => x.id.startsWith('u21'))) {
       assert.equal(u.password_hash, null);
