@@ -1,0 +1,5 @@
+/* Agregados de la 3.0 sobre el diseño de 2.1: aviso sin conexión. */
+.netwrap{max-width:1240px;margin:0 auto;padding:10px 16px 0}
+.netwrap .banner{margin-bottom:0}
+@media (min-width:1024px){.netwrap{padding:16px 32px 0}}
+body.auth .netwrap{max-width:400px}
