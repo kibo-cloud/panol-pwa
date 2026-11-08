@@ -54,19 +54,28 @@ export async function freePort() {
   });
 }
 
+// Escribe un secreto en un archivo nuevo (flag 'wx', modo 0600) dentro de un directorio
+// temporal propio (mkdtemp), llama fn(archivo) y borra todo al terminar, falle o no.
+export async function withSecretFile(content, fn) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'panol-secret-'));
+  const file = path.join(dir, 'pw');
+  try {
+    await fs.writeFile(file, content, { flag: 'wx', mode: 0o600 });
+    return await fn(file);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}
+
 // Crea el cluster si el directorio todavía no tiene uno.
 export async function ensureCluster({ dir, user = 'postgres', password }) {
   if (existsSync(path.join(dir, 'PG_VERSION'))) return false;
   const { initdb } = await binaries();
   await fs.mkdir(dir, { recursive: true });
-  const pwfile = path.join(os.tmpdir(), `panol-pw-${process.pid}-${Date.now()}`);
-  await fs.writeFile(pwfile, password + '\n', { mode: 0o600 });
-  try {
+  await withSecretFile(password + '\n', async (pwfile) => {
     const r = await run(initdb, [`--pgdata=${dir}`, `--username=${user}`, `--pwfile=${pwfile}`, '--auth=scram-sha-256', '--encoding=UTF8', '--locale=C']);
     if (r.code !== 0) throw new Error(`initdb falló (${r.code}):\n${r.out}`);
-  } finally {
-    await fs.rm(pwfile, { force: true });
-  }
+  });
   return true;
 }
 

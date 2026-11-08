@@ -19,7 +19,8 @@ export function registerAuthRoutes(app) {
     },
   }, async (req, reply) => {
     const { username, password, remember = false } = req.body;
-    const r = await auth.login(db, config, { username, password, remember, ip: req.ip, userAgent: req.headers['user-agent'] });
+    const previousToken = req.cookies?.[cookieName(config)];
+    const r = await auth.login(db, config, { username, password, remember, ip: req.ip, userAgent: req.headers['user-agent'], previousToken });
     reply.setCookie(cookieName(config), r.token, cookieOptions(config, r));
     const session = { idHash: null, csrfToken: r.csrfToken, user: { id: r.user.id, username: r.user.username, name: r.user.name, role: r.user.role, mustChangePassword: r.user.must_change_password } };
     return auth.me(db, session);
@@ -43,8 +44,10 @@ export function registerAuthRoutes(app) {
         properties: { currentPassword: { ...str(200), minLength: 1 }, newPassword: str(1000) },
       },
     },
-  }, async (req) => {
-    await auth.changePassword(db, req.session, { ...req.body, ip: req.ip });
-    return auth.me(db, { ...req.session, user: { ...req.session.user, mustChangePassword: false } });
+  }, async (req, reply) => {
+    // Sesión nueva: el identificador y el token CSRF anteriores dejan de servir.
+    const s = await auth.changePassword(db, config, req.session, { ...req.body, ip: req.ip, userAgent: req.headers['user-agent'] });
+    reply.setCookie(cookieName(config), s.token, cookieOptions(config, s));
+    return auth.me(db, { ...req.session, csrfToken: s.csrfToken, user: { ...req.session.user, mustChangePassword: false } });
   });
 }

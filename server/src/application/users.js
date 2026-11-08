@@ -7,6 +7,7 @@ import { effectivePermissions } from '../domain/permissions.js';
 import { hashPassword, checkPasswordPolicy, generateTemporaryPassword } from './passwords.js';
 import { newId } from './ids.js';
 import { audit } from './auth.js';
+import { lockName } from '../adapters/pg/catalog-repo.js';
 
 const USERNAME_RE = /^[a-z0-9._-]{3,60}$/;
 const LAST_ADMIN = 'Tiene que quedar al menos un administrador activo.';
@@ -31,6 +32,10 @@ async function mustFind(q, id) {
   if (!u) throw new DomainError('No se encontró el usuario.', 'not_found', 404);
   return u;
 }
+// Un solo cambio de perfil, baja o restablecimiento de usuarios a la vez: así el chequeo de
+// "último administrador activo" no se puede saltear con dos pedidos en paralelo.
+export const lockAdmins = (c) => lockName(c, 'users:admins');
+
 const versionConflict = () => new DomainError('Otra persona modificó este usuario. Recargá para ver los cambios.', 'version_conflict', 409);
 
 export const listUsers = async (db) => (await repo.listUsers(db)).map(repo.publicUser);
@@ -56,6 +61,7 @@ export async function createUser(db, actor, input) {
 
 export async function updateUser(db, actor, id, input, version) {
   return withTransaction(db, async (c) => {
+    await lockAdmins(c);
     const cur = await mustFind(c, id);
     const set = {};
     if (input.name !== undefined) set.name = cleanName(input.name);
@@ -74,6 +80,7 @@ export async function updateUser(db, actor, id, input, version) {
 
 export async function setActive(db, actor, id, active, version) {
   return withTransaction(db, async (c) => {
+    await lockAdmins(c);
     const cur = await mustFind(c, id);
     if (!active && cur.role === 'admin' && cur.active && (await repo.countActiveAdmins(c, id)) === 0) throw new DomainError(LAST_ADMIN, 'last_admin', 409);
     if (!active && id === actor.id) throw new DomainError('No podés desactivar tu propio usuario.', 'self_deactivate', 409);
@@ -86,14 +93,16 @@ export async function setActive(db, actor, id, active, version) {
 }
 
 // Fija una contraseña temporal y obliga a cambiarla en el próximo ingreso.
-export async function resetPassword(db, actor, id, input = {}) {
+export async function resetPassword(db, actor, id, input = {}, version) {
   const generated = input.temporaryPassword == null;
   const temporaryPassword = generated ? generateTemporaryPassword() : input.temporaryPassword;
   checkPasswordPolicy(temporaryPassword);
   const passwordHash = await hashPassword(temporaryPassword);
   return withTransaction(db, async (c) => {
+    await lockAdmins(c);
     const cur = await mustFind(c, id);
-    const row = await repo.updateUser(c, id, { passwordHash, mustChangePassword: true, legacySalt: null, legacyPinHash: null });
+    const row = await repo.updateUser(c, id, { passwordHash, mustChangePassword: true, legacySalt: null, legacyPinHash: null }, { version });
+    if (!row) throw versionConflict();
     await repo.deleteUserSessions(c, id);
     await repo.clearLock(c, cur.username.toLowerCase());
     await audit(c, { action: 'password_reset', entity: 'users', entityId: id, detail: `Restablecimiento de contraseña de ${cur.username}`, actorId: actor.id, ip: actor.ip });

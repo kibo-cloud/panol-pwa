@@ -10,11 +10,13 @@ import pg from 'pg';
 import { buildConfig } from '../../src/config.js';
 import { createPool } from '../../src/adapters/pg/pool.js';
 import { runMigrations } from '../../src/adapters/pg/migrate.js';
+import { provisionAppRole, APP_ROLE } from '../../src/adapters/pg/app-role.js';
 import { buildApp } from '../../src/app.js';
 import { ensureCluster, startCluster, stopCluster, freePort } from '../../scripts/lib/embedded-pg.js';
 import { withDatabase } from '../../scripts/lib/dev-db.js';
 
 const PASSWORD = 'panol-test';
+const APP_PASSWORD = 'panol-app-test';
 
 async function adminQuery(url, sql) {
   const c = new pg.Client({ connectionString: withDatabase(url, 'postgres') });
@@ -50,20 +52,38 @@ export async function createTestDatabase() {
   };
 }
 
-// Base migrada + pool + app lista para `inject`.
+// URL de la misma base con el rol de la app.
+export function appUrlOf(url) {
+  const u = new URL(url);
+  u.username = APP_ROLE;
+  u.password = APP_PASSWORD;
+  return u.toString();
+}
+
+// Base migrada + app lista para `inject`.
+// - `pool`: dueño de las tablas (preparar datos y mirar la base en las pruebas).
+// - `appPool`: rol `panol_app`, el que usa la app (como en producción).
+// Con migrate: false la app usa el pool del dueño (pruebas del propio migrador).
 export async function setupApp({ migrate = true, env = {}, extend } = {}) {
   const db = await createTestDatabase();
   const pool = createPool(db.url, { max: 5 });
-  if (migrate) await runMigrations(pool);
-  const config = buildConfig({ NODE_ENV: 'test', DATABASE_URL: db.url, ...env });
-  const app = await buildApp({ config, pool, logger: false, extend });
+  let appPool = null;
+  if (migrate) {
+    await runMigrations(pool);
+    await provisionAppRole(pool, appUrlOf(db.url));
+    appPool = createPool(appUrlOf(db.url), { max: 5 });
+  }
+  const config = buildConfig({ NODE_ENV: 'test', DATABASE_URL: appUrlOf(db.url), MIGRATION_DATABASE_URL: db.url, ...env });
+  const app = await buildApp({ config, pool: appPool || pool, logger: false, extend });
   await app.ready();
   return {
     app,
     pool,
+    appPool,
     url: db.url,
     close: async () => {
       await app.close().catch(() => {});
+      await appPool?.end().catch(() => {});
       await pool.end().catch(() => {});
       await db.cleanup();
     },

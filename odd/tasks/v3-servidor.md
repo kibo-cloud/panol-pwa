@@ -129,6 +129,32 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       were written with the code (no RED run). `npm run db:reset` + `npm start` + curl login
       (cookie + `X-CSRF-Token`) -> `GET /api/state` 200, `POST /api/techs` 201 with `ETag`;
       server and `db:stop` stopped. `node tests/e2e/run.mjs t6` 4/4 (2.1 suite untouched).
+- [x] E1.V1 Security corrections from the independent review of E1.T1-E1.T4 (PASS with
+      issues). Route: delegated writer. Test-first: `server/test/integration/security.test.js`
+      (9 tests) + unit `config`, `secret-file`; RED observed (8 integration tests failing: item
+      INSERT accepted on a control being finalized, draft tech/period/correction changes
+      accepted, 9 verifications on 12 parallel bad logins, app connected as superuser, old
+      session alive after login, session id unchanged after password change, user routes 200
+      without If-Match, two parallel admin demotions both 200; unit files failing on missing
+      `requireDevEnvironment` / `withSecretFile`), then GREEN. Fixes: migration 003
+      (`control_items_guard` reads the parent with `FOR SHARE`; `controls_guard` forbids
+      changing tech, period, correction/supersedes on a draft; role `panol_app` with
+      SELECT/INSERT/UPDATE/DELETE only, no UPDATE/DELETE/TRUNCATE on `movements`,
+      `movement_transfers`, `audit_log`, no access to `schema_migrations`; demo ledger clear via
+      `demo_clear_ledger()` SECURITY DEFINER limited to demo rows); login and current-password
+      checks reserve the attempt (`login_locks` row `FOR UPDATE` in the same transaction as the
+      verification and the failure count); last-admin checks serialized with a constant
+      advisory xact lock (role change, deactivate, reset); config defaults to production
+      (requires `APP_ORIGIN`, `DATABASE_URL`; unknown `NODE_ENV` refused; seed, `db:reset`,
+      `db:start` refuse outside development/test), test scripts use
+      `--env-file=server/test/test.env`; app/owner split (`DATABASE_URL` = `panol_app`,
+      `MIGRATION_DATABASE_URL` = owner; `main.js` migrates + provisions with the owner and
+      refuses to serve as superuser/owner; harness and dev scripts updated); login deletes the
+      session behind the incoming cookie, password change closes all sessions and returns a new
+      cookie + CSRF token; `initdb` password file in `mkdtemp` dir, `wx` + 0600, removed after
+      use; user PATCH/deactivate/reactivate/reset-password require If-Match (428/409).
+      Evidence: `npm test` 60/60; `npm run test:db` 64/64; `npm run db:reset` without
+      `NODE_ENV` refused, with `NODE_ENV=development` ok (migration 003 applied).
 - [ ] E1.T5 `.txt` v2 importer and export: admin-only; same validation as 2.1 plus the empty
       date rule; `data.deleted` applied; PIN users migrated (PIN works once as temporary
       password, then forced change); import report before confirming; *Descargar .txt*.
@@ -185,7 +211,7 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 ## Stage 1 implementation notes (E1.T4)
 - Concurrency: every PATCH/DELETE of an editable row (and the shift change and finalize
   POSTs) requires `If-Match`; missing -> 428, stale -> 409 `{error:'conflict', current}`.
-  (T3 user routes keep If-Match optional; left for the security follow-up.)
+  (User routes require it too since E1.V1.)
 - Stock: a movement locks its tool row (`FOR UPDATE`) before loading the inventory
   context; unit-code and pending-return uniqueness also rely on the DB indexes.
 - Idempotency: table `idempotency_keys` (per user + key, request hash); the key is claimed

@@ -1,7 +1,8 @@
 // Datos de demostración (equivalente a seedDemo/clearDemo de 2.1): técnicos, herramientas,
 // entregas y controles de ejemplo marcados como demo. Se borran sin tocar los datos reales.
 // El borrado es la única excepción al "solo agregar" del libro y de los controles finalizados,
-// y la base solo la permite para filas demo dentro de esta transacción (`panol.demo_clear`).
+// y la base solo la permite para filas demo dentro de esta transacción (`panol.demo_clear`);
+// los movimientos los borra `demo_clear_ledger()` (SECURITY DEFINER del dueño).
 import * as repo from '../adapters/pg/catalog-repo.js';
 import { saveControl } from '../adapters/pg/inventory-repo.js';
 import { buildControlDoc } from '../domain/controls.js';
@@ -114,8 +115,8 @@ export async function clearDemo(db, actor) {
     const n = {};
     n.controlItems = await del('DELETE FROM control_items WHERE control_id IN (SELECT id FROM controls WHERE demo)');
     n.controls = await del('DELETE FROM controls WHERE demo');
-    await del('DELETE FROM movement_transfers WHERE movement_id IN (SELECT id FROM movements WHERE demo)');
-    n.movements = await del('DELETE FROM movements WHERE demo');
+    // El rol de la app no puede borrar del libro: lo hace una función del dueño, solo para demo.
+    n.movements = (await c.query('SELECT demo_clear_ledger() AS n')).rows[0].n;
     n.assignments = await del(`DELETE FROM assignments WHERE demo OR tech_id IN (${demoTechs}) OR tool_id IN (${demoTools})`);
     n.units = await del(`DELETE FROM units WHERE demo OR tool_id IN (${demoTools})`);
     n.shiftChanges = await del(`DELETE FROM shift_changes WHERE demo OR tech_id IN (${demoTechs})`);

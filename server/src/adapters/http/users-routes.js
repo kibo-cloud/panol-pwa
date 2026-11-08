@@ -1,19 +1,13 @@
 // /api/users y /api/permissions: solo administradores.
 import * as users from '../../application/users.js';
-import { badRequest } from './errors.js';
+import { requireVersion } from './rest.js';
 import { PERM_KEYS, ROLE_KEYS } from '../../domain/constants.js';
 
 const idParam = { type: 'object', required: ['id'], properties: { id: { type: 'string', pattern: '^[A-Za-z0-9_.~:@+-]{1,200}$' } } };
 const tempPw = { type: 'string', maxLength: 1000 };
 
-// If-Match opcional con la versión (número, con o sin comillas).
-function ifMatch(req) {
-  const h = req.headers['if-match'];
-  if (h === undefined) return undefined;
-  const m = /^(?:W\/)?"?(\d{1,9})"?$/.exec(String(h).trim());
-  if (!m) throw badRequest('If-Match inválido.', 'invalid_if_match');
-  return Number(m[1]);
-}
+// Toda modificación de un usuario exige If-Match con su versión (falta: 428, vieja: 409).
+const ifMatch = requireVersion;
 
 export function registerUserRoutes(app) {
   const { db } = app;
@@ -51,7 +45,7 @@ export function registerUserRoutes(app) {
   app.post('/api/users/:id/reset-password', {
     ...admin,
     schema: { params: idParam, body: { type: ['object', 'null'], additionalProperties: false, properties: { temporaryPassword: tempPw } } },
-  }, async (req) => users.resetPassword(db, actor(req), req.params.id, req.body || {}));
+  }, async (req) => users.resetPassword(db, actor(req), req.params.id, req.body || {}, ifMatch(req)));
 
   const permsBody = {
     type: 'object',

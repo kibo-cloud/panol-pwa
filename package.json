@@ -13,8 +13,8 @@
     "db:stop": "node server/scripts/db-stop.js",
     "db:migrate": "node server/scripts/db-migrate.js",
     "db:reset": "node server/scripts/db-reset.js",
-    "test": "node --test \"server/test/unit/**/*.test.js\"",
-    "test:db": "node --test --test-concurrency=2 \"server/test/integration/**/*.test.js\""
+    "test": "node --env-file=server/test/test.env --test \"server/test/unit/**/*.test.js\"",
+    "test:db": "node --env-file=server/test/test.env --test --test-concurrency=2 \"server/test/integration/**/*.test.js\""
   },
   "dependencies": {
     "@fastify/cookie": "11.1.3",

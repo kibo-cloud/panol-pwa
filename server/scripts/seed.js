@@ -7,6 +7,7 @@ import { planMovement } from '../src/domain/movements.js';
 import { buildControlDoc } from '../src/domain/controls.js';
 import { periodOf, prevP, pkeyOf } from '../src/domain/period.js';
 import { hashPassword } from '../src/application/passwords.js';
+import { requireDevEnvironment } from '../src/config.js';
 
 // Usuarios de desarrollo, uno o más por perfil. Contraseña de todos: DEV_PASSWORD (solo local).
 export const DEV_PASSWORD = 'panol-dev-1234';
@@ -37,7 +38,9 @@ const TOOLS = [
   ['tool-taladro', 'Taladro percutor', 'cat-electricas', true],
 ];
 
-export async function seed(pool, { now = new Date() } = {}) {
+export async function seed(pool, { now = new Date(), config } = {}) {
+  // Datos y contraseñas de desarrollo: nunca en producción (ni con NODE_ENV sin definir).
+  requireDevEnvironment(config ?? { nodeEnv: process.env.NODE_ENV || 'production' }, 'La semilla de desarrollo');
   let n = 0;
   const newId = (p) => `${p}seed${++n}`;
   const at = (daysAgo) => new Date(now.getTime() - daysAgo * 864e5).toISOString();

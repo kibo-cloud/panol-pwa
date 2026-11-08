@@ -94,6 +94,18 @@ export async function getLock(q, key) {
   return rows[0] || null;
 }
 
+// Crea (si falta) y toma con FOR UPDATE la fila de bloqueo del usuario. Llamar dentro de una
+// transacción: los intentos en paralelo del mismo usuario esperan acá hasta que el anterior
+// registre su resultado.
+export async function lockForAttempt(q, key) {
+  await q.query('INSERT INTO login_locks (username, fails) VALUES ($1, 0) ON CONFLICT (username) DO NOTHING', [key]);
+  const { rows } = await q.query(
+    'SELECT fails, locked_until, GREATEST(0, ceil(extract(epoch FROM locked_until - now())))::int AS seconds_left FROM login_locks WHERE username = $1 FOR UPDATE',
+    [key],
+  );
+  return rows[0];
+}
+
 // Suma un fallo de forma atómica y, desde el quinto, fija la espera (30 s, doble, máx. 15 min).
 export async function registerFailure(q, key, ip) {
   const { rows } = await q.query(

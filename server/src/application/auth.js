@@ -6,6 +6,7 @@ import { DomainError } from '../domain/errors.js';
 import { lockMessage } from '../domain/lockout.js';
 import { effectivePermissions } from '../domain/permissions.js';
 import { verifyPassword, verifyDummy, hashPassword, needsRehash, checkPasswordPolicy } from './passwords.js';
+import { verifyLegacyPin } from './legacy-pin.js';
 import { newId } from './ids.js';
 
 export const BAD_LOGIN = 'Usuario o contraseña incorrectos.';
@@ -25,38 +26,78 @@ class LockedError extends DomainError {
 }
 export { LockedError };
 
-// Devuelve { token, session, user } o lanza DomainError (401 genérico o 429 bloqueado).
-export async function login(db, config, { username, password, remember, ip, userAgent }) {
-  const key = lockKey(username);
-  const lock = await repo.getLock(db, key);
-  if (lock && lock.seconds_left > 0) {
-    await repo.recordAttempt(db, key, ip, 'locked');
-    throw new LockedError(lock.seconds_left);
-  }
-  const user = key ? await repo.findUserByUsername(db, key) : null;
-  const usable = user && user.active && user.password_hash;
-  const ok = usable ? await verifyPassword(user.password_hash, password) : await verifyDummy(password);
-  if (!ok) {
-    const f = await repo.registerFailure(db, key, ip);
-    await repo.recordAttempt(db, key, ip, 'fail');
-    await audit(db, { action: 'login_fail', entity: 'users', entityId: user ? user.id : null, detail: `Ingreso fallido: ${key.slice(0, 60)}`, ip });
-    if (f.seconds_left > 0) {
-      await audit(db, { action: 'login_lockout', entity: 'users', entityId: user ? user.id : null, detail: `Bloqueo de ${f.seconds_left} s tras ${f.fails} intentos: ${key.slice(0, 60)}`, ip });
-      throw new LockedError(f.seconds_left);
-    }
-    throw new DomainError(BAD_LOGIN, 'bad_credentials', 401);
-  }
-  return withTransaction(db, async (c) => {
-    await repo.clearLock(c, key);
-    const set = { lastLoginAt: new Date() };
-    if (needsRehash(user.password_hash)) set.passwordHash = await hashPassword(password);
-    await repo.updateUser(c, user.id, set);
-    const s = await createSession(c, config, user.id, { remember: !!remember, ip, userAgent });
-    await repo.recordAttempt(c, key, ip, 'ok');
-    await audit(c, { action: 'login_ok', entity: 'users', entityId: user.id, detail: `Ingreso de ${user.username}`, actorId: user.id, ip });
-    return { ...s, user: await repo.findUserById(c, user.id) };
-  });
+// Verifica la contraseña del usuario. Un usuario migrado de 2.x sin contraseña todavía usa su
+// PIN (algoritmos de 2.1). Sin usuario usable se verifica contra un hash al azar (mismo tiempo).
+// Devuelve { ok, legacy }.
+export async function verifyUserSecret(user, password) {
+  if (user && user.active && user.password_hash) return { ok: await verifyPassword(user.password_hash, password), legacy: false };
+  if (user && user.active && user.legacy_pin_hash) return { ok: await verifyLegacyPin(password, user.legacy_salt, user.legacy_pin_hash), legacy: true };
+  await verifyDummy(password);
+  return { ok: false, legacy: false };
 }
+
+// Un intento de ingreso (o de confirmar la contraseña actual) contra el bloqueo progresivo.
+// La fila de bloqueo se crea y se toma con FOR UPDATE antes de verificar, en la misma
+// transacción que registra el resultado: los intentos en paralelo del mismo usuario se
+// verifican de a uno y nunca hay más verificaciones que las permitidas antes del bloqueo.
+// check(c) devuelve { ok, user, ... }; onFail(c, f) registra el fallo; onOk(c, r) lo que sigue.
+async function guardedAttempt(db, key, ip, { check, onFail, onOk }) {
+  const r = await withTransaction(db, async (c) => {
+    const lock = await repo.lockForAttempt(c, key);
+    if (lock.seconds_left > 0) {
+      await onFail(c, null, lock);
+      return { locked: lock.seconds_left };
+    }
+    const v = await check(c);
+    if (!v.ok) {
+      const f = await repo.registerFailure(c, key, ip);
+      await onFail(c, f, v);
+      return { fail: f };
+    }
+    await repo.clearLock(c, key);
+    return { ok: await onOk(c, v) };
+  });
+  if (r.locked) throw new LockedError(r.locked);
+  if (r.fail && r.fail.seconds_left > 0) throw new LockedError(r.fail.seconds_left);
+  return r;
+}
+
+// Devuelve { token, session, user } o lanza DomainError (401 genérico o 429 bloqueado).
+// previousToken: cookie de sesión que traía el navegador; esa sesión se cierra al ingresar.
+export async function login(db, config, { username, password, remember, ip, userAgent, previousToken }) {
+  const key = lockKey(username);
+  const r = await guardedAttempt(db, key, ip, {
+    check: async (c) => {
+      const user = key ? await repo.findUserByUsername(c, key) : null;
+      return { ...(await verifyUserSecret(user, password)), user };
+    },
+    onFail: async (c, f, v) => {
+      if (!f) return repo.recordAttempt(c, key, ip, 'locked');
+      const user = v.user;
+      await repo.recordAttempt(c, key, ip, 'fail');
+      await audit(c, { action: 'login_fail', entity: 'users', entityId: user ? user.id : null, detail: `Ingreso fallido: ${key.slice(0, 60)}`, ip });
+      if (f.seconds_left > 0) {
+        await audit(c, { action: 'login_lockout', entity: 'users', entityId: user ? user.id : null, detail: `Bloqueo de ${f.seconds_left} s tras ${f.fails} intentos: ${key.slice(0, 60)}`, ip });
+      }
+    },
+    onOk: async (c, { user, legacy }) => {
+      const set = { lastLoginAt: new Date() };
+      // El PIN de 2.x sirve solo como contraseña temporal: obliga a crear una nueva.
+      if (legacy) set.mustChangePassword = true;
+      else if (needsRehash(user.password_hash)) set.passwordHash = await hashPassword(password);
+      await repo.updateUser(c, user.id, set);
+      if (typeof previousToken === 'string' && TOKEN_RE.test(previousToken)) await repo.deleteSession(c, sha256(previousToken));
+      const s = await createSession(c, config, user.id, { remember: !!remember, ip, userAgent });
+      await repo.recordAttempt(c, key, ip, 'ok');
+      await audit(c, { action: 'login_ok', entity: 'users', entityId: user.id, detail: `Ingreso de ${user.username}${legacy ? ' con el PIN de 2.x' : ''}`, actorId: user.id, ip });
+      return { ...s, user: await repo.findUserById(c, user.id) };
+    },
+  });
+  if (!r.ok) throw new DomainError(BAD_LOGIN, 'bad_credentials', 401);
+  return r.ok;
+}
+
+const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 
 export async function createSession(q, config, userId, { remember, ip, userAgent }) {
   const token = crypto.randomBytes(32).toString('base64url');
@@ -69,7 +110,7 @@ export async function createSession(q, config, userId, { remember, ip, userAgent
 
 // Sesión válida para el token de la cookie, o null (y la borra si venció).
 export async function resolveSession(db, config, token) {
-  if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+  if (typeof token !== 'string' || !TOKEN_RE.test(token)) return null;
   const idHash = sha256(token);
   const s = await repo.findSession(db, idHash);
   if (!s) return null;
@@ -103,25 +144,27 @@ export async function me(db, session) {
   };
 }
 
-export async function changePassword(db, session, { currentPassword, newPassword, ip }) {
+// Cambia la contraseña (o reemplaza el PIN migrado de 2.x). Cierra todas las sesiones del
+// usuario y devuelve una sesión nueva (identificador y token CSRF renovados).
+export async function changePassword(db, config, session, { currentPassword, newPassword, ip, userAgent }) {
   const user = await repo.findUserById(db, session.user.id);
   const key = lockKey(user.username);
-  const lock = await repo.getLock(db, key);
-  if (lock && lock.seconds_left > 0) throw new LockedError(lock.seconds_left);
-  if (!(await verifyPassword(user.password_hash || '', currentPassword))) {
-    const f = await repo.registerFailure(db, key, ip);
-    await audit(db, { action: 'password_change_fail', entity: 'users', entityId: user.id, detail: 'Contraseña actual incorrecta al cambiarla', actorId: user.id, ip });
-    if (f.seconds_left > 0) throw new LockedError(f.seconds_left);
-    throw new DomainError('La contraseña actual no es correcta.', 'bad_current_password', 400);
-  }
+  const r = await guardedAttempt(db, key, ip, {
+    check: async () => verifyUserSecret(user, currentPassword),
+    onFail: async (c, f) => {
+      if (f) await audit(c, { action: 'password_change_fail', entity: 'users', entityId: user.id, detail: 'Contraseña actual incorrecta al cambiarla', actorId: user.id, ip });
+    },
+    onOk: async () => true,
+  });
+  if (!r.ok) throw new DomainError('La contraseña actual no es correcta.', 'bad_current_password', 400);
   checkPasswordPolicy(newPassword);
   if (newPassword === currentPassword) throw new DomainError('La contraseña nueva tiene que ser distinta de la actual.', 'same_password', 400);
   const hash = await hashPassword(newPassword);
-  await withTransaction(db, async (c) => {
+  return withTransaction(db, async (c) => {
     await repo.updateUser(c, user.id, { passwordHash: hash, mustChangePassword: false, legacySalt: null, legacyPinHash: null });
-    // Las demás sesiones del usuario se cierran; la actual sigue.
-    await repo.deleteUserSessions(c, user.id, session.idHash);
-    await repo.clearLock(c, key);
+    await repo.deleteUserSessions(c, user.id);
+    const s = await createSession(c, config, user.id, { remember: !!session.remember, ip, userAgent });
     await audit(c, { action: 'password_change', entity: 'users', entityId: user.id, detail: `Cambio de contraseña de ${user.username}`, actorId: user.id, ip });
+    return s;
   });
 }

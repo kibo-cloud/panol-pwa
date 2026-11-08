@@ -32,6 +32,8 @@ async function login(username, password = PW, extra = {}) {
   return { res, cookie: c?.value, setCookie: c?.header, csrf: res.statusCode === 200 ? res.json().csrfToken : null };
 }
 
+// If-Match con la versión vigente del usuario.
+const ver = async (id) => ({ 'if-match': `"${(await q('SELECT version FROM users WHERE id = $1', [id])).rows[0].version}"` });
 const as = (s) => ({ cookie: s.cookie, 'x-csrf-token': s.csrf });
 const get = (url, s) => app.inject({ method: 'GET', url, headers: s ? { cookie: s.cookie } : {} });
 const send = (method, url, s, payload, headers = {}) => app.inject({ method, url, headers: { ...as(s), ...headers }, ...(payload !== undefined ? { payload } : {}) });
@@ -204,8 +206,10 @@ describe('cambio de contraseña obligatorio', () => {
     const ok = await send('POST', '/api/auth/change-password', s, { currentPassword: temporaryPassword, newPassword: 'nueva-clave-segura' });
     assert.equal(ok.statusCode, 200);
     assert.equal(ok.json().mustChangePassword, false);
-    assert.equal((await get('/api/test/any', s)).statusCode, 200);
-    // La otra sesión del usuario se cerró; la temporal ya no sirve.
+    // La sesión se renueva: la cookie nueva sirve, la anterior y la otra sesión ya no.
+    const renewed = { cookie: cookieOf(ok).value, csrf: ok.json().csrfToken };
+    assert.equal((await get('/api/test/any', renewed)).statusCode, 200);
+    assert.equal((await get('/api/auth/me', s)).statusCode, 401);
     assert.equal((await get('/api/auth/me', s2)).statusCode, 401);
     assert.equal((await login('nuevo.uno', temporaryPassword)).res.statusCode, 401);
     assert.equal((await login('nuevo.uno', 'nueva-clave-segura')).res.statusCode, 200);
@@ -246,39 +250,39 @@ describe('administración de usuarios', () => {
     assert.equal(stale.statusCode, 409);
 
     const victim = await login('sup1');
-    const off = await send('POST', `/api/users/${target.id}/deactivate`, adm);
+    const off = await send('POST', `/api/users/${target.id}/deactivate`, adm, undefined, await ver(target.id));
     assert.equal(off.statusCode, 200);
     assert.equal(off.json().user.active, false);
     assert.equal((await get('/api/auth/me', victim)).statusCode, 401);
     assert.equal((await login('sup1')).res.statusCode, 401);
-    assert.equal((await send('POST', `/api/users/${target.id}/reactivate`, adm)).statusCode, 200);
+    assert.equal((await send('POST', `/api/users/${target.id}/reactivate`, adm, undefined, await ver(target.id))).statusCode, 200);
     assert.equal((await login('sup1')).res.statusCode, 200);
 
-    const rs = await send('POST', `/api/users/${target.id}/reset-password`, adm, { temporaryPassword: 'temporal-12345' });
+    const rs = await send('POST', `/api/users/${target.id}/reset-password`, adm, { temporaryPassword: 'temporal-12345' }, await ver(target.id));
     assert.equal(rs.statusCode, 200);
     assert.equal(rs.json().temporaryPassword, undefined);
     assert.equal(rs.json().user.mustChangePassword, true);
     assert.equal((await login('sup1')).res.statusCode, 401);
     const t = await login('sup1', 'temporal-12345');
     assert.equal(t.res.json().mustChangePassword, true);
-    const gen = await send('POST', `/api/users/${target.id}/reset-password`, adm);
+    const gen = await send('POST', `/api/users/${target.id}/reset-password`, adm, undefined, await ver(target.id));
     assert.equal(gen.statusCode, 200);
     assert.ok(gen.json().temporaryPassword.length >= 10);
     assert.equal((await get('/api/auth/me', t)).statusCode, 401);
 
     const acts = (await q('SELECT action FROM audit_log WHERE entity_id = $1', [target.id])).rows.map((r) => r.action);
     for (const x of ['user_update', 'user_deactivate', 'user_reactivate', 'password_reset']) assert.ok(acts.includes(x), x);
-    assert.equal((await send('POST', '/api/users/no-existe/deactivate', adm)).statusCode, 404);
+    assert.equal((await send('POST', '/api/users/no-existe/deactivate', adm, undefined, { 'if-match': '"1"' })).statusCode, 404);
   });
 
   test('no se puede quedar sin administradores ni desactivarse a sí mismo', async () => {
     const adm = await login('admin1');
-    assert.equal((await send('POST', '/api/users/u-adm/deactivate', adm)).json().error, 'self_deactivate');
-    assert.equal((await send('POST', '/api/users/u-adm2/deactivate', adm)).statusCode, 200);
-    const demote = await send('PATCH', '/api/users/u-adm', adm, { role: 'consulta' });
+    assert.equal((await send('POST', '/api/users/u-adm/deactivate', adm, undefined, await ver('u-adm'))).json().error, 'self_deactivate');
+    assert.equal((await send('POST', '/api/users/u-adm2/deactivate', adm, undefined, await ver('u-adm2'))).statusCode, 200);
+    const demote = await send('PATCH', '/api/users/u-adm', adm, { role: 'consulta' }, await ver('u-adm'));
     assert.equal(demote.statusCode, 409);
     assert.equal(demote.json().error, 'last_admin');
-    assert.equal((await send('POST', '/api/users/u-adm2/reactivate', adm)).statusCode, 200);
+    assert.equal((await send('POST', '/api/users/u-adm2/reactivate', adm, undefined, await ver('u-adm2'))).statusCode, 200);
   });
 });
 
