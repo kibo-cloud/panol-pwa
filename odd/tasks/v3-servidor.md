@@ -706,8 +706,45 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   `lens_context_budget_exceeded` in stage 1); fallback independent verifier: PASS with
   issues, 5 findings + 1 pre-existing, all fixed in E2.V1.
 
+## Stage 3 decisions (parent, within PEDIDO §2.4–§2.5)
+- Especialidad: configurable catalog (defaults Mecánico, Electricista, Electro-mecánico,
+  Refrigeración, Soldador, Edilicio, Servicios Generales, Ingeniería, Pañolero), optional
+  field on techs; filter in Técnicos/Controles/Alertas/Reportes and a column in reports and
+  exports (printing comes in stage 10).
+- Kit base = editable ordered list of tools with quantities (the `BLANCO` equivalent); optional
+  kits per especialidad. "Entregar kit" delivers a whole kit to a tech or caja in ONE
+  transaction, one movement per tool (entrega inicial, or adicional when the holder already has
+  it); all or nothing on stock; skipped serialized tools without enough units are refused, not
+  silently dropped.
+- Custom order: `sort_order` on categories and tools (global). Drag and drop on desktop
+  (pointer events, keyboard accessible), up/down arrows on mobile; "insertar en posición" when
+  creating a tool. Applied in control, ficha, inventario, reportes and Excel (printing in
+  stage 10). Reordering is one request with the full ordered id list and `If-Match` on a
+  per-scope order version, so two people reordering at once get a 409.
+- Per-tech custom order (PEDIDO "Opcional"): not implemented in this stage, to keep one order
+  that matches the physical box; recorded as a possible follow-up.
+- Permissions: new `kits_edit` (admin; responsable may deliver kits through `movements_do`);
+  ordering uses `tools_edit`; especialidades catalog uses `techs_edit`.
+
+## Stage 3 tasks (branch `v3/etapa-3-kit-orden`, stacked on stage 2)
+- [ ] E3.T1 Backend: especialidades catalog + tech field, kits (base + per especialidad) with
+      items and quantities, deliver-kit endpoint, ordering for categories and tools (insert at
+      position, full-list reorder with version), report/state/export changes, `.txt` v2
+      compatibility (especialidad and order are not in v2: export ignores, import keeps
+      defaults); unit + integration tests.
+- [ ] E3.T2 Frontend: especialidad on tech form/sheet and filters, Configuración ›
+      Especialidades, Kits screen (edit base kit and per-especialidad kits, reorder),
+      "Entregar kit" from the tech/caja sheet with a preview of what will be delivered and stock
+      problems, ordering UI (drag and drop desktop, arrows mobile, insert at position),
+      order applied everywhere listed above; design guide.
+- [ ] E3.T3 E2E: especialidad filter and report column, edit base kit, deliver a kit in one
+      step (one movement per tool, stock refused when short), reorder categories and tools on
+      desktop (drag) and mobile (arrows), order reflected in control/ficha/inventario/report/
+      Excel, insert at position, concurrent reorder 409; CI green; PR.
+
 ## Next step
-- Stage 2 PR (stacked on PR #1). Engram mirror of this document: pending (multiple active
+- E3.T1–E3.T3 (one delegated writer), then independent review, CI and the stage 3 PR.
+- Stage 2 PR #2 (stacked on PR #1). Engram mirror of this document: pending (multiple active
   sessions). PR #1 awaits user review; after it is merged, rebase stage 2 onto `v3-servidor`.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);
