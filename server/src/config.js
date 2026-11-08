@@ -4,8 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseEnv } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { TIME_ZONE } from './domain/period.js';
 
-export const TIME_ZONE = 'America/Argentina/Buenos_Aires';
+export { TIME_ZONE };
 // Toda la aplicación trabaja con la hora local de la empresa, sin depender del equipo.
 process.env.TZ = TIME_ZONE;
 
