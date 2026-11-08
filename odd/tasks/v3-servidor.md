@@ -538,7 +538,7 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       parity fixed; new `web/test/plantillas.test.js` 11, router + drafts caja cases);
       `npm run test:db` 123/123; `npm run build` ok, `web/dist/index.html` with 0 inline
       script/style/handlers.
-- [ ] E2.T4 E2E: move one and several techs, coverage return, rotation, supervisor view,
+- [x] E2.T4 E2E: move one and several techs, coverage return, rotation, supervisor view,
       caja assignment + control, `.txt` migration of turnos to plantillas; existing specs
       adapted; CI green; PR.
       Done except CI/PR (parent): commit `d694dcd`. Route: delegated writer. Adapted: route
@@ -694,9 +694,21 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   the new plantilla; server and `db:stop` stopped. `npm run test:e2e` 35 passed, 0 failed (255 s; stage 1
   specs untouched and still green thanks to the delegating legacy routes).
 
+## Stage 2 close (parent)
+- Web parity: `coverageOf` in `web/src/state/plantillas.js` now ignores a coverage already cut
+  by a permanent move, like the server's `activeCoverage` (RED 11/12 → GREEN 12/12 in
+  `web/test/plantillas.test.js`). Route: parent inline (one mechanical, understood file).
+- Decision: a `.txt` import that meets a scheduled coverage skips that membership change and
+  counts it in the report and audit (the planned coverage wins over an older file).
+- Verification before push: `npm test` 137/137; `PANOL_E2E_BUILD=1` E2E `t9` 8/8. Stage 2 CI
+  run 42487438456 (before E2.V1): 4 jobs green, E2E 43/43; final CI run on the PR.
+- RDD: risk high (4604 lines); native review not attempted at this size (refused with
+  `lens_context_budget_exceeded` in stage 1); fallback independent verifier: PASS with
+  issues, 5 findings + 1 pre-existing, all fixed in E2.V1.
+
 ## Next step
-- Push `v3/etapa-2-plantillas`, CI green, stage 2 PR (parent). Engram mirror of this document: pending (parent). PR #1
-  awaits user review.
+- Stage 2 PR (stacked on PR #1). Engram mirror of this document: pending (multiple active
+  sessions). PR #1 awaits user review; after it is merged, rebase stage 2 onto `v3-servidor`.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);
   `/api/state` and movement planning load the full ledger (fine for stage 1 volumes);
