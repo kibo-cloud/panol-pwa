@@ -11,7 +11,7 @@ import { loadMovementsFull } from './state-repo.js';
 import { replaceOverrides, deleteUserSessions } from './auth-repo.js';
 import { stamp } from '../../importers/txt-v2/plan.js';
 import { readPlantillas } from './state-repo.js';
-import { loadHistory, insertRange, closeRange, rangesFromChanges } from './plantilla-repo.js';
+import { loadHistory, insertRange, closeRange, rangesFromChanges, applyMovePlan, freeRangeId } from './plantilla-repo.js';
 import { planMove, effectiveRange } from '../../domain/plantillas.js';
 import { DomainError } from '../../domain/errors.js';
 import { localDateISO } from '../../domain/period.js';
@@ -155,7 +155,11 @@ const changeDay = (x) => x.effectiveFrom || (x.at ? localDateISO(new Date(x.at))
 // - Sin historial: se arma con los cambios de turno del archivo y su turno actual.
 // - Con historial: los cambios nuevos se agregan como movimientos (los que caen antes del
 //   último tramo no se pueden aplicar sin reescribir el historial y se cuentan como omitidos);
-//   después, si la plantilla de hoy no es la del archivo, se mueve desde hoy.
+//   después, si la plantilla de hoy no es la del archivo, se mueve desde hoy (durante una
+//   cobertura en curso la cobertura termina hoy; con una cobertura programada no se puede y
+//   también se cuenta como omitido).
+// Un id de cambio de turno que ya existe en el historial (un rango que no se exporta) entra
+// con un id nuevo.
 // El historial nunca se borra ni se edita: un cambio de turno modificado o borrado en el
 // archivo no cambia nada (los cambios de turno de 2.1 tampoco se editaban).
 async function reconcileMembership(c, plan, { actorId, today }) {
@@ -172,29 +176,31 @@ async function reconcileMembership(c, plan, { actorId, today }) {
     let hist = await loadHistory(c, { techIds: [techId] });
     if (!hist.length) {
       for (const r of await rangesFromChanges(c, t.shiftId ?? null, fileChanges)) {
-        const range = { id: r.srcId ?? newId('ph'), techId, plantillaId: r.plantillaId, validFrom: r.validFrom, validTo: r.validTo, reason: r.reason ?? 'Importación del .txt' };
+        const range = { id: await freeRangeId(c, r.srcId, newId), techId, plantillaId: r.plantillaId, validFrom: r.validFrom, validTo: r.validTo, reason: r.reason ?? 'Importación del .txt' };
         await insertRange(c, range, { actorId: r.by ?? actorId, demo: !!t.demo, createdAt: r.createdAt });
       }
       continue;
     }
-    const move = async (to, from, reason, firstId) => {
+    // Un movimiento que el dominio rechaza (DomainError) se omite y se cuenta.
+    const move = async (to, from, reason, firstId = null) => {
+      const id0 = firstId ? await freeRangeId(c, firstId, newId) : null;
       let n = 0;
-      const p = planMove(hist, { techId, targetId: to, from, reason }, { newId: (pre) => (n++ === 0 && firstId ? firstId : newId(pre)) });
-      if (p.close) await closeRange(c, p.close.id, p.close.validTo);
-      for (const r of p.inserts) await insertRange(c, r, { actorId, demo: !!t.demo });
+      try {
+        const p = planMove(hist, { techId, targetId: to, from, reason, today }, { newId: (pre) => (n++ === 0 && id0 ? id0 : newId(pre)) });
+        await applyMovePlan(c, p, { actorId, demo: !!t.demo });
+      } catch (err) {
+        if (!(err instanceof DomainError)) throw err;
+        skipped++;
+        return;
+      }
       hist = await loadHistory(c, { techIds: [techId] });
     };
     const news = fileChanges.filter((x) => newSc[x.id] && changeDay(x))
       .sort((a, b) => changeDay(a).localeCompare(changeDay(b)) || (a.at || '').localeCompare(b.at || ''));
     for (const x of news) {
       const exists = x.to && (await c.query('SELECT 1 FROM plantillas WHERE id = $1', [x.to])).rows[0];
-      try {
-        if (!exists) throw new DomainError('plantilla inexistente');
-        await move(x.to, changeDay(x), x.note || 'Cambio de turno (importado)', x.id);
-      } catch (err) {
-        if (!(err instanceof DomainError)) throw err;
-        skipped++;
-      }
+      if (!exists) skipped++;
+      else await move(x.to, changeDay(x), x.note || 'Cambio de turno (importado)', x.id);
     }
     const cur = effectiveRange(hist, today)?.plantillaId ?? null;
     const want = t.shiftId ?? null;

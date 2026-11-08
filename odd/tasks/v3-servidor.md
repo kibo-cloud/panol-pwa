@@ -553,6 +553,38 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       1280/390. Evidence: `PANOL_E2E_BUILD=1 npm run test:e2e` 43 passed, 0 failed, 0 skipped
       (326 s; no console/CSP errors). Found and fixed while writing specs: tech/tool ids missing
       from `S.*[id]` objects in the new sheets.
+- [x] E2.V1 Correction of the independent stage 2 review (PASS with issues). Route: delegated
+      writer (6 items over domain, application, pg adapters, importer and a migration).
+      1. Coverage checked against today: `planMove` takes `today` (local date); the coverage
+         path applies only when the coverage is running or scheduled (`validTo > today`), the
+         move falls before its end, and it was not already cut (a cut leaves the voided return
+         starting after the shortened coverage end). Otherwise the normal `move_before_last`
+         floor. RED: 2 unit (past coverage voided the lived return; cut coverage voided the
+         permanent range) + 2 integration (200 instead of 422) -> GREEN.
+      2. One `applyMovePlan` (plantilla-repo: shorten, close, inserts) used by `applyMove` and
+         the `.txt` import; every import move (incl. the final "from today") is skipped and
+         counted on a DomainError; apply response `report.membershipSkipped`, audit says
+         "cambios de plantilla omitidos". RED: active coverage -> 500 (23P01); scheduled
+         coverage -> 422 aborting the import -> GREEN (coverage ends today / skipped + counted).
+      3. Demo clear nulls `cajas.referente_tech_id` of demo techs first (audit `caja_edit`,
+         `deleted.cajasReferente`). RED 500 (FK) -> GREEN.
+      4. Lock order plantilla (target) then tech everywhere (`applyMove` incl. version check,
+         `moveTech`, legacy `changeShift`; move-selected locks the target once before the
+         loop); PG 40P01/40001 -> 409 `{error:'retry'}` in the shared handler. RED: two-connection
+         test (external lock on the target, move-selected + move-one) -> 500 deadlock; unit
+         mapping test failing -> GREEN (200 + 422 `same_plantilla`, no deadlock).
+      5. `.txt` range ids that already exist in the history get a new id (`freeRangeId`, both
+         the move and the no-history path). RED 409 `import_conflict` (not 500 as reported) ->
+         GREEN.
+      6. Migration `008_plantillas_unique_name.sql`: `plantillas_dedupe_active_names()` (suffix
+         " (n)" by sort_order, id; audited) + partial unique index `plantillas_active_name_key`
+         on `lower(name)` for active rows; API maps 23505 to 409 `duplicate`, import apply to 409
+         `duplicate_plantilla_name`, dry-run reports `shifts.name` "nombre de plantilla
+         repetido". RED (no index, no report error) -> GREEN. Note: `lower()` follows the DB
+         locale (non-ASCII capitals such as Ñ may not fold), same as the existing API check.
+      Evidence: `npm test` 136/136; `npm run test:db` 132/132; `PANOL_E2E_BUILD=1 npm run test:e2e` 43/0/0 (318 s). Commit: see git log
+      (`fix(server): ...`). Follow-up: `web/src/state/plantillas.js` `coverageOf`/`validateMove`
+      still mirror the old rule client-side (web/ outside this surface; the server decides).
 
 ## Stage 2 implementation notes (E2.T1)
 - Membership: `tech_plantilla_history` ranges `[valid_from, valid_to)` with

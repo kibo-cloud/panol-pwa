@@ -10,12 +10,16 @@ import { planMove, effectiveRange, planRotation, canRotate, cleanPlantillaName, 
 import { validDay } from '../domain/catalog.js';
 import { localDateISO } from '../domain/period.js';
 import { newId } from './ids.js';
-import { withTransaction, checkVersion, record, notifyChange } from './common.js';
+import { withTransaction, checkVersion, record, notifyChange, onUnique } from './common.js';
 import { idempotent } from './idempotency.js';
 
 const rule = (msg, code = 'invalid_input', status = 422) => new DomainError(msg, code, status);
 const forbidden = () => rule('Tu perfil no tiene permiso para esta acción.', 'forbidden', 403);
 const MAX_SELECTED = 200;
+// Índice único parcial de la migración 008 (nombre de plantilla activa): la última defensa si
+// dos altas o renombres simultáneos pasan el control previo.
+const NAME_TAKEN = 'Ya existe una plantilla con ese nombre.';
+const onNameTaken = onUnique(NAME_TAKEN, 'duplicate');
 
 // Error de la base por superposición de rangos (restricción de exclusión): otro cambio
 // simultáneo del mismo técnico ganó.
@@ -40,7 +44,7 @@ async function supervisorOf(c, userId) {
 async function assertNameFree(c, name, exceptId) {
   await repo.lockName(c, 'plantillas.name');
   const { rows } = await c.query('SELECT 1 FROM plantillas WHERE lower(name) = lower($1) AND archived_at IS NULL AND id IS DISTINCT FROM $2 LIMIT 1', [name, exceptId]);
-  if (rows[0]) throw rule('Ya existe una plantilla con ese nombre.', 'duplicate', 409);
+  if (rows[0]) throw rule(NAME_TAKEN, 'duplicate', 409);
 }
 
 const nameOf = async (c, id) => (id ? (await repo.getRow(c, 'plantillas', id))?.name ?? id : 'Sin plantilla');
@@ -71,7 +75,7 @@ export async function createPlantilla(db, actor, input) {
       label = input.shiftLabel;
     }
     const order = input.order ?? (await c.query('SELECT coalesce(max(sort_order), 0) + 1 AS n FROM plantillas')).rows[0].n;
-    const row = await repo.insertRow(c, 'plantillas', newId('pl'), { name, supervisorUserId: sup?.id ?? null, currentShiftLabel: label, order, by: actor.id });
+    const row = await repo.insertRow(c, 'plantillas', newId('pl'), { name, supervisorUserId: sup?.id ?? null, currentShiftLabel: label, order, by: actor.id }).catch(onNameTaken);
     if (sup) await prepo.insertSupervisorChange(c, { id: newId('ps'), plantillaId: row.id, fromUserId: null, supervisorUserId: sup.id, from: localDateISO() }, actor.id);
     await record(c, actor, { action: 'plantilla_create', entity: 'plantillas', id: row.id, version: row.version, event: 'create', detail: `Alta de plantilla ${name}${sup ? `, supervisor ${sup.name}` : ''}` });
     return row;
@@ -90,7 +94,7 @@ export async function updatePlantilla(db, actor, id, input, version) {
     if (input.order !== undefined) set.order = input.order;
     const diff = Object.fromEntries(Object.entries(set).filter(([k, v]) => v !== cur[k]));
     if (!Object.keys(diff).length) return cur;
-    const row = await repo.updateRow(c, 'plantillas', id, diff);
+    const row = await repo.updateRow(c, 'plantillas', id, diff).catch(onNameTaken);
     const detail = diff.name ? `Plantilla renombrada: ${cur.name} a ${row.name}` : `Orden de la plantilla ${row.name}: ${row.order}`;
     await record(c, actor, { action: diff.name ? 'plantilla_rename' : 'plantilla_reorder', entity: 'plantillas', id, version: row.version, detail });
     return row;
@@ -147,24 +151,23 @@ export async function changeSupervisor(db, actor, id, input, version) {
 
 // ---------------------------------------------------------------- mover técnicos
 // Dentro de la transacción `c`. `expectFrom`: la plantilla en la que tiene que estar ahora
-// (mover seleccionados desde la vista de una plantilla).
-export async function applyMove(c, actor, techId, input, { expectFrom = null, today = localDateISO() } = {}) {
+// (mover seleccionados desde la vista de una plantilla); `version`: la del técnico (If-Match).
+// Orden de bloqueo en todos los movimientos (evita bloqueos mutuos): primero la plantilla
+// destino, después el técnico.
+export async function applyMove(c, actor, techId, input, { expectFrom = null, today = localDateISO(), version = null } = {}) {
+  const target = await activePlantilla(c, input.plantillaId, { lock: true, msg: 'Elegí la plantilla destino.' });
   const tech = await repo.getRow(c, 'techs', techId, { lock: true });
   if (!tech) throw notFoundError('No se encontró el técnico.');
+  if (version != null) checkVersion(tech, version, 'No se encontró el técnico.');
   if (tech.active === false) throw rule('El técnico está inactivo.', 'inactive_tech');
-  const target = await activePlantilla(c, input.plantillaId, { lock: true, msg: 'Elegí la plantilla destino.' });
   const ranges = await prepo.loadHistory(c, { techIds: [techId] });
   if (expectFrom) {
     // La plantilla en la que está hoy (durante una cobertura, la de la cobertura).
     const here = effectiveRange(ranges, today) || ranges.find((r) => r.validTo == null);
     if (!here || here.plantillaId !== expectFrom) throw rule(`${tech.name} no está en esta plantilla.`, 'not_member');
   }
-  const plan = planMove(ranges, { techId, targetId: target.id, from: input.from || today, until: input.until ?? null, reason: input.reason }, { newId });
-  // Primero se acorta la cobertura y se anula la vuelta; después entra el rango nuevo.
-  if (plan.shorten) await prepo.shortenCoverage(c, plan.shorten.id, plan.shorten.validTo);
-  if (plan.close) await prepo.closeRange(c, plan.close.id, plan.close.validTo);
-  const inserted = [];
-  for (const r of plan.inserts) inserted.push(await prepo.insertRange(c, r, { actorId: actor.id, demo: !!tech.demo }).catch(onOverlap));
+  const plan = planMove(ranges, { techId, targetId: target.id, from: input.from || today, until: input.until ?? null, reason: input.reason, today }, { newId });
+  const inserted = await prepo.applyMovePlan(c, plan, { actorId: actor.id, demo: !!tech.demo }).catch(onOverlap);
   // Sube la versión del técnico: quien lo tenga abierto para editar ve que cambió.
   const touched = repo.toApi('techs', (await c.query('UPDATE techs SET active = active WHERE id = $1 RETURNING *', [techId])).rows[0]);
   const fromName = await nameOf(c, plan.fromPlantillaId);
@@ -178,13 +181,13 @@ export async function applyMove(c, actor, techId, input, { expectFrom = null, to
 
 export async function moveTech(db, actor, techId, input, { version = null, idempotencyKey, path } = {}) {
   return idempotent(db, { userId: actor.id, key: idempotencyKey, method: 'POST', path, body: { input, version } }, async (c) => {
-    if (version != null) checkVersion(await repo.getRow(c, 'techs', techId, { lock: true }), version, 'No se encontró el técnico.');
-    const r = await applyMove(c, actor, techId, input);
+    const r = await applyMove(c, actor, techId, input, { version });
     return { status: 200, body: { tech: r.tech, ranges: r.ranges } };
   });
 }
 
-// Mover seleccionados: todos o ninguno (una sola transacción). Se bloquean en orden de id.
+// Mover seleccionados: todos o ninguno (una sola transacción). Se bloquea la plantilla destino
+// una vez antes que los técnicos (mismo orden que mover uno) y los técnicos en orden de id.
 export async function moveSelected(db, actor, sourceId, input, { idempotencyKey, path } = {}) {
   const ids = [...new Set(input.techIds || [])].sort();
   if (!ids.length) throw rule('Elegí al menos un técnico.', 'invalid_input');
@@ -193,6 +196,7 @@ export async function moveSelected(db, actor, sourceId, input, { idempotencyKey,
     const source = await repo.getRow(c, 'plantillas', sourceId);
     if (!source) throw notFoundError('No se encontró la plantilla.');
     if (input.targetPlantillaId === sourceId) throw rule('Elegí una plantilla destino distinta.', 'same_plantilla');
+    await activePlantilla(c, input.targetPlantillaId, { lock: true, msg: 'Elegí la plantilla destino.' });
     const moved = [];
     for (const techId of ids) {
       try {

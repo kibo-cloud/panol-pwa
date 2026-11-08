@@ -85,6 +85,29 @@ describe('plantillas: alta, edición y archivo', () => {
     assert.equal(stale.json().current.name, 'Sur Uno');
   });
 
+  test('nombre único entre las plantillas activas: índice parcial y repetidos viejos con sufijo', async () => {
+    const dup = "INSERT INTO plantillas (id, name) VALUES ($1, $2)";
+    await assert.rejects(api.q(dup, ['pl-dup-1', 'TURNO NOCHE']), (e) => e.code === '23505' && e.constraint === 'plantillas_active_name_key');
+    // Una archivada puede repetir el nombre.
+    await api.q("INSERT INTO plantillas (id, name, archived_at) VALUES ('pl-dup-2', 'Turno mañana', now())");
+    assert.equal((await api.call('admin', 'POST', '/api/plantillas', { name: 'turno mañana' })).statusCode, 409);
+    await api.q("DELETE FROM plantillas WHERE id = 'pl-dup-2'");
+    // Repetidos anteriores a la migración 008: la primera (por orden e id) conserva el nombre.
+    const c = await api.pool.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query('DROP INDEX plantillas_active_name_key');
+      await c.query("INSERT INTO plantillas (id, name, sort_order) VALUES ('pl-dup-3', 'Turno Mañana', 99), ('pl-dup-4', 'turno mañana', 98), ('pl-dup-5', 'Turno mañana (2)', 97)");
+      assert.equal((await c.query('SELECT plantillas_dedupe_active_names() AS n')).rows[0].n, 2);
+      const names = Object.fromEntries((await c.query("SELECT id, name FROM plantillas WHERE id IN ('manana', 'pl-dup-3', 'pl-dup-4', 'pl-dup-5')")).rows.map((r) => [r.id, r.name]));
+      assert.deepEqual(names, { manana: 'Turno mañana', 'pl-dup-4': 'turno mañana (3)', 'pl-dup-3': 'Turno Mañana (4)', 'pl-dup-5': 'Turno mañana (2)' });
+      assert.equal((await c.query("SELECT count(*)::int AS n FROM audit_log WHERE detail LIKE '%migración 008%'")).rows[0].n, 2);
+    } finally {
+      await c.query('ROLLBACK');
+      c.release();
+    }
+  });
+
   test('archivar: solo sin técnicos; archivada no recibe técnicos ni se edita', async () => {
     assert.equal((await api.call('admin', 'POST', '/api/plantillas/tarde/archive', undefined, ifMatch(await ver('plantillas', 'tarde')))).statusCode, 409);
     const p = (await api.call('admin', 'POST', '/api/plantillas', { name: 'Para archivar' })).json().plantilla;
@@ -221,6 +244,66 @@ describe('mover técnicos', () => {
       ['tarde', null, from, false], ['noche', from, from, true], ['tarde', until, until, false], ['tarde', from, null, false],
     ].sort((x, y) => (x[1] ?? '').localeCompare(y[1] ?? '')));
     assert.equal((await api.q('SELECT plantilla_on($1, $2::date) AS p', [t.id, addDays(from, 1)]))[0].p, 'tarde');
+  });
+
+  // E2.V1: la cobertura se mira contra hoy, no contra la fecha del cambio.
+  test('cobertura ya terminada: un cambio con fecha dentro de ella no anula la vuelta ya vivida', async () => {
+    const t = await newTech('Cubre Cuatro', 'COB-4', 'tarde');
+    const from = addDays(today, -6);
+    const until = addDays(today, -3);
+    assert.equal((await api.call('admin', 'POST', `/api/techs/${t.id}/move`, { plantillaId: 'noche', from, until, reason: 'Cubrió' })).statusCode, 200);
+    const before = await hist(t.id);
+    const r = await api.call('admin', 'POST', `/api/techs/${t.id}/move`, { plantillaId: 'manana', from: addDays(today, -4), reason: 'Con fecha vieja' });
+    assert.equal(r.statusCode, 422, r.body);
+    assert.equal(r.json().error, 'move_before_last');
+    assert.match(r.json().message, new RegExp(`anterior al ${until}`));
+    assert.deepEqual(await hist(t.id), before);
+  });
+
+  test('cobertura cortada por un cambio definitivo: otro cambio dentro de ella no anula el definitivo', async () => {
+    const t = await newTech('Cubre Cinco', 'COB-5', 'tarde');
+    const from = addDays(today, -2);
+    const until = addDays(today, 5);
+    const cut = addDays(today, 2);
+    assert.equal((await api.call('admin', 'POST', `/api/techs/${t.id}/move`, { plantillaId: 'noche', from, until, reason: 'Cubre' })).statusCode, 200);
+    assert.equal((await api.call('admin', 'POST', `/api/techs/${t.id}/move`, { plantillaId: 'manana', from: cut, reason: 'Se queda en mañana' })).statusCode, 200);
+    const before = await hist(t.id);
+    const r = await api.call('admin', 'POST', `/api/techs/${t.id}/move`, { plantillaId: 'noche', from: addDays(today, 1), reason: 'x' });
+    assert.equal(r.statusCode, 422, r.body);
+    assert.equal(r.json().error, 'move_before_last');
+    assert.deepEqual(await hist(t.id), before);
+    assert.equal((await api.q('SELECT plantilla_on($1, $2::date) AS p', [t.id, addDays(until, 1)]))[0].p, 'manana');
+  });
+
+  // Mismo orden de bloqueo en mover uno y mover seleccionados (plantilla destino, después
+  // técnicos): con el orden viejo (técnico, después plantilla) esto era un bloqueo mutuo.
+  test('mover uno y mover seleccionados a la vez hacia la misma plantilla no se bloquean entre sí', async () => {
+    const a = await newTech('Bloqueo Uno', 'LCK-1', 'tarde');
+    const b = await newTech('Bloqueo Dos', 'LCK-2', 'tarde');
+    const [first, second] = [a, b].sort((x, y) => (x.id < y.id ? -1 : 1));
+    const waiting = async () => (await api.q("SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'"))[0].n;
+    const until = async (n) => {
+      for (let i = 0; i < 200 && (await waiting()) < n; i++) await new Promise((r) => setTimeout(r, 25));
+      assert.ok((await waiting()) >= n, `esperaba ${n} transacciones esperando un bloqueo`);
+    };
+    const ext = await api.pool.connect();
+    try {
+      await ext.query('BEGIN');
+      await ext.query("SELECT 1 FROM plantillas WHERE id = 'noche' FOR UPDATE");
+      const sel = api.call('admin', 'POST', '/api/plantillas/tarde/move-selected', { techIds: [first.id, second.id], targetPlantillaId: 'noche', from: today, reason: 'Juntos' });
+      await until(1);
+      const one = api.call('admin', 'POST', `/api/techs/${second.id}/move`, { plantillaId: 'noche', from: today, reason: 'Solo' });
+      await until(2);
+      await ext.query('COMMIT');
+      const [rs, ro] = await Promise.all([sel, one]);
+      assert.equal(rs.statusCode, 200, rs.body);
+      // El segundo llega cuando el técnico ya está en noche.
+      assert.equal(ro.statusCode, 422, ro.body);
+      assert.equal(ro.json().error, 'same_plantilla');
+    } finally {
+      await ext.query('ROLLBACK').catch(() => {});
+      ext.release();
+    }
   });
 });
 

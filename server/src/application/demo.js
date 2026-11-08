@@ -117,6 +117,13 @@ export async function clearDemo(db, actor) {
     }
     const del = async (sql) => (await c.query(sql)).rowCount;
     const n = {};
+    // Una caja real cuyo referente es un técnico demo queda sin referente (clave foránea simple):
+    // se audita en cada caja antes de borrar los técnicos.
+    const freed = (await c.query(`UPDATE cajas SET referente_tech_id = NULL WHERE referente_tech_id IN (${demoTechs}) RETURNING id, name, version`)).rows;
+    for (const cj of freed) {
+      await record(c, actor, { action: 'caja_edit', entity: 'cajas', id: cj.id, version: cj.version, detail: `Caja ${cj.name} sin referente: su referente era un técnico de demostración` });
+    }
+    n.cajasReferente = freed.length;
     n.controlItems = await del('DELETE FROM control_items WHERE control_id IN (SELECT id FROM controls WHERE demo)');
     n.controls = await del('DELETE FROM controls WHERE demo');
     // El rol de la app no puede borrar del libro: lo hace una función del dueño, solo para demo.

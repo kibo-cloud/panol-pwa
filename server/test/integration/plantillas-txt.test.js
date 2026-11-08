@@ -86,3 +86,84 @@ test('importar: un turno que ya no está archiva la plantilla y su gente queda s
   // Nada se borró del historial.
   assert.equal((await api.q("SELECT count(*)::int AS n FROM tech_plantilla_history WHERE tech_id = 't-carla'"))[0].n, 2);
 });
+
+// ---------------------------------------------------------------- E2.V1
+const addDays = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 864e5).toISOString().slice(0, 10);
+const histOf = (techId) => api.q("SELECT id, plantilla_id AS p, valid_from::text AS f, valid_to::text AS t, temporary FROM tech_plantilla_history WHERE tech_id = $1 ORDER BY valid_from NULLS FIRST, created_at", [techId]);
+const applyFile = async (p) => {
+  const rep = await dry(toTxt(p));
+  assert.equal(rep.canApply, true, JSON.stringify(rep.errors));
+  return importTxt(toTxt(p), { token: rep.token });
+};
+
+test('importar con un técnico en una cobertura en curso: la cobertura termina hoy y entra la plantilla del archivo', async () => {
+  const from = addDays(today, -2);
+  const until = addDays(today, 3);
+  assert.equal((await api.call('admin', 'POST', '/api/techs/t-ana/move', { plantillaId: 'tarde', from, until, reason: 'Cubre' })).statusCode, 200);
+  const p = await exportPayload();
+  assert.equal(p.data.techs['t-ana'].shiftId, 'tarde');
+  const soon = new Date(Date.now() + 3 * 3600e3).toISOString();
+  p.data.techs['t-ana'] = { ...p.data.techs['t-ana'], shiftId: 'noche', updatedAt: soon };
+  const r = await applyFile(p);
+  assert.equal(r.statusCode, 200, r.body);
+  assert.deepEqual((await histOf('t-ana')).map((x) => [x.p, x.f, x.t, x.temporary]), [
+    ['manana', null, from, false], ['tarde', from, today, true], ['noche', today, null, false], ['manana', until, until, false],
+  ]);
+  assert.equal((await api.q("SELECT plantilla_on('t-ana', $1::date) AS p", [addDays(until, 1)]))[0].p, 'noche');
+});
+
+test('importar con un técnico en una cobertura programada: el cambio se omite y se cuenta, la importación sigue', async () => {
+  const from = addDays(today, 2);
+  const until = addDays(today, 5);
+  assert.equal((await api.call('admin', 'POST', '/api/techs/t-bruno/move', { plantillaId: 'manana', from, until, reason: 'Cubre' })).statusCode, 200);
+  const before = await histOf('t-bruno');
+  const p = await exportPayload();
+  const soon = new Date(Date.now() + 4 * 3600e3).toISOString();
+  p.data.techs['t-bruno'] = { ...p.data.techs['t-bruno'], shiftId: 'tarde', updatedAt: soon };
+  p.data.config.turnos = { ...p.data.config.turnos, list: p.data.config.turnos.list.map((s) => (s.id === 'noche' ? { ...s, name: 'Turno noche (importado)' } : s)), updatedAt: soon };
+  const r = await applyFile(p);
+  assert.equal(r.statusCode, 200, r.body);
+  assert.equal(r.json().report.membershipSkipped, 1);
+  // Lo demás del archivo entró; el historial del técnico quedó igual.
+  assert.equal((await api.q("SELECT name FROM plantillas WHERE id = 'noche'"))[0].name, 'Turno noche (importado)');
+  assert.deepEqual(await histOf('t-bruno'), before);
+  const [a] = await api.q("SELECT detail FROM audit_log WHERE action = 'import_txt' ORDER BY at DESC, id DESC LIMIT 1");
+  assert.match(a.detail, /1 cambios de plantilla omitidos/);
+});
+
+test('importar un cambio de turno con el id de un rango que ya existe (no exportado): entra con un id nuevo', async () => {
+  const p = await exportPayload();
+  const soon = new Date(Date.now() + 5 * 3600e3).toISOString();
+  // t-carla no tiene plantilla desde hoy; su rango "desde siempre" (ph-t-carla) no se exporta.
+  assert.equal(p.data.shiftChanges['ph-t-carla'], undefined);
+  p.data.techs['t-carla'] = { ...p.data.techs['t-carla'], shiftId: 'manana', updatedAt: soon };
+  p.data.shiftChanges['ph-t-carla'] = { techId: 't-carla', from: null, to: 'manana', fromName: '', toName: 'Turno mañana', effectiveFrom: today, note: 'Forjado', at: soon };
+  // Técnico nuevo cuyo cambio de turno reusa el id del rango base de otro técnico.
+  p.data.techs['t-zeta'] = { ...p.data.techs['t-ana'], name: 'Zeta Nueva', legajo: 'DEV-099', shiftId: 'tarde', createdAt: soon, updatedAt: soon };
+  p.data.shiftChanges['ph-t-ana'] = { techId: 't-zeta', from: 'manana', to: 'tarde', fromName: 'Turno mañana', toName: 'Turno tarde', effectiveFrom: addDays(today, -1), note: 'Forjado 2', at: soon };
+  const r = await applyFile(p);
+  assert.equal(r.statusCode, 200, r.body);
+  const carla = await api.q("SELECT id, valid_from::text AS f, reason FROM tech_plantilla_history WHERE tech_id = 't-carla' AND plantilla_id = 'manana'");
+  assert.equal(carla.length, 1);
+  assert.notEqual(carla[0].id, 'ph-t-carla');
+  assert.deepEqual([carla[0].f, carla[0].reason], [today, 'Forjado']);
+  const zeta = await api.q("SELECT id, plantilla_id AS p FROM tech_plantilla_history WHERE tech_id = 't-zeta'");
+  assert.ok(zeta.length >= 1 && zeta.every((x) => x.id !== 'ph-t-ana'), JSON.stringify(zeta));
+  assert.equal((await api.q("SELECT tech_id FROM tech_plantilla_history WHERE id = 'ph-t-ana'"))[0].tech_id, 't-ana');
+});
+
+test('plantillas activas con nombre único: el informe avisa y la base lo exige al reactivar una archivada', async () => {
+  // franco está archivada (test anterior); otra plantilla activa toma su nombre.
+  assert.equal((await api.call('admin', 'POST', '/api/plantillas', { name: 'Franco' })).statusCode, 201);
+  const p = await exportPayload();
+  const soon = new Date(Date.now() + 6 * 3600e3).toISOString();
+  p.data.config.turnos = { list: [...p.data.config.turnos.list, { id: 'franco', name: 'FRANCO', order: 9 }], updatedAt: soon };
+  const rep = await dry(toTxt(p));
+  assert.equal(rep.canApply, false);
+  assert.ok(rep.errors.some((e) => e.collection === 'shifts' && e.field === 'name' && /nombre de plantilla repetido/.test(e.message)), JSON.stringify(rep.errors));
+  const r = await importTxt(toTxt(p), { token: 'a'.repeat(64) });
+  assert.equal(r.statusCode, 422);
+  assert.equal(r.json().error, 'import_invalid');
+  // La base también lo exige (índice único parcial).
+  await assert.rejects(api.q("UPDATE plantillas SET archived_at = NULL WHERE id = 'franco'"), (e) => e.code === '23505' && e.constraint === 'plantillas_active_name_key');
+});

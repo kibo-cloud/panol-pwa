@@ -171,3 +171,23 @@ describe('bajas lógicas', () => {
     assert.equal(dry.json().totalChanges, 0, JSON.stringify(dry.json().counts));
   });
 });
+
+describe('datos de demostración', () => {
+  test('borrar la demo deja sin referente a una caja real cuyo referente era un técnico demo (auditado)', async () => {
+    assert.equal((await api.call('admin', 'POST', '/api/demo')).statusCode, 201);
+    const [demoTech] = await api.q('SELECT id FROM techs WHERE demo ORDER BY id LIMIT 1');
+    const l = (await api.call('admin', 'POST', '/api/lineas', { name: 'Línea demo-ref', kind: 'linea' })).json().linea;
+    const cr = await api.call('admin', 'POST', '/api/cajas', { name: 'Caja con referente demo', lineaId: l.id, referenteTechId: demoTech.id });
+    assert.equal(cr.statusCode, 201, cr.body);
+    const cj = cr.json().caja;
+    const del = await api.call('admin', 'DELETE', '/api/demo');
+    assert.equal(del.statusCode, 200, del.body);
+    assert.equal(del.json().deleted.cajasReferente, 1);
+    const [row] = await api.q('SELECT referente_tech_id, version FROM cajas WHERE id = $1', [cj.id]);
+    assert.equal(row.referente_tech_id, null);
+    assert.ok(row.version > cj.version);
+    const [a] = await api.q("SELECT detail FROM audit_log WHERE action = 'caja_edit' AND entity_id = $1", [cj.id]);
+    assert.match(a.detail, /sin referente: su referente era un técnico de demostración/);
+    assert.equal((await api.q('SELECT count(*)::int AS n FROM techs WHERE demo'))[0].n, 0);
+  });
+});

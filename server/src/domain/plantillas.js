@@ -26,8 +26,10 @@ export function effectiveRange(ranges, day) {
 }
 
 // Plan de un cambio de plantilla (o de una cobertura temporal si viene `until`).
-// ranges: historial del técnico. Devuelve { close, inserts, fromPlantillaId }.
-export function planMove(ranges, { techId, targetId, from, until = null, reason }, { newId }) {
+// ranges: historial del técnico; today: fecha local de hoy (sin today no hay camino de
+// cobertura y vale siempre el piso del último tramo). Devuelve { shorten, close, inserts,
+// fromPlantillaId, cancelledReturn }.
+export function planMove(ranges, { techId, targetId, from, until = null, reason, today = null }, { newId }) {
   if (!targetId) fail('Elegí la plantilla destino.', 'invalid_plantilla');
   if (!validDay(from)) fail('La fecha desde no es válida.', 'invalid_date');
   if (until != null && until !== '') {
@@ -40,7 +42,10 @@ export function planMove(ranges, { techId, targetId, from, until = null, reason 
 
   const sorted = sortRanges(ranges || []);
   const open = sorted.find((r) => r.validTo == null) || null;
-  const coverage = activeCoverage(sorted, open, from);
+  // Cobertura en curso o programada hoy, y un cambio que cae antes de su fin (desde el fin en
+  // adelante es un cambio normal sobre la vuelta automática).
+  const live = activeCoverage(sorted, open, today);
+  const coverage = live && from < live.validTo ? live : null;
   if (coverage) {
     // Durante una cobertura (en curso o programada): otra cobertura no; un cambio definitivo
     // sí, desde el comienzo de la cobertura. La cobertura termina en la fecha del cambio y la
@@ -68,11 +73,17 @@ export function planMove(ranges, { techId, targetId, from, until = null, reason 
   return { shorten: null, close: open ? { id: open.id, validTo: from } : null, inserts, fromPlantillaId: open ? open.plantillaId : null, cancelledReturn: null };
 }
 
-// Cobertura que sigue vigente (o todavía no empezó) en `day`: el rango temporal no anulado que
-// termina donde empieza la vuelta automática (el rango abierto), con fin posterior a `day`.
-export function activeCoverage(sorted, open, day) {
-  if (!open || open.validFrom == null) return null;
-  return sorted.find((r) => r.temporary && r.validTo === open.validFrom && r.validFrom != null && r.validFrom < r.validTo && day < r.validTo) || null;
+// Cobertura en curso o programada hoy (`today`, fecha local; se mira contra hoy y no contra
+// la fecha del cambio): el rango temporal no anulado que termina donde empieza el rango abierto
+// (la vuelta automática) y con fin posterior a hoy. Una cobertura ya cortada por un cambio
+// definitivo no cuenta: el corte deja anulada la vuelta original, un rango que empieza después
+// del fin (acortado) de la cobertura; sin corte, nada empieza después del rango abierto.
+export function activeCoverage(sorted, open, today) {
+  if (!open || open.validFrom == null || !today) return null;
+  const cov = sorted.find((r) => r.temporary && r.validTo === open.validFrom && r.validFrom != null && r.validFrom < r.validTo && today < r.validTo);
+  if (!cov) return null;
+  const cut = sorted.some((r) => r.validFrom != null && r.validFrom > cov.validTo);
+  return cut ? null : cov;
 }
 
 // Rotación de la plantilla completa: cambia el turno actual (dato informativo).

@@ -65,6 +65,25 @@ export async function shortenCoverage(q, id, validTo) {
   return RANGE(rows[0]);
 }
 
+// Aplica un plan de planMove() (dominio) en el orden que pide el historial: primero se acorta
+// la cobertura y se anula la vuelta (o se cierra el rango abierto); después entran los rangos
+// nuevos. Lo usan mover técnicos y la importación del .txt. Devuelve los rangos insertados.
+export async function applyMovePlan(q, plan, { actorId = null, demo = false } = {}) {
+  if (plan.shorten) await shortenCoverage(q, plan.shorten.id, plan.shorten.validTo);
+  if (plan.close) await closeRange(q, plan.close.id, plan.close.validTo);
+  const inserted = [];
+  for (const r of plan.inserts) inserted.push(await insertRange(q, r, { actorId, demo }));
+  return inserted;
+}
+
+// Id de un rango que viene de afuera (el .txt): si ya existe en el historial (por ejemplo, un
+// rango que no se exporta), se usa uno nuevo para no chocar con la clave primaria.
+export async function freeRangeId(q, id, newId) {
+  if (!id) return newId('ph');
+  const { rows } = await q.query('SELECT 1 FROM tech_plantilla_history WHERE id = $1', [id]);
+  return rows[0] ? newId('ph') : id;
+}
+
 // Rangos calculados por la función de la migración 005 a partir de cambios de turno de 2.1.
 export async function rangesFromChanges(q, currentPlantillaId, changes) {
   const { rows } = await q.query('SELECT * FROM plantilla_ranges_from_changes($1, $2::jsonb)', [currentPlantillaId, JSON.stringify(changes)]);

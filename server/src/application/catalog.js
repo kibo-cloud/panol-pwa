@@ -82,10 +82,10 @@ export async function updateTech(db, actor, id, input, version) {
 // respuesta conserva la forma de 2.1 (`shiftChange`) y agrega el rango nuevo.
 export async function changeShift(db, actor, techId, input, version) {
   return withTransaction(db, async (c) => {
-    checkVersion(await repo.getRow(c, 'techs', techId, { lock: true }), version, 'No se encontró el técnico.');
+    // applyMove bloquea la plantilla destino y después el técnico, y controla la versión.
     const r = await plantillas.applyMove(c, actor, techId, {
       plantillaId: input.to, from: cleanDay(input.effectiveFrom, 'La fecha desde') || localDateISO(), reason: cleanText(input.note, 'La nota') || 'Cambio de turno',
-    });
+    }, { version });
     const range = r.ranges[0];
     const shiftChange = { id: range.id, techId, from: r.fromPlantillaId, to: r.toPlantillaId, fromName: r.fromName, toName: r.toName, effectiveFrom: range.validFrom, note: range.reason, at: range.createdAt, by: range.by };
     return { tech: r.tech, shiftChange, range };

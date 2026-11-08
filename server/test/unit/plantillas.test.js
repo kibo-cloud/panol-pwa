@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  covers, effectiveRange, planMove, planRotation, canRotate, defaultPlantillaName, cleanPlantillaName, shiftChangesFromHistory,
+  covers, effectiveRange, planMove, planMove as planMoveRaw, planRotation, canRotate, defaultPlantillaName, cleanPlantillaName, shiftChangesFromHistory,
   controlRefDate, reportPlantillaOf,
 } from '../../src/domain/plantillas.js';
 
@@ -67,6 +67,8 @@ test('validaciones: fecha, motivo, destino distinto, hasta posterior, no antes d
 
 test('cambio definitivo durante una cobertura: acorta la cobertura y anula la vuelta a la base', () => {
   const h = [R('r1', 'manana', null, '2026-03-05'), R('r2', 'noche', '2026-03-05', '2026-03-12', { temporary: true }), R('r3', 'manana', '2026-03-12')];
+  // Hoy dentro de la cobertura (la cobertura se mira contra hoy).
+  const planMove = (ranges, input, deps) => planMoveRaw(ranges, { today: '2026-03-06', ...input }, deps);
   const p = planMove(h, { techId: 'tA', targetId: 'tarde', from: '2026-03-08', reason: 'Se queda' }, { newId });
   assert.deepEqual(p.shorten, { id: 'r2', validTo: '2026-03-08' });
   assert.deepEqual(p.close, { id: 'r3', validTo: '2026-03-12' });
@@ -81,6 +83,49 @@ test('cambio definitivo durante una cobertura: acorta la cobertura y anula la vu
   // Otra cobertura mientras dura la primera, no; después de que termina, sí.
   assert.throws(() => planMove(h, { techId: 'tA', targetId: 'tarde', from: '2026-03-08', until: '2026-03-10', reason: 'x' }, { newId }), /cobertura temporal hasta el 2026-03-12/);
   assert.equal(planMove(h, { techId: 'tA', targetId: 'tarde', from: '2026-03-12', until: '2026-03-15', reason: 'x' }, { newId }).shorten, null);
+});
+
+// La cobertura se mira contra hoy, no contra la fecha del cambio: una cobertura que ya terminó
+// no vuelve a abrir el camino de la cobertura (A), ni lo abre una cobertura ya cortada (B).
+test('cobertura ya terminada: un cambio con fecha anterior respeta el último tramo vivido', () => {
+  const h = [R('r1', 'manana', null, '2026-03-05'), R('r2', 'noche', '2026-03-05', '2026-03-12', { temporary: true }), R('r3', 'manana', '2026-03-12')];
+  const mv = (from, today) => planMove(h, { techId: 'tA', targetId: 'tarde', from, reason: 'x', today }, { newId });
+  assert.throws(() => mv('2026-03-08', '2026-03-20'), (e) => e.code === 'move_before_last' && /anterior al 2026-03-12/.test(e.message));
+  // El mismo día en que termina la cobertura ya no hay cobertura: cambio normal desde la vuelta.
+  assert.throws(() => mv('2026-03-08', '2026-03-12'), (e) => e.code === 'move_before_last');
+  const p = mv('2026-03-14', '2026-03-20');
+  assert.equal(p.shorten, null);
+  assert.deepEqual(p.close, { id: 'r3', validTo: '2026-03-14' });
+  // Una cobertura nueva después de una ya terminada no choca con la vieja.
+  assert.equal(planMove(h, { techId: 'tA', targetId: 'tarde', from: '2026-03-14', until: '2026-03-16', reason: 'x', today: '2026-03-20' }, { newId }).shorten, null);
+});
+
+test('cobertura cortada por un cambio definitivo: un cambio posterior no anula el rango definitivo', () => {
+  // Cobertura [05, 12) cortada el 08 por un cambio definitivo a tarde: queda [05, 08), la vuelta
+  // del 12 anulada y tarde abierto desde el 08.
+  const h = [
+    R('r1', 'manana', null, '2026-03-05'), R('r2', 'noche', '2026-03-05', '2026-03-08', { temporary: true }),
+    R('r3', 'manana', '2026-03-12', '2026-03-12'), R('r4', 'tarde', '2026-03-08'),
+  ];
+  const mv = (from, today) => planMove(h, { techId: 'tA', targetId: 'noche', from, reason: 'x', today }, { newId });
+  // Hoy después del corte (el definitivo ya se vive).
+  assert.throws(() => mv('2026-03-06', '2026-03-09'), (e) => e.code === 'move_before_last' && /anterior al 2026-03-08/.test(e.message));
+  // Hoy antes del corte (definitivo programado): la cobertura sigue en curso pero ya está cortada.
+  assert.throws(() => mv('2026-03-06', '2026-03-06'), (e) => e.code === 'move_before_last' && /anterior al 2026-03-08/.test(e.message));
+  const p = mv('2026-03-10', '2026-03-09');
+  assert.equal(p.shorten, null);
+  assert.deepEqual(p.close, { id: 'r4', validTo: '2026-03-10' });
+});
+
+test('cambio definitivo desde la vuelta programada: la cobertura sigue y se puede cortar antes', () => {
+  // Cobertura [05, 12) y cambio definitivo a tarde desde el 12 (la vuelta a mañana queda anulada).
+  const h = [
+    R('r1', 'manana', null, '2026-03-05'), R('r2', 'noche', '2026-03-05', '2026-03-12', { temporary: true }),
+    R('r3', 'manana', '2026-03-12', '2026-03-12'), R('r4', 'tarde', '2026-03-12'),
+  ];
+  const p = planMove(h, { techId: 'tA', targetId: 'manana', from: '2026-03-08', reason: 'x', today: '2026-03-06' }, { newId });
+  assert.deepEqual(p.shorten, { id: 'r2', validTo: '2026-03-08' });
+  assert.deepEqual(p.close, { id: 'r4', validTo: '2026-03-12' });
 });
 
 test('mover a un técnico sin plantilla abre su primer rango', () => {
