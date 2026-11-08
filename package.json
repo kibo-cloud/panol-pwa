@@ -1,0 +1,27 @@
+{
+  "name": "panol",
+  "version": "3.0.0-dev",
+  "private": true,
+  "description": "Pañol 3: control de herramientas (servidor + PWA)",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server/src/main.js",
+    "db:start": "node server/scripts/db-start.js",
+    "db:migrate": "node server/scripts/db-migrate.js",
+    "db:reset": "node server/scripts/db-reset.js",
+    "test": "node --test \"server/test/unit/**/*.test.js\"",
+    "test:db": "node --test --test-concurrency=2 \"server/test/integration/**/*.test.js\""
+  },
+  "dependencies": {
+    "@fastify/cookie": "11.1.3",
+    "argon2": "0.45.1",
+    "fastify": "5.12.7",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "embedded-postgres": "16.14.0-beta.17"
+  }
+}
