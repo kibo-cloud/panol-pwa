@@ -19,7 +19,7 @@ export function eq(a, b, msg) { if (a !== b) throw new Error(`assert: ${msg}: ex
 
 export const TXT_HEAD = 'PAÑOL · archivo de datos\r\nNo lo edites a mano.\r\n';
 export const parseTxt = (txt) => JSON.parse(txt.slice(txt.indexOf('{')));
-export const ROUTES = ['inicio', 'turnos', 'tecnicos', 'control', 'entregas', 'inventario', 'controles', 'reportes', 'alertas', 'config', 'admin', 'mas'];
+export const ROUTES = ['inicio', 'plantillas', 'tecnicos', 'control', 'entregas', 'inventario', 'lineas', 'controles', 'reportes', 'alertas', 'config', 'admin', 'mas'];
 
 // API call from the page (its session). Returns { status, body, etag }.
 export function api(page, method, url, body, { version, idem } = {}) {
