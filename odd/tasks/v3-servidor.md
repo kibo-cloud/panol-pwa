@@ -155,9 +155,47 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       use; user PATCH/deactivate/reactivate/reset-password require If-Match (428/409).
       Evidence: `npm test` 60/60; `npm run test:db` 64/64; `npm run db:reset` without
       `NODE_ENV` refused, with `NODE_ENV=development` ok (migration 003 applied).
-- [ ] E1.T5 `.txt` v2 importer and export: admin-only; same validation as 2.1 plus the empty
+- [x] E1.T5 `.txt` v2 importer and export: admin-only; same validation as 2.1 plus the empty
       date rule; `data.deleted` applied; PIN users migrated (PIN works once as temporary
       password, then forced change); import report before confirming; *Descargar .txt*.
+      Route: delegated writer. Code: `server/src/importers/txt-v2/{validate,plan}.js` (pure),
+      `adapters/pg/txt-repo.js`, `application/txt-import.js`, `adapters/http/txt-routes.js`,
+      `application/legacy-pin.js`, migration 004 (`imported` on movements, controls, audit).
+      Endpoints: `POST /api/import/txt?mode=merge|replace&dryRun=1` (text/plain body, 20 MB
+      text like 2.1) -> report (counts per collection, ids to create/update/delete, errors
+      with collection/id/field, conflicts, assumptions such as generated usernames, new users
+      with PIN kind, `token`); same body with `&token=` applies in one SERIALIZABLE
+      transaction, refused (409) if the plan changed since the report, 422 while errors
+      exist; `GET /api/export/txt` (admin) -> 2.1-shaped `.txt` v2 with `deleted: {}` and users
+      without any credential field. Audit `import_txt` (summary) and `export_txt`.
+      Rules: version 2 only; merge = 2.1 `mergeInto` (newer stamp wins, tie keeps server,
+      newer tombstone deletes, stamps > 1 day ahead clamped), but movements/audit are append
+      only and finalized controls immutable (differences are reported conflicts); replace only
+      on a server without movements/controls, file must have an active admin, importer's own
+      user kept, other server users not in the file deleted; referential and uniqueness checks
+      on the final state (dangling shift/category -> null with an assumption, legajo/unit
+      code/original control/reception duplicates -> errors); empty optional date -> NULL,
+      empty required date (movement/audit/alert/shift-change `at`, `finishedAt` of a finalized
+      control) -> report error. PIN users: username from the name (lowercase, no accents,
+      non-alnum -> `.`, numeric suffix), `legacy_salt`/`legacy_pin_hash`, no password hash,
+      `must_change_password`; login verifies pbkdf2$/sha256:/fnv: in constant time under the
+      same lockout, change-password accepts the PIN and clears the legacy fields.
+      Fixture: `server/test/fixtures/v21.js` (invented 2.1 export, pbkdf2 PINs; writes
+      `v21-export.txt`). Tests written with the code (no RED run). Evidence: `npm test` 63/63
+      (new: legacy PIN algorithms, username derivation, reader); `npm run test:db` 83/83 (new
+      `txt-import.test.js`, 19: admin-only 403/401, versions 1/3/'2'/missing, proto key,
+      garbage, JSON body 415, 413 over 20 MB, replace dry-run counts without writes, token
+      required/stale, no-admin refusal, replace apply (ids, original `at`, transfers, empty
+      optional dates NULL, controls imported, shifts, permissions, users with legacy PIN,
+      audit), replace refused with ledger, pbkdf2 login + forced change + legacy cleared,
+      lockout on PIN login, 2.0.0 fixture merge with sha256/fnv logins, merge newer/tie/older,
+      tombstones newer/older + ledger/finalized conflicts, movement/finalized control
+      conflicts, future clamp, required empty date errors + confirm 422, export without
+      credentials, export -> dry-run = 0 changes); live: `db:reset` + `node
+      server/src/main.js` (as `panol_app`) + curl login 200, `GET /api/state` 200, dry-run of
+      `legacy-2.0.0.txt` 200 (5 errors: unit codes already in the dev seed, as expected) and
+      of `v21-export.txt` 200 (`canApply`, 22 changes), `GET /api/export/txt` 200; server
+      and `db:stop` stopped. `node tests/e2e/run.mjs t3` 4/4 (2.1 suite untouched).
 - [ ] E1.T6 Frontend on Vite: split `index.html` into feature modules, API client replaces
       `S`/`put`/`patch`/`del`, login with user + password + "Mantener la sesión", forced
       password change, live updates via SSE, conflict notice on 409, offline banner + local
@@ -187,6 +225,7 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 - 2026-11-07: first delivery (no code) approved with adjustments; E1.T0 done.
 - 2026-11-07: E1.T1-E1.T3 done (server scaffold, schema + domain, auth and users).
 - 2026-11-07: E1.T4 done (API for every 2.1 operation, SSE, idempotency, demo data).
+- 2026-11-08: E1.V1 done (security corrections) and E1.T5 done (`.txt` v2 import/export).
 
 ## Stage 1 implementation notes (E1.T1-E1.T3)
 - Embedded PG runs through the bundled `initdb`/`pg_ctl` of `embedded-postgres`
@@ -225,8 +264,22 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   edit, alert reopen, last shift cannot be deleted, serialized flag change refused (409)
   instead of silently ignored when the tool has movements.
 
+## Stage 1 implementation notes (E1.V1, E1.T5)
+- DB roles: the app connects as `panol_app` (`DATABASE_URL`); migrations and the role
+  provisioning run as the owner (`MIGRATION_DATABASE_URL`, `npm run db:migrate` or `main.js`
+  at start when set). The server refuses to serve as a superuser or table owner. New
+  append-only tables must `REVOKE UPDATE, DELETE` from `panol_app` in their migration.
+- Dev/test need an explicit `NODE_ENV` (`.env` from `.env.example`; tests via
+  `server/test/test.env`); without it the config is production.
+- `.txt` backup limits (to confirm in the stage 1 PR): users are exported without PIN or
+  password hashes, so a v3 backup does not restore credentials (an admin resets them) and
+  2.1 cannot open a v3 backup that has users (2.1 requires `salt`/`pinHash`; exporting them
+  as empty strings would keep 2.1 compatibility without secrets). Export is admin-only (2.1
+  let any signed-in user download). The server keeps no tombstones (`deleted: {}`), so a
+  merge can bring back a row deleted on the server since the file was saved.
+
 ## Next step
-- E1.T5 `.txt` v2 importer and export.
+- E1.T6 Frontend on Vite.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);
   `/api/state` and movement planning load the full ledger (fine for stage 1 volumes);

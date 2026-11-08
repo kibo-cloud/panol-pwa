@@ -10,6 +10,7 @@ import { registerCatalogRoutes } from './adapters/http/catalog-routes.js';
 import { registerReadRoutes } from './adapters/http/read-routes.js';
 import { registerOperationRoutes } from './adapters/http/operation-routes.js';
 import { registerEventRoutes } from './adapters/http/events-routes.js';
+import { registerTxtRoutes } from './adapters/http/txt-routes.js';
 
 // extend(app): permite a las pruebas registrar rutas antes de `ready()`.
 // events: opciones del flujo SSE (p. ej. heartbeatMs en pruebas).
@@ -56,6 +57,7 @@ export async function buildApp({ config, pool, logger, extend, events } = {}) {
   registerReadRoutes(app);
   registerOperationRoutes(app);
   registerEventRoutes(app, events);
+  registerTxtRoutes(app);
   if (extend) await extend(app);
   return app;
 }

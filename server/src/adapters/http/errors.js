@@ -33,6 +33,9 @@ export function errorHandler(err, req, reply) {
   if (err && (err.statusCode === 415 || err.code === 'FST_ERR_CTP_INVALID_MEDIA_TYPE')) {
     return reply.code(415).send({ error: 'unsupported_media_type', message: 'El formato de los datos no es válido.' });
   }
+  if (err && (err.statusCode === 413 || err.code === 'FST_ERR_CTP_BODY_TOO_LARGE')) {
+    return reply.code(413).send({ error: 'too_large', message: 'El archivo es demasiado grande para ser de Pañol.' });
+  }
   if (err && err.statusCode && err.statusCode >= 400 && err.statusCode < 500) {
     return reply.code(err.statusCode).send({ error: 'invalid_request', message: 'La solicitud no es válida.' });
   }
