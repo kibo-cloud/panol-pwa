@@ -424,9 +424,58 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 - Follow-ups: the old 2.1 E2E suite still targets root `index.html` (E1.T7); CSV keeps 2.1's
   quoting (no spreadsheet-formula guard).
 
+## Decisions on the stage 1 PR points (2026-11-08, user delegated: "toma las mejores decisiones")
+- Default permissions (supervisor = responsable + `shift_change`; gerencia = read-only +
+  `reports_export`), off-VPS copy via rclone to an S3-compatible bucket (B2 or R2),
+  usernames derived from names, session timings, temp password shown once: kept as proposed.
+- Demo clear: kept (only demo-flagged rows, through a restricted function; audit never deleted).
+- `.txt` export without credential hashes: kept (security over 2.1 round-trip for users).
+- `.env.example`: unchanged (reads blocked by a user deny rule); variables documented in
+  `LEEME.md` and `docker-compose.yml`.
+- PR #1 merge stays with the user. Stage 2 is stacked: `v3/etapa-2-plantillas` branches from
+  `v3/etapa-1-servidor`, its PR targets `v3/etapa-1-servidor` until #1 is merged, then it is
+  rebased onto `v3-servidor`.
+
+## Stage 2 decisions (parent, within PEDIDO §2.2–§2.3)
+- Effective plantilla of a tech on a date = the `tech_plantilla_history` range covering it
+  (no overlap via exclusion constraint). Temporary coverage = a range with `valid_to` and
+  `temporary=true`; after `valid_to` the tech is back in the base range automatically (derived
+  by date, no cron job).
+- "Turno actual" of a plantilla is informative: a label from a configurable list (default
+  Mañana, Tarde, Noche), changed once per plantilla and stored in `plantilla_rotations`.
+  Supervisor changes go to `plantilla_supervisor_history` (date, actor).
+- Permissions: `shift_change` keeps its key and now means "mover técnicos de plantilla";
+  new `plantillas_edit` (create, rename, supervisor, archive; admin by default) and
+  `plantilla_rotate` (admin; a supervisor may always rotate their own plantilla).
+- Migration of 2.1 turnos: each shift becomes a plantilla with the shift's name, no
+  supervisor (assignable later), current shift label = its name; `techs.shiftId` and
+  `shiftChanges` become history ranges. `.txt` v2 stays importable; v2 export maps plantillas
+  to `config.turnos` and current membership to `techs.shiftId`.
+- Cajas compartidas: a holder is a tech XOR a caja (CHECK); controls and assignments
+  generalise to the holder; one original control per holder and period. Referente = a tech.
+- Line on missing/broken tools stays in stage 4 (optional, never blocks).
+
+## Stage 2 tasks (branch `v3/etapa-2-plantillas`)
+- [ ] E2.T1 Backend plantillas: migration (plantillas, history tables with exclusion
+      constraint, rotations, supervisor history, shift labels setting, control
+      `plantilla_id_snapshot`), data migration from shifts, domain (effective plantilla by
+      date, coverage return), API (CRUD, rotate, change supervisor, move one tech, move
+      selected techs in one transaction, coverage with return date, history), permissions,
+      SSE, audit, `.txt` import/export mapping; unit + integration tests.
+- [ ] E2.T2 Backend líneas, sectores y cajas: catalog, cajas with referente, holder
+      generalisation for assignments, movements and controls, single-form "alta" of an
+      assignment to a tech or a caja; tests.
+- [ ] E2.T3 Frontend: Plantillas module replacing Turnos (list, plantilla view based on
+      `Turno.dc.html`, select + "Mover seleccionados", "Cambiar de plantilla" from the tech
+      sheet based on `CambioTurno.dc.html`, coverage with return date, rotation, supervisor
+      change, history), "Mi plantilla" first for supervisors with their alerts, grouping by
+      plantilla in panel, filters, reports; Líneas/Sectores/Cajas screens; design guide.
+- [ ] E2.T4 E2E: move one and several techs, coverage return, rotation, supervisor view,
+      caja assignment + control, `.txt` migration of turnos to plantillas; existing specs
+      adapted; CI green; PR.
+
 ## Next step
-- User review of the stage 1 PR (squash merge into `v3-servidor`). Then stage 2 (plantillas,
-  movimiento de técnicos y líneas) on `v3/etapa-2-plantillas` from the updated `v3-servidor`.
+- E2.T1 + E2.T2 (delegated backend writer). PR #1 awaits user review.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);
   `/api/state` and movement planning load the full ledger (fine for stage 1 volumes);
