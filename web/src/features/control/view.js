@@ -126,10 +126,11 @@ async function saveDraft(silent) {
   try { await drafts().put(rec); ck.local = true; } catch (e) { console.warn(e); }
   if (ck.conflict) { if (!silent) toast('Resolvé el aviso de cambios antes de guardar.', 'err'); if (UI.ck === ck) ckUpdateProgress(); return; }
   if (net.offline) { if (!silent) toast('Sin conexión: el borrador quedó guardado en este equipo y se envía al volver la conexión.'); if (UI.ck === ck) ckUpdateProgress(); return; }
-  await sendLocal(silent);
+  await sendLocal(silent, ck);
 }
-async function sendLocal(silent = true) {
-  const ck = UI.ck; if (!ck) return;
+// Recibe el control a enviar: al salir del checklist UI.ck ya se limpió y el borrador igual se envía.
+async function sendLocal(silent = true, ck = UI.ck) {
+  if (!ck) return;
   let rec = null; try { rec = await drafts().get(ck.key); } catch { rec = null; }
   if (!rec || rec.conflict) return;
   ck.saving = true;
