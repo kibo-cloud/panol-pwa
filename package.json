@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node server/src/main.js",
     "db:start": "node server/scripts/db-start.js",
+    "db:stop": "node server/scripts/db-stop.js",
     "db:migrate": "node server/scripts/db-migrate.js",
     "db:reset": "node server/scripts/db-reset.js",
     "test": "node --test \"server/test/unit/**/*.test.js\"",
