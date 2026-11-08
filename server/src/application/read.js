@@ -14,7 +14,7 @@ const DEMO_COLS = ['techs', 'shiftChanges', 'categories', 'tools', 'units', 'ass
 
 function derived(S, now) {
   const d = deriveState(S, { now });
-  const alerts = deriveAlerts({ now, techs: S.techs, tools: S.tools, units: S.units, assignments: S.assignments, controls: d.ctls, movements: d.movs, alertRes: S.alertRes });
+  const alerts = deriveAlerts({ now, techs: S.techs, cajas: S.cajas, tools: S.tools, units: S.units, assignments: S.assignments, controls: d.ctls, movements: d.movs, alertRes: S.alertRes });
   return { d, alerts };
 }
 
@@ -36,7 +36,7 @@ export async function getState(db, { now = new Date(), user = null } = {}) {
     config: { turnos: { list: S.shifts.map((s) => ({ id: s.id, name: s.name, order: s.order })) }, shiftLabels: S.shiftLabels },
     derived: {
       cur: d.cur, curKey: d.curKey, pools: d.pools, stateOf: d.stateOf, effective: ids(d.eff), drafts: ids(d.drafts), supersededBy: d.supersededBy,
-      pendingReturns: d.pendingReturns.map((m) => m.id), techInfo: d.techInfo, shiftInfo: d.shiftInfo, kpi: d.kpi, alerts,
+      pendingReturns: d.pendingReturns.map((m) => m.id), techInfo: d.techInfo, cajaInfo: d.cajaInfo, shiftInfo: d.shiftInfo, kpi: d.kpi, alerts,
       hasDemo: DEMO_COLS.some((c) => Object.values(S[c]).some((x) => x.demo)),
       myPlantilla: myPlantilla(S, user, alerts),
     },
@@ -67,11 +67,12 @@ export async function getReport(db, filters, { now = new Date() } = {}) {
 }
 
 // Historial de controles (opcionalmente de un técnico), del más nuevo al más viejo.
-export async function listControls(db, { techId, status, plantillaId } = {}) {
+export async function listControls(db, { techId, cajaId, status, plantillaId } = {}) {
   let list = await loadControls(db, status ? { status } : {});
   const { supersededBy, eff } = effectiveControls(list);
   const effIds = new Set(Object.values(eff).map((c) => c.id));
   if (techId) list = list.filter((c) => c.techId === techId);
+  if (cajaId) list = list.filter((c) => c.cajaId === cajaId);
   // Por plantilla: la foto que guardó cada control (no la plantilla actual del técnico).
   if (plantillaId) list = list.filter((c) => c.plantillaId === plantillaId);
   list.sort((a, b) => b.pnum - a.pnum || (b.finishedAt || b.updatedAt || '').localeCompare(a.finishedAt || a.updatedAt || ''));

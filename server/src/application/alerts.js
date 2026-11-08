@@ -16,9 +16,9 @@ export async function resolveAlert(db, actor, key, input = {}, { now = new Date(
     if (await repo.getRow(c, 'alertRes', key)) throw new DomainError('La alerta ya está resuelta.', 'already_resolved', 409);
     const S = await readState(c);
     const d = deriveState(S, { now });
-    const a = deriveAlerts({ now, techs: S.techs, tools: S.tools, units: S.units, assignments: S.assignments, controls: d.ctls, movements: d.movs, alertRes: S.alertRes }).find((x) => x.key === key);
+    const a = deriveAlerts({ now, techs: S.techs, cajas: S.cajas, tools: S.tools, units: S.units, assignments: S.assignments, controls: d.ctls, movements: d.movs, alertRes: S.alertRes }).find((x) => x.key === key);
     if (!a) throw new DomainError('La alerta ya no está abierta.', 'not_found', 404);
-    const row = await repo.insertRow(c, 'alertRes', key, { type: a.type, title: a.title, text: a.text, techId: a.techId || null, note, at: now, by: actor.id });
+    const row = await repo.insertRow(c, 'alertRes', key, { type: a.type, title: a.title, text: a.text, techId: a.techId || null, cajaId: a.cajaId || null, note, at: now, by: actor.id });
     await record(c, actor, { action: 'alert_resolve', entity: 'alert_resolutions', id: key, version: row.version, event: 'create', detail: `Alerta resuelta: ${a.title}, ${a.text}` });
     return row;
   });

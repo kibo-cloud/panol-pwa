@@ -37,7 +37,11 @@ export function deriveState(S, { now = new Date() } = {}) {
   const asgs = toList(S.assignments);
   const activeAsg = asgs.filter((a) => a.active);
   const toolNameOf = (id) => ((S.tools || {})[id] || {}).name || '';
-  const asgByTech = groupBy(activeAsg, 'techId');
+  // Asignaciones por poseedor: técnico o caja compartida (etapa 2).
+  const asgByTech = groupBy(activeAsg.filter((a) => a.techId), 'techId');
+  const asgByCaja = groupBy(activeAsg.filter((a) => a.cajaId), 'cajaId');
+  const cajas = toList(S.cajas).sort(byName);
+  for (const k in asgByCaja) asgByCaja[k].sort((a, b) => toolNameOf(a.toolId).localeCompare(toolNameOf(b.toolId), 'es'));
   for (const k in asgByTech) asgByTech[k].sort((a, b) => toolNameOf(a.toolId).localeCompare(toolNameOf(b.toolId), 'es'));
 
   const ctls = toList(S.controls).map((c) => ({ ...c, pkey: c.pkey || pkeyOf(c.period), pnum: c.pnum || pnumOf(c.period) }));
@@ -50,9 +54,7 @@ export function deriveState(S, { now = new Date() } = {}) {
   for (const t of tools) pools[t.id] = { ...emptyPool(), ...(pools[t.id] || {}) };
   const pend = pendingReturns(movs);
 
-  const techInfo = {};
-  for (const t of techs) {
-    const list = asgByTech[t.id] || [];
+  const infoOf = (list, key) => {
     const s = emptySum();
     for (const a of list) {
       const st = (stateOf[a.id] && stateOf[a.id].state) || 'pendiente';
@@ -60,13 +62,17 @@ export function deriveState(S, { now = new Date() } = {}) {
       s[st] += q;
       s.total += q;
     }
-    const curEff = eff[t.id + '|' + curKey];
-    const curDraft = drafts[t.id + '|' + curKey];
+    const curEff = eff[key + '|' + curKey];
+    const curDraft = drafts[key + '|' + curKey];
     s.curStatus = curEff ? 'done' : curDraft ? 'draft' : 'pend';
     s.light = !s.total ? 'pend' : s.faltante ? 'bad' : s.cambio ? 'warn' : s.pendiente ? 'pend' : 'ok';
     s.lines = list.length;
-    techInfo[t.id] = s;
-  }
+    return s;
+  };
+  const techInfo = {};
+  for (const t of techs) techInfo[t.id] = infoOf(asgByTech[t.id] || [], t.id);
+  const cajaInfo = {};
+  for (const k of cajas) cajaInfo[k.id] = infoOf(asgByCaja[k.id] || [], 'caja:' + k.id);
   const sumOf = (list) => {
     const s = emptySum();
     for (const t of list) for (const k of Object.keys(s)) s[k] += techInfo[t.id][k];
@@ -89,8 +95,8 @@ export function deriveState(S, { now = new Date() } = {}) {
     ctlMonth: effList.filter((c) => c.period && c.period.y === cur.y && c.period.m === cur.m).length,
   };
   return {
-    cur, curKey, curNum, today: localDateISO(now), shifts, shiftById, plantillaById, plantillaHist, techs, activeTechs, tools, units, unitsByTool, asgs, activeAsg, asgByTech,
+    cur, curKey, curNum, today: localDateISO(now), shifts, shiftById, plantillaById, plantillaHist, techs, activeTechs, cajas, tools, units, unitsByTool, asgs, activeAsg, asgByTech, asgByCaja,
     ctls, eff, effList, effByTech, drafts, supersededBy, stateOf, hist, transitions, movs, pools, pendingReturns: pend,
-    techInfo, shiftInfo, kpi,
+    techInfo, cajaInfo, shiftInfo, kpi,
   };
 }

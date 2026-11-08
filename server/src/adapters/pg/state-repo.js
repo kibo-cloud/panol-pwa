@@ -9,7 +9,7 @@ const iso = (d) => (d instanceof Date ? d.toISOString() : d ?? null);
 const byId = (list) => Object.fromEntries(list.map(({ id, ...x }) => [id, x]));
 
 const MOVEMENT = (r) => ({
-  id: r.id, type: r.type, techId: r.tech_id, toolId: r.tool_id, qty: r.qty, unitId: r.unit_id, newAssignmentId: r.new_assignment_id,
+  id: r.id, type: r.type, techId: r.tech_id, cajaId: r.caja_id, toolId: r.tool_id, qty: r.qty, unitId: r.unit_id, newAssignmentId: r.new_assignment_id,
   oldAssignmentId: r.old_assignment_id, oldUnitId: r.old_unit_id, newUnitId: r.new_unit_id, oldState: r.old_state, returned: r.returned,
   oldDest: r.old_dest, condition: r.condition, linkedControlId: r.linked_control_id, resolvesMovementId: r.resolves_movement_id,
   reason: r.reason || '', notes: r.notes || '', at: iso(r.at), by: r.created_by, demo: r.demo, transfers: [],
@@ -50,6 +50,8 @@ export async function readPlantillas(q) {
 export async function readState(q) {
   const P = await readPlantillas(q);
   const { shifts, techs, shiftChanges } = P;
+  const lineas = await listRows(q, 'lineas', 'ORDER BY sort_order, id');
+  const cajas = await listRows(q, 'cajas', 'ORDER BY id');
   const categories = await listRows(q, 'categories', 'ORDER BY id');
   const tools = await listRows(q, 'tools', 'ORDER BY id');
   const units = await listRows(q, 'units', 'ORDER BY id');
@@ -67,6 +69,8 @@ export async function readState(q) {
     plantillaRotations: await loadRotations(q),
     plantillaSupervisors: await loadSupervisorHistory(q),
     shiftLabels: (await loadShiftLabels(q)).labels,
+    lineas: byId(lineas),
+    cajas: byId(cajas),
     categories: byId(categories),
     tools: byId(tools),
     units: byId(units),

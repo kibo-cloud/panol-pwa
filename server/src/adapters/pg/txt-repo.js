@@ -28,9 +28,12 @@ export async function loadTxtState(q) {
   const P = await readPlantillas(q);
   data.techs = strip(P.techs.map(({ plantillaId, ...t }) => t));
   data.shiftChanges = Object.fromEntries(Object.entries(P.shiftChanges).sort(([a], [b]) => (a < b ? -1 : 1)));
-  for (const c of ['categories', 'tools', 'units', 'assignments', 'alertRes']) data[c] = strip(await listRows(q, c, `ORDER BY ${TABLES[c].key}`));
-  data.controls = strip((await loadControls(q)).sort((a, b) => (a.id < b.id ? -1 : 1)));
-  data.movements = strip(await loadMovementsFull(q));
+  // El .txt v2 no tiene cajas compartidas (etapa 2): sus asignaciones, controles, movimientos y
+  // alertas resueltas no salen, y las unidades salen sin la caja.
+  const noCaja = (list) => list.filter((r) => !r.cajaId).map(({ cajaId, ...r }) => r);
+  for (const c of ['categories', 'tools', 'units', 'assignments', 'alertRes']) data[c] = strip(noCaja((await listRows(q, c, `ORDER BY ${TABLES[c].key}`)).map((r) => (c === 'units' ? { ...r, cajaId: null } : r))));
+  data.controls = strip(noCaja((await loadControls(q)).sort((a, b) => (a.id < b.id ? -1 : 1))));
+  data.movements = strip(noCaja(await loadMovementsFull(q)));
   data.audit = Object.fromEntries((await q.query('SELECT id, action, entity, entity_id, detail, at, actor_id FROM audit_log ORDER BY at, id')).rows.map((r) => [
     r.id, { action: r.action, entity: r.entity, entityId: r.entity_id, detail: r.detail, at: iso(r.at), by: r.actor_id },
   ]));
@@ -54,16 +57,20 @@ export async function loadTxtState(q) {
 // ---------------------------------------------------------------- aplicar un plan
 const stampIso = (r) => (Number.isFinite(stamp(r)) ? new Date(stamp(r)).toISOString() : null);
 
+// Campos de la 3.0 que el .txt v2 no tiene: una importación no los toca.
+const V3_ONLY = new Set(['cajaId']);
+const v2Cols = (s) => Object.entries(s.cols).filter(([k]) => !V3_ONLY.has(k));
+
 async function insertGeneric(c, name, id, r) {
   const s = TABLES[name];
-  const cols = Object.entries(s.cols).map(([k, col]) => [col, r[k] ?? (k === 'demo' ? false : null)]);
+  const cols = v2Cols(s).map(([k, col]) => [col, r[k] ?? (k === 'demo' ? false : null)]);
   cols.push(['created_by', r.by ?? null], ['created_at', r.createdAt ?? stampIso(r) ?? new Date()], ['updated_at', stampIso(r) ?? new Date()]);
   await c.query(`INSERT INTO ${s.table} (${[s.key, ...cols.map((x) => x[0])].join(', ')}) VALUES (${cols.map((_, i) => `$${i + 1}`).concat(`$${cols.length + 1}`).join(', ')})`, [id, ...cols.map((x) => x[1])]);
 }
 
 async function updateGeneric(c, name, id, r) {
   const s = TABLES[name];
-  const cols = Object.entries(s.cols).map(([k, col]) => [col, r[k] ?? (k === 'demo' ? false : null)]);
+  const cols = v2Cols(s).map(([k, col]) => [col, r[k] ?? (k === 'demo' ? false : null)]);
   await c.query(`UPDATE ${s.table} SET ${cols.map((x, i) => `${x[0]} = $${i + 2}`).join(', ')} WHERE ${s.key} = $1`, [id, ...cols.map((x) => x[1])]);
 }
 

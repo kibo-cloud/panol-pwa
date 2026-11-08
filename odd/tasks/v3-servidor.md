@@ -350,6 +350,7 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 - 2026-11-08: E1.T7 done (E2E on the v3 server, 35 specs) and E1.T8 done (Docker, Compose,
   backups, CI workflow, LEEME); first CI run pending.
 - 2026-11-08: E1.T9 done: CI green after runner-only fixes; stage 1 PR opened.
+- 2026-11-08: E2.T1 done (plantillas backend) and E2.T2 done (líneas, sectores, cajas backend).
 
 ## Stage 1 implementation notes (E1.T1-E1.T3)
 - Embedded PG runs through the bundled `initdb`/`pg_ctl` of `embedded-postgres`
@@ -487,9 +488,27 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       plantilla, export -> dry-run = 0 changes; adapted: catalog (shift change and turnos now
       on plantillas), txt-import (membership and plantillas instead of `techs.shift_id`/`shifts`),
       auth (permission map has the 3 new keys)).
-- [ ] E2.T2 Backend líneas, sectores y cajas: catalog, cajas with referente, holder
+- [x] E2.T2 Backend líneas, sectores y cajas: catalog, cajas with referente, holder
       generalisation for assignments, movements and controls, single-form "alta" of an
       assignment to a tech or a caja; tests.
+      Route: delegated writer. Code: migration `006_lineas_cajas.sql`, `domain/lineas.js`,
+      `application/lineas.js`, `adapters/http/lineas-routes.js`; holder generalisation in
+      `domain/{movements,controls,alerts,derive,integrity}.js`, `application/{controls,alerts,read}.js`,
+      `adapters/pg/{catalog,inventory,state,txt}-repo.js`, movement/control route schemas.
+      Test-first: `unit/holders.test.js` RED (missing module), then GREEN (one wrong regex in
+      the test itself fixed); `integration/cajas-api.test.js` written before the code but not run
+      RED separately. Evidence: `npm test` 117 pass + 1 expected failure (web PERMS parity, as in E2.T1); `npm run test:db` 121/121 (new
+      `cajas-api` 9: lineas_edit only (supervisor/responsable/consulta/gerencia 403), unique
+      names, If-Match 428/409, caja needs an active línea and an active referente, DB CHECK
+      exactly one holder on assignments/controls (23514), single-form alta by quantity
+      (entrega inicial then adicional, idempotent replay, stock check 422) and by several units
+      (all or nothing; units held by the caja), alta to a tech with the same endpoint, caja
+      control through `/api/controls` with `cajaId` (409 second original, tech and caja same
+      period allowed, partial unique index 23505), finalize, `derived.effective`/`cajaInfo`/
+      faltante alert with `cajaId`, alert resolution stores `caja_id`, devolución from the caja
+      and integrity clean, archive rules (caja with tools 409, línea with active cajas 409,
+      archived caja refuses alta and control), `.txt` export without caja rows and export ->
+      dry-run = 0 changes). Stage 1 tests unchanged.
 - [ ] E2.T3 Frontend: Plantillas module replacing Turnos (list, plantilla view based on
       `Turno.dc.html`, select + "Mover seleccionados", "Cambiar de plantilla" from the tech
       sheet based on `CambioTurno.dc.html`, coverage with return date, rotation, supervisor
@@ -537,6 +556,19 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   last range are skipped and counted in the import audit) and a move from today if the
   file's shiftId differs. History is never deleted or edited by an import.
 
+## Stage 2 implementation notes (E2.T2)
+- Holder = tech XOR caja: `assignments` and `controls` have `CHECK (num_nonnulls(tech_id,
+  caja_id) = 1)`; `movements` and `units` at most one. Original control uniqueness is two
+  partial unique indexes (per tech, per caja). `controls_guard` also forbids changing
+  `caja_id` on a draft (and now compares `tech_id` with IS DISTINCT FROM).
+- Domain keys: effective controls/drafts use `<techId>|<pkey>` (unchanged) and
+  `caja:<cajaId>|<pkey>`; pending-control alert key for a caja is `pend-caja:<id>-<pkey>`;
+  other alert keys are unchanged (they use assignment/movement ids). A caja has no plantilla
+  (`plantillaId` null on its controls). Archived cajas get no alerts, altas or controls.
+- `.txt` v2 has no cajas: caja assignments, controls, movements and alert resolutions are
+  left out of the export (the v2 file's stock then omits what cajas hold), units go out
+  without the caja; an import never writes `caja_id`. Backups of v3 data are the pg_dump ones.
+
 ## Stage 2 API notes (for the frontend writer)
 - `GET /api/state` (backward compatible, new keys): `plantillas` (by id, incl. archived:
   name, supervisorUserId, currentShiftLabel, order, archivedAt, version), `plantillaHistory`
@@ -571,10 +603,33 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 - Permissions: new keys `plantillas_edit`, `plantilla_rotate`, `lineas_edit` (admin only by
   default); `shift_change` label is now "Mover técnicos de plantilla". The web PERMS list
   (`web/src/state/constants.js`) must add the 3 keys (parity test).
-- SSE events: `plantillas` (create/update/delete/move) and `techs` (update on every move).
+- SSE events: `plantillas` (create/update/delete/move) and `techs` (update on every move);
+  `lineas`, `cajas` (create/update/delete) and `movements` for altas.
+- Líneas/cajas (E2.T2, `lineas_edit`): `GET /api/lineas`, `POST /api/lineas` {name, kind:
+  'linea'|'sector', order?}, `PATCH /api/lineas/:id` + If-Match, `POST /api/lineas/:id/archive`
+  + If-Match (409 with active cajas); `GET /api/cajas`, `POST /api/cajas` {name, lineaId,
+  referenteTechId?}, `PATCH /api/cajas/:id` + If-Match, `POST /api/cajas/:id/archive` + If-Match
+  (409 with tools). `/api/state` adds `lineas` and `cajas` (by id) and `derived.cajaInfo`
+  (same shape as `techInfo`); `derived.effective`/`drafts` add `caja:<id>|<pkey>` keys.
+- Holder fields: assignments, units, movements, controls and alerts carry `cajaId` (null or
+  absent for techs); `techId` is null for a caja. Controls of a caja: `techName` is the caja
+  name at the time. `POST /api/movements` and `POST /api/controls` accept `cajaId` instead of
+  `techId` (both -> 422); `GET /api/controls?cajaId=`.
+- Alta (`movements_do`, Idempotency-Key): `POST /api/assignments` {holder: {techId}|{cajaId},
+  toolId, qty (by quantity) | unitIds[] (serialized), reason?} -> 201 {movements[],
+  assignments[]}; entrega inicial, or adicional when the holder already has that tool; all
+  units or none.
+
+- Stage 2 backend live check (after E2.T2): `NODE_ENV=development npm run db:reset` (migrations 005 and 006
+  applied, seed loaded), `node server/src/main.js` + curl: health ok, admin login 200, `POST /api/plantillas`
+  201, `POST /api/plantillas/manana/move-selected` (2 techs) 200, `GET /api/state` 200 with both techs in
+  the new plantilla; server and `db:stop` stopped. `npm run test:e2e` 35 passed, 0 failed (255 s; stage 1
+  specs untouched and still green thanks to the delegating legacy routes).
 
 ## Next step
-- E2.T2 (delegated backend writer), then E2.T3 frontend. PR #1 awaits user review.
+- E2.T3 frontend (add the 3 permission keys to `web/src/state/constants.js` first: the parity
+  test fails until then), then E2.T4. Engram mirror of this document: pending (parent). PR #1
+  awaits user review.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);
   `/api/state` and movement planning load the full ledger (fine for stage 1 volumes);

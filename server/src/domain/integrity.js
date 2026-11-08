@@ -27,7 +27,14 @@ export function integrityIssues(d) {
     if (codes[c]) out.push({ sev: 'bad', t: 'Código duplicado', s: u.code });
     codes[c] = 1;
   }
+  const cajaById = Object.fromEntries((d.cajas || []).map((k) => [k.id, k]));
   for (const a of d.activeAsg) {
+    if (a.cajaId) {
+      const k = cajaById[a.cajaId];
+      if (!k) out.push({ sev: 'bad', t: 'Asignación sin caja', s: toolName(a.toolId) });
+      else if (k.archivedAt) out.push({ sev: 'warn', t: `La caja ${k.name} está archivada y tiene herramientas`, s: `${toolName(a.toolId)}: registrá la devolución o el retiro.` });
+      continue;
+    }
     const t = techById[a.techId];
     if (!t) out.push({ sev: 'bad', t: 'Asignación sin técnico', s: toolName(a.toolId) });
     else if (t.active === false) out.push({ sev: 'warn', t: `${t.name} está inactivo y tiene herramientas`, s: `${toolName(a.toolId)}: registrá la devolución o el retiro.` });

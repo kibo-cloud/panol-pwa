@@ -24,7 +24,7 @@ export function registerReadRoutes(app) {
   }, async (req) => read.getReport(db, req.query));
 
   app.get('/api/controls', {
-    schema: { querystring: obj({ techId: S.id, plantillaId: S.id, status: { type: 'string', enum: ['borrador', 'finalizado'] } }) },
+    schema: { querystring: obj({ techId: S.id, cajaId: S.id, plantillaId: S.id, status: { type: 'string', enum: ['borrador', 'finalizado'] } }) },
   }, async (req) => ({ controls: await read.listControls(db, req.query) }));
 
   app.get('/api/controls/:id', { schema: { params: idParams } }, async (req, reply) => {

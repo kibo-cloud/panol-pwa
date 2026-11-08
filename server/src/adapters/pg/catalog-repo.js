@@ -14,16 +14,18 @@ export const TABLES = {
   shifts: { table: 'shifts', key: 'id', cols: { name: 'name', order: 'sort_order' } },
   categories: { table: 'categories', key: 'id', cols: { name: 'name', demo: 'demo' } },
   tools: { table: 'tools', key: 'id', cols: { name: 'name', description: 'description', categoryId: 'category_id', serialized: 'serialized', active: 'active', demo: 'demo' } },
-  units: { table: 'units', key: 'id', cols: { toolId: 'tool_id', code: 'code', status: 'status', techId: 'tech_id', demo: 'demo' } },
+  units: { table: 'units', key: 'id', cols: { toolId: 'tool_id', code: 'code', status: 'status', techId: 'tech_id', cajaId: 'caja_id', demo: 'demo' } },
+  lineas: { table: 'lineas', key: 'id', cols: { name: 'name', kind: 'kind', order: 'sort_order', archivedAt: 'archived_at' } },
+  cajas: { table: 'cajas', key: 'id', cols: { name: 'name', lineaId: 'linea_id', referenteTechId: 'referente_tech_id', archivedAt: 'archived_at' } },
   shiftChanges: {
     table: 'shift_changes', key: 'id',
     cols: { techId: 'tech_id', from: 'from_shift_id', to: 'to_shift_id', fromName: 'from_name', toName: 'to_name', effectiveFrom: 'effective_from', note: 'note', at: 'at', demo: 'demo' },
   },
-  alertRes: { table: 'alert_resolutions', key: 'key', cols: { type: 'type', title: 'title', text: 'text', techId: 'tech_id', note: 'note', at: 'at', demo: 'demo' } },
+  alertRes: { table: 'alert_resolutions', key: 'key', cols: { type: 'type', title: 'title', text: 'text', techId: 'tech_id', cajaId: 'caja_id', note: 'note', at: 'at', demo: 'demo' } },
   assignments: {
     table: 'assignments', key: 'id',
     cols: {
-      techId: 'tech_id', toolId: 'tool_id', unitId: 'unit_id', qty: 'qty', active: 'active', since: 'since', until: 'until', movementId: 'movement_id',
+      techId: 'tech_id', cajaId: 'caja_id', toolId: 'tool_id', unitId: 'unit_id', qty: 'qty', active: 'active', since: 'since', until: 'until', movementId: 'movement_id',
       replaces: 'replaces', endReason: 'end_reason', replacedBy: 'replaced_by', endMovementId: 'end_movement_id', demo: 'demo',
     },
   },
