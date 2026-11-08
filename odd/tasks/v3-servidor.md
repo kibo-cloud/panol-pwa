@@ -196,11 +196,33 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       `legacy-2.0.0.txt` 200 (5 errors: unit codes already in the dev seed, as expected) and
       of `v21-export.txt` 200 (`canApply`, 22 changes), `GET /api/export/txt` 200; server
       and `db:stop` stopped. `node tests/e2e/run.mjs t3` 4/4 (2.1 suite untouched).
-- [ ] E1.T6 Frontend on Vite: split `index.html` into feature modules, API client replaces
+- [x] E1.T6 Frontend on Vite: split `index.html` into feature modules, API client replaces
       `S`/`put`/`patch`/`del`, login with user + password + "Mantener la sesión", forced
       password change, live updates via SSE, conflict notice on 409, offline banner + local
       draft of the control in progress resent on reconnect, CSP `script-src 'self'`, xlsx and
       jspdf self-hosted with SRI, service worker updated. Same views and design.
+      Commits `33c02ae` (toolchain, client, store, shared UI), `eea6f47` (feature views),
+      `021f949` (server static + headers). Route: delegated writer. Code: `web/` (Vite root; `src/api` only data access, `src/state`
+      store + pure 2.1 derive + drafts, `src/ui` shared components/router/modal, 13
+      `src/features/*`), `vite.config.js` + `web/scripts/vendor-plugin.js` (copies xlsx 0.18.5 /
+      jspdf 2.5.1 to `vendor/`, sha384 into `virtual:panol-vendor`), `web/scripts/dev.mjs`
+      (`npm run dev`), `server/src/adapters/http/web-routes.js` (static + SPA fallback + headers).
+      Deps (exact): @fastify/static 10.1.7; dev: vite 7.3.7, xlsx 0.18.5, jspdf 2.5.1,
+      @fontsource/inter 5.2.8 (npm builds of xlsx/jspdf have the same sha512 as the 2.1 cdnjs SRI).
+      Tests written with the code (no RED run). Evidence: `npm test` 88/88 (new web: api client
+      headers/error kinds/offline guard, `esc`, router, draft queue, constants parity with the
+      server); `npm run test:db` 89/89 (new `web.test.js`: exact CSP, nosniff, Referrer-Policy,
+      HSTS only in production, immutable cache for assets/vendor, no-cache index/sw/manifest,
+      SPA fallback, /api and missing files 404); `npm run build` -> `web/dist/index.html` has
+      only `<script type="module" src>` + `<link rel="stylesheet">` (0 inline script/style/
+      handlers); live CDP smoke on `db:reset` + build served by Fastify, 67/67: login (wrong
+      password message), 17 routes + 4 admin tabs at 1280 and 390 without overflow, draft saved
+      then finalized, entrega, xlsx/pdf/csv exports, SSE conflict notice + 409 refusal + "Mantener
+      mis cambios", offline banner on server stop, draft kept in IndexedDB `panol-drafts` and
+      resent on reconnect, other writes refused offline, logout, forced password change for a new
+      gerencia user, lockout countdown, 0 CSP violations, 0 console errors; `npm run dev` proxied
+      `/api` login + SSE; server and `db:stop` stopped. `node tests/e2e/run.mjs t6` 4/4 (2.1
+      suite untouched).
 - [ ] E1.T7 E2E: runner starts the server on a seeded embedded DB; the 30 existing specs
       adapted; new specs for login, lockout, forced password change, `.txt` migration,
       conflict 409, offline draft.
@@ -226,6 +248,7 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 - 2026-11-07: E1.T1-E1.T3 done (server scaffold, schema + domain, auth and users).
 - 2026-11-07: E1.T4 done (API for every 2.1 operation, SSE, idempotency, demo data).
 - 2026-11-08: E1.V1 done (security corrections) and E1.T5 done (`.txt` v2 import/export).
+- 2026-11-08: E1.T6 done (Vite frontend over the API).
 
 ## Stage 1 implementation notes (E1.T1-E1.T3)
 - Embedded PG runs through the bundled `initdb`/`pg_ctl` of `embedded-postgres`
@@ -278,8 +301,30 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   let any signed-in user download). The server keeps no tombstones (`deleted: {}`), so a
   merge can bring back a row deleted on the server since the file was saved.
 
+## Stage 1 implementation notes (E1.T6)
+- CSP: the 2.1 templates used inline `style="..."` (blocked by `style-src 'self'`); they now
+  use `data-css="..."`, applied through CSSOM by `setHTML()` (allowed by CSP). The CSP header is
+  sent on every response (API too) with `X-Content-Type-Options` and `Referrer-Policy`; HSTS
+  only with `NODE_ENV=production`.
+- Static files are served in their own Fastify context marked public (the session is still
+  required on every `/api` route); unknown GETs without extension get `index.html`.
+- Views and texts are the 2.1 ones; 2.1's client-side derive runs on `GET /api/state`, with the
+  current period taken from the server (`derived.cur`). Writes call the API, then refetch.
+- Concurrency: editing modals keep the record version; an SSE refresh with a newer version or a
+  409 shows "Alguien modificó este registro…" with Recargar / Mantener mis cambios (keep = save
+  over the new version, an explicit user choice). The checklist does the same with its draft.
+- Offline: only the checklist draft is written while offline (IndexedDB `panol-v3`, store
+  `panol-drafts`, key `tech|period[|corr-<id>]`); same content keeps its Idempotency-Key, changed
+  content gets a new one; resent on reconnect; a 409 marks it as a conflict instead of retrying.
+- Admin › Permisos keeps pending changes with an "unsaved changes" counter (design guide) and
+  saves them with one `PUT /api/permissions`; 2.1 saved each toggle immediately.
+- `npm run dev` sets `APP_ORIGIN=http://127.0.0.1:5173` for the API (the Origin check must see
+  the Vite origin). Build output `web/dist` (ignored); `WEB_DIST` env overrides it.
+- Follow-ups: the old 2.1 E2E suite still targets root `index.html` (E1.T7); CSV keeps 2.1's
+  quoting (no spreadsheet-formula guard).
+
 ## Next step
-- E1.T6 Frontend on Vite.
+- E1.T7 E2E on the server.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);
   `/api/state` and movement planning load the full ledger (fine for stage 1 volumes);
