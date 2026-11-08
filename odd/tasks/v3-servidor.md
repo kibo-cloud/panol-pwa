@@ -317,8 +317,20 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       (`DOMAIN`, `ACME_EMAIL`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
       `APP_DB_PASSWORD`, `BACKUP_HOUR`, `KEEP_DAILY`, `KEEP_WEEKLY`, `KEEP_MONTHLY`; `.env.offsite`:
       `BACKUP_REMOTE`, `RCLONE_CONFIG_OFFSITE_*`).
-- [ ] E1.T9 Close stage 1: CI green, PR `v3/etapa-1-servidor` -> `v3-servidor` with what was
+- [x] E1.T9 Close stage 1: CI green, PR `v3/etapa-1-servidor` -> `v3-servidor` with what was
       done, how to test and test results.
+      Evidence: branches pushed (history scanned: no `privado/`, `.pgdata/` or real `.env`).
+      CI fixes found only on the runner, each verified locally before pushing:
+      `COLLATE "C"` in an import test (Debian locale sorts `u-imp` last); per-spec E2E timeout
+      (a hung CDP call stalled the job 30 min); browser stderr and 30 s wait on launch; root
+      cause of the 2 failing SW specs: the runner inherits `NODE_ENV=test`, so its `vite build`
+      produced `PROD=false` and the app never registered the worker (now forced to
+      `production`; the app also registers when `load` already fired). Local with forced
+      rebuild: e2e 35/35, unit 96/96. CI run 42460525210: unit, integration, compose (build,
+      smoke, backup/restore) and E2E (35/35, 192 s) all green. RDD: risk high
+      (`hot_path` auth, `process_boundary`), consent granted (standing user consent), native
+      review refused `lens_context_budget_exceeded` (4669 lines); fallback independent
+      security verifier: PASS with issues, all 8 findings fixed in E1.V1. Route: parent inline.
 
 ## Acceptance criteria (stage 1)
 - Every 2.1 feature works through the server; the 2.1 protections hold (CSP, SRI, `esc()`,
@@ -337,6 +349,7 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 - 2026-11-08: E1.T6 done (Vite frontend over the API).
 - 2026-11-08: E1.T7 done (E2E on the v3 server, 35 specs) and E1.T8 done (Docker, Compose,
   backups, CI workflow, LEEME); first CI run pending.
+- 2026-11-08: E1.T9 done: CI green after runner-only fixes; stage 1 PR opened.
 
 ## Stage 1 implementation notes (E1.T1-E1.T3)
 - Embedded PG runs through the bundled `initdb`/`pg_ctl` of `embedded-postgres`
@@ -412,8 +425,8 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   quoting (no spreadsheet-formula guard).
 
 ## Next step
-- E1.T9: push the stage branch (user decision), first CI run, fix what only Docker/CI can show,
-  then the stage 1 PR.
+- User review of the stage 1 PR (squash merge into `v3-servidor`). Then stage 2 (plantillas,
+  movimiento de técnicos y líneas) on `v3/etapa-2-plantillas` from the updated `v3-servidor`.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);
   `/api/state` and movement planning load the full ledger (fine for stage 1 volumes);
