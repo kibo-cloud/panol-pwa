@@ -176,7 +176,8 @@ export const tests = [
       const want = ['Llave', 'Martillo', 'Pinza', 'Taladro'];
 
       await page.hash('#control-' + tech);
-      eq((await texts(page, '.item-name')).join(), want.join(), 'control checklist order');
+      // Etapa 4: la tarjeta de limpieza va después de las herramientas (fuera de #ckitems).
+      eq((await texts(page, '#ckitems .item-name')).join(), want.join(), 'control checklist order');
       await page.hash('#tecnico-' + tech);
       eq((await texts(page, '#view .list a.row .t')).join(), want.join(), 'ficha order');
       await page.hash('#inventario');
