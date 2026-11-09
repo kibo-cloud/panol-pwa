@@ -59,3 +59,21 @@ body.auth .netwrap{max-width:400px}
 .kitpv .row{align-items:flex-start}
 .kitprob{display:flex;align-items:center;gap:4px;color:var(--bad-ink);margin-top:4px}
 .espsel{min-height:44px;max-width:100%}
+
+/* Etapa 4: conteo por cantidad, línea opcional y limpieza en el checklist. */
+.qty{display:flex;flex-direction:column;gap:8px}
+.qrow{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.qrow .ql{flex:1;min-width:0;font-size:14px;font-weight:600;color:var(--label)}
+.qrow .stepper{gap:6px;flex:none}
+.qrow .stepper input{width:64px;min-height:44px}
+.stepper button[disabled]{opacity:.45;cursor:not-allowed}
+.qfoot{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.qmiss{display:inline-flex;align-items:center;gap:6px;font-size:14px;font-weight:700;color:var(--ink2)}
+.qmiss.bad{color:var(--bad-ink)}.qmiss.ok{color:var(--ok-ink)}
+.qfoot .qchip{min-height:44px}
+.pick.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.ckline{margin:0}
+.ckline select{min-height:44px;max-width:100%}
+.ckclean{margin-top:10px}
+.qline{color:var(--label)}
+.ctlclean .srow{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}

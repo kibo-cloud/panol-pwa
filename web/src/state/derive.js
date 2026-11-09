@@ -5,6 +5,7 @@
 import { pkeyOf, pnumOf, plabel, periodOf } from './period.js';
 import { holderKey } from './plantillas.js';
 import { sortByOrder, orderTools } from './orden.js';
+import { asgUnits } from './conteo.js';
 
 export function groupBy(arr, k) { const o = {}; for (const x of arr) { const key = typeof k === 'function' ? k(x) : x[k]; (o[key] || (o[key] = [])).push(x); } return o; }
 const list = (o) => Object.entries(o || {}).map(([id, x]) => ({ id, ...x }));
@@ -16,6 +17,7 @@ function alertHref(a) {
   const hk = holderKey(a);
   if (a.type === 'pendiente') return `#control-${hk}`;
   if (a.type === 'devolucion') return '#entregas';
+  if (a.type === 'limpieza' && a.controlId) return `#controlver-${a.controlId}`;
   return a.cajaId ? `#caja-${a.cajaId}` : `#tecnico-${a.techId}`;
 }
 
@@ -63,10 +65,12 @@ export function deriveState(S) {
     for (const [aid, it] of Object.entries(c.items || {})) {
       if (!it || !it.state) continue;
       const prev = stateOf[aid];
-      (hist[aid] || (hist[aid] = [])).push({ state: it.state, controlId: c.id, pkey: c.pkey, pnum: c.pnum });
+      // Etapa 4: con las cantidades del ítem (esperadas, en buen estado, para recambio, faltan).
+      const q = { expected: it.expected ?? it.qty ?? null, good: it.good ?? null, change: it.change ?? null, missing: it.missing ?? null };
+      (hist[aid] || (hist[aid] = [])).push({ state: it.state, ...q, controlId: c.id, pkey: c.pkey, pnum: c.pnum });
       const ps = prev ? prev.state : null;
-      if (ps !== it.state && (it.state !== 'bueno' || ps)) transitions.push({ techId: c.techId, cajaId: c.cajaId || null, hk: c.hk, asgId: aid, toolId: it.toolId, toolName: it.toolName, unitCode: it.unitCode, from: ps, to: it.state, pkey: c.pkey, pnum: c.pnum, at: c.finishedAt, controlId: c.id, note: it.note });
-      stateOf[aid] = { state: it.state, note: it.note || '', controlId: c.id, at: c.finishedAt, pkey: c.pkey };
+      if (ps !== it.state && (it.state !== 'bueno' || ps)) transitions.push({ techId: c.techId, cajaId: c.cajaId || null, hk: c.hk, asgId: aid, toolId: it.toolId, toolName: it.toolName, unitCode: it.unitCode, from: ps, to: it.state, pkey: c.pkey, pnum: c.pnum, at: c.finishedAt, controlId: c.id, note: it.note, ...q });
+      stateOf[aid] = { state: it.state, ...q, note: it.note || '', lineaId: it.lineaId || null, controlId: c.id, at: c.finishedAt, pkey: c.pkey };
     }
   }
   // movimientos y saldos (siempre desde las transferencias)
@@ -81,7 +85,8 @@ export function deriveState(S) {
   const emptySum = () => ({ bueno: 0, cambio: 0, faltante: 0, pendiente: 0, total: 0 });
   const infoOf = (hk) => {
     const l = asgByTech[hk] || []; const s = emptySum();
-    for (const a of l) { const st = (stateOf[a.id] && stateOf[a.id].state) || 'pendiente'; const q = a.qty || 1; s[st] += q; s.total += q; }
+    // Por unidades (etapa 4): en buen estado, para recambio, faltantes y sin controlar.
+    for (const a of l) { const q = a.qty || 1; const u = asgUnits(stateOf[a.id], q); for (const k of ['bueno', 'cambio', 'faltante', 'pendiente']) s[k] += u[k]; s.total += q; }
     const curEff = eff[hk + '|' + curKey], curDraft = drafts[hk + '|' + curKey];
     s.curStatus = curEff ? 'done' : curDraft ? 'draft' : 'pend';
     s.light = !s.total ? 'pend' : s.faltante ? 'bad' : s.cambio ? 'warn' : s.pendiente ? 'pend' : 'ok';

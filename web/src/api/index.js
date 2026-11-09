@@ -83,8 +83,9 @@ export const api = {
   // operaciones (con Idempotency-Key)
   movement: (body, o) => http.post('/api/movements', body, idem(o)),
   createControl: (body, o) => http.post('/api/controls', body, idem(o)),
-  saveControl: (id, items, version, o) => http.patch(`/api/controls/${enc(id)}`, { items }, idem({ ...o, version })),
-  finalizeControl: (id, version, o) => http.post(`/api/controls/${enc(id)}/finalize`, undefined, idem({ ...o, version })),
+  // body: { items, cleaning? } (etapa 4: limpieza de herramientas y caja).
+  saveControl: (id, body, version, o) => http.patch(`/api/controls/${enc(id)}`, body, idem({ ...o, version })),
+  finalizeControl: (id, version, o, body) => http.post(`/api/controls/${enc(id)}/finalize`, body, idem({ ...o, version })),
   resolveAlert: (key, note) => http.post(`/api/alerts/${enc(key)}/resolution`, { note }),
   loadDemo: () => http.post('/api/demo'),
   clearDemo: () => http.del('/api/demo'),

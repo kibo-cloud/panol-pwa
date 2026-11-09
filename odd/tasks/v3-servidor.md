@@ -929,11 +929,30 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       fields, and successful finalizes in 4 integration files send `{ cleaning: { status:
       'limpio' } }` (the 422 expectations for pending/missing note are unchanged).
       Evidence: `npm test` 161/161; `npm run test:db` 168/168.
-- [ ] E4.T2 Frontend: checklist with quantity inputs (steppers ≥44px) for qty > 1 and the
+- [x] E4.T2 Frontend: checklist with quantity inputs (steppers ≥44px) for qty > 1 and the
       three buttons for qty = 1, live "faltan N" with required motivo, optional línea on
       missing/change, cleaning item with required note, finalize disabled with the exact
       reason, control detail/ficha/history/report changes, offline draft compatible; design
       guide.
+      Route: delegated writer. Code: `web/src/state/conteo.js` (pure: quantities, derived state,
+      summary and the exact Finalizar reason, units per assignment, % limpio, losses by línea),
+      `features/control/view.js` (qty = 1 radiogroup; qty > 1 "En buen estado" / "Requieren
+      recambio" steppers 46 px + numeric input clamped to the assigned qty, live "Faltan N" /
+      "Están todas", "Todas en buen estado"; motivo block with quick-phrase chips (required when
+      missing > 0, optional observation with change only); "Línea o sector donde se trabajaba
+      (opcional)" select; card "Limpieza de herramientas y caja" Limpio / Requiere limpieza with
+      required note and chips; Finalizar disabled with the reason in server order; confirmation
+      sheet in units with cleaning and the alert count; focus kept when a card re-renders),
+      `state/drafts.js` (cleaning in the offline record and request; old records still valid),
+      `state/derive.js` (quantities in `stateOf`, units in summaries), control detail (Bien /
+      Recambio / Faltan / Línea columns, cleaning card, "Sin dato de limpieza" for old ones),
+      tech and caja sheet (quantities line, last cleaning), history rows, alerts (`limpieza`
+      icon, KPI, "Ver control"), reports (% limpio KPI and columns, "Faltantes y recambios por
+      línea"), CSV/Excel/PDF (% limpio, "Por línea"), `api/index.js` (save/finalize bodies),
+      icon `clean`, styles in `v3.css` (classes only, no inline styles).
+      Test-first: not observed; `web/test/conteo.test.js` (5) written with the module.
+      Evidence: `npm test` 166/166; `npm run build` ok, `web/dist/index.html` has no inline
+      script/style/handlers (one module script tag).
 - [ ] E4.T3 E2E: quantity control with good/change/missing and required motivo, qty = 1
       buttons, cleaning required to finalize and its note, consecutive cleaning alert,
       change never counted as missing in report, optional línea and report by línea, old

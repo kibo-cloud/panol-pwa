@@ -10,12 +10,14 @@ import { csvCell } from './csv.js';
 import { fdt, mlabel, nowISO } from '../../state/period.js';
 
 function repTables(R) {
-  const tech = [['Técnico', 'Legajo', 'Plantilla', 'Especialidad', 'Asignadas', 'Buen estado', 'Para cambio', 'Faltantes', '% en condiciones', 'Controles', 'Esperados', 'Reposiciones', 'Recuperadas'], ...R.rows.map((r) => [r.name, r.legajo, r.shift, r.especialidad, r.total, r.bueno, r.cambio, r.faltante, r.pct == null ? '' : r.pct, r.ctl, r.expected, r.repos, r.recup])];
-  const sh = [['Plantilla', 'Técnicos', 'Herramientas', 'Buen estado', 'Para cambio', 'Faltantes', '% en condiciones', 'Controles realizados', 'Controles pendientes', 'Reposiciones'], ...R.shifts.map((s) => [s.name, s.techs, s.total, s.bueno, s.cambio, s.faltante, s.pct == null ? '' : s.pct, s.ctl, s.pend, s.repos])];
+  // Etapa 4: unidades, % limpio al final (el PDF lee las columnas por posición) y "Por línea".
+  const tech = [['Técnico', 'Legajo', 'Plantilla', 'Especialidad', 'Asignadas', 'Buen estado', 'Para cambio', 'Faltantes', '% en condiciones', 'Controles', 'Esperados', 'Reposiciones', 'Recuperadas', '% limpio'], ...R.rows.map((r) => [r.name, r.legajo, r.shift, r.especialidad, r.total, r.bueno, r.cambio, r.faltante, r.pct == null ? '' : r.pct, r.ctl, r.expected, r.repos, r.recup, r.pctLimpio == null ? '' : r.pctLimpio])];
+  const sh = [['Plantilla', 'Técnicos', 'Herramientas', 'Buen estado', 'Para cambio', 'Faltantes', '% en condiciones', 'Controles realizados', 'Controles pendientes', 'Reposiciones', '% limpio'], ...R.shifts.map((s) => [s.name, s.techs, s.total, s.bueno, s.cambio, s.faltante, s.pct == null ? '' : s.pct, s.ctl, s.pend, s.repos, s.pctLimpio == null ? '' : s.pctLimpio])];
+  const lineas = [['Línea o sector', 'Faltantes', 'Para recambio'], ...R.lineas.map((l) => [l.name, l.faltante, l.cambio])];
   const evo = [['Mes', 'Para cambio', 'Faltantes', 'Controles', 'Reposiciones', 'Recuperadas'], ...R.evo.map((e) => [mlabel(e.y, e.m), e.cambio, e.faltante, e.ctl, e.repos, e.recup])];
   // Por herramienta, en el orden personalizado (etapa 3).
   const tools = [['Herramienta', 'Categoría', 'Asignadas', 'Buen estado', 'Para cambio', 'Faltantes', 'Sin controlar'], ...R.tools.map((x) => [x.name, x.category, x.total, x.bueno, x.cambio, x.faltante, x.pendiente])];
-  return { tech, sh, evo, tools };
+  return { tech, sh, evo, tools, lineas };
 }
 const fileBase = (R) => `reporte-herramientas-${R.f.ym}${R.f.w !== 'all' ? '-s' + R.f.w : ''}`;
 
@@ -23,7 +25,7 @@ const fileBase = (R) => `reporte-herramientas-${R.f.ym}${R.f.w !== 'all' ? '-s' 
 ACT.exportCsv = () => {
   if (!gateUI('reports_export')) return; const R = computeReport(); const T = repTables(R);
   const block = (title, rows) => [csvCell(title), ...rows.map((r) => r.map(csvCell).join(';'))].join('\r\n');
-  const csv = '﻿' + [block('Reporte de herramientas: ' + R.label, []), block('Por técnico', T.tech), block('Por plantilla', T.sh), block('Evolución mensual', T.evo), block('Por herramienta', T.tools)].join('\r\n\r\n');
+  const csv = '﻿' + [block('Reporte de herramientas: ' + R.label, []), block('Por técnico', T.tech), block('Por plantilla', T.sh), block('Evolución mensual', T.evo), block('Por herramienta', T.tools), block('Por línea', T.lineas)].join('\r\n\r\n');
   saveFile(fileBase(R) + '.csv', csv);
 };
 ACT.exportXlsx = async () => {
@@ -31,7 +33,7 @@ ACT.exportXlsx = async () => {
   await act(async () => {
     await loadScript(vendor.xlsx, () => window.XLSX); const XLSX = window.XLSX; const R = computeReport(); const T = repTables(R); const wb = XLSX.utils.book_new();
     const add = (name, rows) => { const ws = XLSX.utils.aoa_to_sheet([[`Reporte de herramientas: ${R.label}`], [], ...rows]); ws['!cols'] = rows[0].map((_, i) => ({ wch: i === 0 ? 26 : 14 })); XLSX.utils.book_append_sheet(wb, ws, name); };
-    add('Por técnico', T.tech); add('Por plantilla', T.sh); add('Evolución', T.evo); add('Por herramienta', T.tools);
+    add('Por técnico', T.tech); add('Por plantilla', T.sh); add('Evolución', T.evo); add('Por herramienta', T.tools); add('Por línea', T.lineas);
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }); await saveFile(fileBase(R) + '.xlsx', new Blob([buf]));
   });
 };
@@ -50,6 +52,7 @@ ACT.exportPdf = async () => {
     table('Por plantilla', T.sh.map((r, i) => (i === 0 ? ['Plantilla', 'Técnicos', 'Herramientas', 'Bien', 'Cambio', 'Faltan', '% cond.', 'Controles', 'Pendientes', 'Reposic.'] : [r[0], r[1], r[2], r[3], r[4], r[5], r[6] === '' ? '—' : r[6] + '%', r[7], r[8], r[9]])), [3, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
     table('Evolución mensual', T.evo, [3, 1, 1, 1, 1, 1]);
     table('Por herramienta', T.tools, [3, 2, 1, 1, 1, 1, 1]);
+    if (T.lineas.length > 1) table('Faltantes y recambios por línea', T.lineas, [3, 1, 1]);
     await saveFile(fileBase(R) + '.pdf', new Blob([doc.output('arraybuffer')]));
   });
 };

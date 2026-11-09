@@ -9,23 +9,26 @@ export const DRAFT_STORE = 'panol-drafts';
 // Una clave por poseedor (técnico, o `caja:<id>` para una caja compartida) y período (las correcciones llevan además el control corregido).
 export const draftKey = (techId, period, correctionOf = null) => `${techId}|${pkeyOf(period)}${correctionOf ? '|corr-' + correctionOf : ''}`;
 
-const payloadOf = (r) => JSON.stringify([r.controlId || null, r.version ?? null, r.correctionOf || null, r.techId, r.pkey, r.items]);
+const payloadOf = (r) => JSON.stringify([r.controlId || null, r.version ?? null, r.correctionOf || null, r.techId, r.pkey, r.items, r.cleaning ?? null]);
 
 // Arma el registro nuevo. Si el contenido a enviar es el mismo que el anterior se conserva la
 // clave de idempotencia (un reenvío no duplica nada); si cambió, se usa una clave nueva.
-export function nextDraft(prev, { techId, period, correctionOf = null, controlId = null, version = null, items }, newKey, now = new Date().toISOString()) {
-  const rec = { key: draftKey(techId, period, correctionOf), techId, period, pkey: pkeyOf(period), correctionOf, controlId, version, items, savedAt: now, conflict: false };
+// Etapa 4: los ítems llevan cantidades (`good`/`change`/`expected`) y el borrador la limpieza
+// (`cleaning`: { status, note }); un borrador guardado antes de la etapa 4 no la tiene.
+export function nextDraft(prev, { techId, period, correctionOf = null, controlId = null, version = null, items, cleaning }, newKey, now = new Date().toISOString()) {
+  const rec = { key: draftKey(techId, period, correctionOf), techId, period, pkey: pkeyOf(period), correctionOf, controlId, version, items, ...(cleaning !== undefined ? { cleaning } : {}), savedAt: now, conflict: false };
   rec.idemKey = prev && payloadOf(prev) === payloadOf(rec) ? prev.idemKey : newKey;
   return rec;
 }
 
 // Qué pedido corresponde: crear el control (todavía no existe en el servidor) o guardar el borrador.
 export function requestFor(rec) {
+  const cl = rec.cleaning !== undefined ? { cleaning: rec.cleaning } : {};
   if (!rec.controlId) {
-    const body = rec.correctionOf ? { correctionOf: rec.correctionOf, items: rec.items } : { ...holderBody(rec.techId), period: rec.period, items: rec.items };
+    const body = rec.correctionOf ? { correctionOf: rec.correctionOf, items: rec.items, ...cl } : { ...holderBody(rec.techId), period: rec.period, items: rec.items, ...cl };
     return { kind: 'create', body, idempotencyKey: rec.idemKey };
   }
-  return { kind: 'save', id: rec.controlId, items: rec.items, version: rec.version, idempotencyKey: rec.idemKey };
+  return { kind: 'save', id: rec.controlId, items: rec.items, ...cl, version: rec.version, idempotencyKey: rec.idemKey };
 }
 
 // Envía los borradores pendientes. `send(req)` devuelve el control guardado o lanza un error
