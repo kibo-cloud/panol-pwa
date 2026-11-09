@@ -875,9 +875,18 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   is unchanged. Per-tech custom order: not implemented (stage 3 decision).
 - Migration 009/010 backfill with existing rows: `integration/orden-migration.test.js` (E3.V1).
 
+## Stage 3 close (parent)
+- CI run 42541148526 (with E3.V1): unit, integration (incl. `orden-migration` on
+  `postgres:16.14`, so `es-x-icu` is available there), compose and E2E 47/47 green. Local
+  spot check `npm test` 155/155.
+- RDD: risk high; native review not attempted at this size; fallback independent verifier:
+  PASS with issues, 6 low/medium-low findings, all fixed in E3.V1 (two accepted deviations:
+  lock order stays scope → row; `es-x-icu` instead of `und-x-icu`).
+- PR #3 `v3/etapa-3-kit-orden` → `v3/etapa-2-plantillas` (stacked).
+
 ## Next step
-- E3.T1–E3.T3 (one delegated writer), then independent review, CI and the stage 3 PR.
-- Stage 2 PR #2 (stacked on PR #1). Engram mirror of this document: pending (multiple active
+- Stage 4 (conteo por cantidad y limpieza) on `v3/etapa-4-conteo`, stacked on stage 3.
+- PRs #1, #2, #3 await user review (stacked: #1 → `v3-servidor`, #2 → stage 1, #3 → stage 2). Engram mirror of this document: pending (multiple active
   sessions). PR #1 awaits user review; after it is merged, rebase stage 2 onto `v3-servidor`.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);
