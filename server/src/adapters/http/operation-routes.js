@@ -10,6 +10,7 @@ import { IDEMPOTENCY_KEY_RE } from '../../application/idempotency.js';
 import { S, obj, idParams, requireVersion, sendRow, actorOf, etag } from './rest.js';
 import { badRequest } from './errors.js';
 import { MV_TYPES, ITEM_STATES, SCHEMA_LIM, LIM } from '../../domain/constants.js';
+import { CLEANING } from '../../domain/controls.js';
 
 export function idempotencyKey(req) {
   const k = req.headers['idempotency-key'];
@@ -25,13 +26,25 @@ export function sendResult(reply, r) {
   return reply.code(r.status).send(r.body);
 }
 
+// Ítem de un control (etapa 4): `state` (los tres botones, o un atajo para todas las unidades)
+// o `good` y `change` (las unidades que faltan son el resto; `missing`, si viene, tiene que
+// coincidir). `expected` es la cantidad con la que se contó: si ya no es la asignada, el ítem
+// queda pendiente. `lineaId`: línea o sector (opcional) de un faltante o recambio.
+const COUNT = S.int(0, 1000000);
+const itemSchema = obj(
+  { state: { type: 'string', enum: ITEM_STATES }, good: COUNT, change: COUNT, missing: COUNT, expected: S.int(1, 1000000), note: S.text, lineaId: S.idOrNull },
+  [],
+  { anyOf: [{ required: ['state'] }, { required: ['good', 'change'] }] },
+);
 const itemsSchema = {
   type: 'object',
   maxProperties: 1000,
   propertyNames: { pattern: S.id.pattern },
-  additionalProperties: {
-    anyOf: [{ type: 'null' }, obj({ state: { type: 'string', enum: ITEM_STATES }, note: S.text }, ['state'])],
-  },
+  additionalProperties: { anyOf: [{ type: 'null' }, itemSchema] },
+};
+// Limpieza de herramientas y caja: null la borra (queda sin indicar).
+const cleaningSchema = {
+  anyOf: [{ type: 'null' }, obj({ status: { type: ['string', 'null'], enum: [...CLEANING, null] }, note: S.text }, ['status'])],
 };
 
 export function registerOperationRoutes(app) {
@@ -55,18 +68,19 @@ export function registerOperationRoutes(app) {
   // ------------------------------------------------------------ controles
   app.post('/api/controls', {
     ...perm('controls_do'),
-    schema: { body: obj({ techId: S.id, cajaId: S.id, period: S.period, correctionOf: S.id, items: itemsSchema }) },
+    schema: { body: obj({ techId: S.id, cajaId: S.id, period: S.period, correctionOf: S.id, items: itemsSchema, cleaning: cleaningSchema }) },
   }, async (req, reply) => sendResult(reply, await controls.createControl(db, actorOf(req), req.body, ctx(req))));
 
   app.patch('/api/controls/:id', {
     ...perm('controls_do'),
-    schema: { params: idParams, body: obj({ items: itemsSchema }, ['items']) },
+    schema: { params: idParams, body: obj({ items: itemsSchema, cleaning: cleaningSchema }, [], { minProperties: 1 }) },
   }, async (req, reply) => sendResult(reply, await controls.saveDraft(db, actorOf(req), req.params.id, req.body, requireVersion(req), ctx(req))));
 
+  // Cuerpo opcional: los últimos ítems y la limpieza se guardan y se finaliza en un paso.
   app.post('/api/controls/:id/finalize', {
     ...perm('controls_do'),
-    schema: { params: idParams },
-  }, async (req, reply) => sendResult(reply, await controls.finalizeControl(db, actorOf(req), req.params.id, requireVersion(req), ctx(req))));
+    schema: { params: idParams, body: { ...obj({ items: itemsSchema, cleaning: cleaningSchema }), type: ['object', 'null'] } },
+  }, async (req, reply) => sendResult(reply, await controls.finalizeControl(db, actorOf(req), req.params.id, requireVersion(req), req.body || {}, ctx(req))));
 
   // ------------------------------------------------------------ alertas
   const keyParams = obj({ key: S.id }, ['key']);

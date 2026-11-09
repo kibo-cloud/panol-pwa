@@ -36,7 +36,7 @@ test('informe: números sobre un fixture armado con la API', async () => {
   const ent = await api.call('responsable', 'POST', '/api/movements', { type: 'entrega_inicial', techId: tech.id, toolId: 'tool-pinza', qty: 3 });
   const asgId = ent.json().assignments[0];
   let c = (await api.call('responsable', 'POST', '/api/controls', { techId: tech.id, period: cur, items: { [asgId]: { state: 'cambio', note: 'Mordaza gastada' } } })).json().control;
-  c = (await api.call('responsable', 'POST', `/api/controls/${c.id}/finalize`, undefined, ifMatch(c.version))).json().control;
+  c = (await api.call('responsable', 'POST', `/api/controls/${c.id}/finalize`, { cleaning: { status: 'limpio' } }, ifMatch(c.version))).json().control;
 
   // Alerta "para cambio": se resuelve y se reabre.
   const key = `camb-${asgId}-${c.id}`;

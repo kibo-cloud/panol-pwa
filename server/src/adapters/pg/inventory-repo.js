@@ -35,6 +35,7 @@ export async function loadControls(q, { status, id, lock = false } = {}) {
   for (const it of items) {
     (byCtl[it.control_id] ||= {})[it.assignment_id] = {
       state: it.state, note: it.note || '', toolId: it.tool_id, toolName: it.tool_name, category: it.category, unitId: it.unit_id, unitCode: it.unit_code, qty: it.qty,
+      expected: it.qty_expected, good: it.qty_good, change: it.qty_change, missing: it.qty_missing, lineaId: it.linea_id,
     };
   }
   return rows.map((r) => {
@@ -42,6 +43,7 @@ export async function loadControls(q, { status, id, lock = false } = {}) {
     return {
       id: r.id, techId: r.tech_id, cajaId: r.caja_id, techName: r.tech_name, shiftId: r.shift_id, plantillaId: r.plantilla_id_snapshot, period, pkey: pkeyOf(period), pnum: pnumOf(period), status: r.status,
       items: byCtl[r.id] || {}, counts: { bueno: r.count_bueno, cambio: r.count_cambio, faltante: r.count_faltante },
+      cleaning: { status: r.cleaning_status, note: r.cleaning_note || '' },
       correction: r.correction, supersedes: r.supersedes_id, startedAt: iso(r.started_at), finishedAt: iso(r.finished_at), updatedAt: iso(r.updated_at), version: r.version, by: r.created_by, demo: r.demo,
     };
   });
@@ -127,10 +129,10 @@ export async function applyMovementPlan(client, plan, { actorId = null, auditId,
 export async function saveControl(client, id, doc, { actorId = null, startedAt, finishedAt, demo = false } = {}) {
   await client.query(
     `INSERT INTO controls (id, tech_id, tech_name, shift_id, period_y, period_m, period_w, status, count_bueno, count_cambio, count_faltante,
-       correction, supersedes_id, started_at, created_by, demo, plantilla_id_snapshot, caja_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,'borrador',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+       correction, supersedes_id, started_at, created_by, demo, plantilla_id_snapshot, caja_id, cleaning_status, cleaning_note)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'borrador',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
     [id, doc.techId ?? null, doc.techName, doc.shiftId, doc.period.y, doc.period.m, doc.period.w, doc.counts.bueno, doc.counts.cambio, doc.counts.faltante,
-      doc.correction, doc.supersedes, startedAt ?? null, actorId, demo, doc.plantillaId ?? null, doc.cajaId ?? null],
+      doc.correction, doc.supersedes, startedAt ?? null, actorId, demo, doc.plantillaId ?? null, doc.cajaId ?? null, ...cleaningCols(doc)],
   );
   await insertItems(client, id, doc.items);
   if (doc.status === 'finalizado') {
@@ -138,11 +140,15 @@ export async function saveControl(client, id, doc, { actorId = null, startedAt, 
   }
 }
 
-async function insertItems(client, id, items) {
+const cleaningCols = (doc) => [(doc.cleaning && doc.cleaning.status) || null, (doc.cleaning && doc.cleaning.note) || null];
+
+// Ítems del documento (buildControlDoc): `qty` repite `expected` (columna de 2.1).
+export async function insertItems(client, id, items) {
   for (const [aid, it] of Object.entries(items)) {
     await client.query(
-      'INSERT INTO control_items (control_id, assignment_id, state, note, tool_id, tool_name, category, unit_id, unit_code, qty) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
-      [id, aid, it.state, it.note || null, it.toolId, it.toolName, it.category, it.unitId, it.unitCode, it.qty],
+      `INSERT INTO control_items (control_id, assignment_id, state, note, tool_id, tool_name, category, unit_id, unit_code, qty,
+         qty_expected, qty_good, qty_change, qty_missing, linea_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+      [id, aid, it.state, it.note || null, it.toolId, it.toolName, it.category, it.unitId, it.unitCode, it.qty, it.expected, it.good, it.change, it.missing, it.lineaId || null],
     );
   }
 }
@@ -155,7 +161,7 @@ export async function rewriteControl(client, id, doc, { finishedAt = null } = {}
   const fin = doc.status === 'finalizado';
   await client.query(
     `UPDATE controls SET tech_name = $2, shift_id = $3, count_bueno = $4, count_cambio = $5, count_faltante = $6,
-       status = $7, finished_at = $8, plantilla_id_snapshot = $9 WHERE id = $1`,
-    [id, doc.techName, doc.shiftId, doc.counts.bueno, doc.counts.cambio, doc.counts.faltante, fin ? 'finalizado' : 'borrador', fin ? finishedAt : null, doc.plantillaId ?? null],
+       status = $7, finished_at = $8, plantilla_id_snapshot = $9, cleaning_status = $10, cleaning_note = $11 WHERE id = $1`,
+    [id, doc.techName, doc.shiftId, doc.counts.bueno, doc.counts.cambio, doc.counts.faltante, fin ? 'finalizado' : 'borrador', fin ? finishedAt : null, doc.plantillaId ?? null, ...cleaningCols(doc)],
   );
 }

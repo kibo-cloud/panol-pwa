@@ -909,11 +909,26 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   `qty`); cleaning and line are not in v2. Import of v2 items uses the migration mapping.
 
 ## Stage 4 tasks (branch `v3/etapa-4-conteo`, stacked on stage 3)
-- [ ] E4.T1 Backend: migration (item quantity columns + check, item `linea_id`, control
+- [x] E4.T1 Backend: migration (item quantity columns + check, item `linea_id`, control
       cleaning status + note, data migration of existing items), domain (finalize validation
       with quantities, cleaning and notes; derived item state; counts; alerts incl.
       consecutive cleaning; reports by units and % limpio; losses by línea), API changes,
       `.txt` mapping; unit + integration tests.
+      Route: delegated writer. Code: migration `011_conteo_limpieza.sql`, `domain/controls.js`
+      (`itemQuantities`, `itemState`, `asgUnits`, `cleanCleaning`, finalize with cleaning),
+      `domain/alerts.js` (faltante/cambio by quantity, `limpieza`), `domain/report.js` (units,
+      % limpio, `lineas`), `domain/derive.js`, `application/controls.js` (merge of quantities,
+      línea check `FOR SHARE`, cleaning, finalize body), `adapters/pg/{inventory,txt}-repo.js`,
+      `adapters/http/operation-routes.js` (strict item/cleaning schemas), demo cleaning.
+      Test-first: not observed (domain written first, then `unit/conteo.test.js` 6,
+      `integration/conteo-api.test.js` 9 and `integration/conteo-migration.test.js` 3). The first
+      run of the migration test was RED for a real defect (`control_items_state_check` already
+      existed as the column CHECK name) -> constraint renamed `control_items_state_derived_check`
+      -> GREEN. Existing tests changed only where the contract changed: `validateFinalize`
+      result has `cleaning`, item doc has the quantity fields, report totals have the cleaning
+      fields, and successful finalizes in 4 integration files send `{ cleaning: { status:
+      'limpio' } }` (the 422 expectations for pending/missing note are unchanged).
+      Evidence: `npm test` 161/161; `npm run test:db` 168/168.
 - [ ] E4.T2 Frontend: checklist with quantity inputs (steppers ≥44px) for qty > 1 and the
       three buttons for qty = 1, live "faltan N" with required motivo, optional línea on
       missing/change, cleaning item with required note, finalize disabled with the exact
@@ -923,6 +938,55 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       buttons, cleaning required to finalize and its note, consecutive cleaning alert,
       change never counted as missing in report, optional línea and report by línea, old
       controls still readable, offline draft with quantities; CI green; PR.
+
+## Stage 4 API notes (for the frontend and later stages)
+- Control item (GET `/api/state`, `/api/controls`): `state` (derived: faltante if `missing` >
+  0, else cambio if `change` > 0, else bueno), `qty` (= `expected`), `expected`, `good`,
+  `change`, `missing`, `lineaId` (only on items with missing or change), `note`, plus the 2.1
+  copies. Control: `cleaning: { status: 'limpio' | 'requiere_limpieza' | null, note }`
+  (null = sin dato: old and imported controls). `counts` are units (Σ good / change / missing).
+- Input item (POST `/api/controls`, PATCH `/api/controls/:id`, POST `.../finalize`):
+  `{ state }` (three buttons, or a shortcut for all units) or `{ good, change }` (missing = the
+  rest; optional `missing` must match; optional `state` must match the derived one), optional
+  `expected` (the quantity it was counted against: if it is no longer the assigned qty the item
+  becomes pending, no error, so an offline draft is never lost), `note`, `lineaId` (null or an
+  active línea; a línea the item already had is kept even if archived). 400 on schema errors
+  (missing `change`, negatives, decimals, extra keys); 422 `invalid_count` (good + change >
+  expected, sums or state do not match), 422 `invalid_linea`.
+- `cleaning` in POST/PATCH/finalize: `{ status, note }` or null (clears); omitted keeps the
+  stored one. PATCH needs `items` or `cleaning`. Finalize accepts an optional body `{ items?,
+  cleaning? }` merged like a draft save in the same transaction. Finalize 422
+  `control_incomplete` messages, in order: "Falta(n) N herramienta(s) por controlar.",
+  "Completá el motivo de N faltante(s).", "Indicá la limpieza de herramientas y caja.",
+  "Completá la nota de limpieza." (extra `cleaning: 'pending' | 'note' | null`). Required for
+  every finalize, corrections included (the correction copies the source cleaning, so a
+  correction of an old control must set it).
+- Corrections copy quantities, `expected`, notes, `lineaId` and cleaning.
+- Alerts: `falt-<asg>-<ctl>` when missing > 0 (text "…: faltan M de N" when N > 1, `qty`),
+  `camb-`/`cons-<asg>-<ctl>` when change > 0 (consecutive = the previous effective control of
+  that assignment also had change > 0); both can exist for one item. New `limp-<holderKey>-<ctl>`
+  (type `limpieza`, sev 2, "Requiere limpieza en controles consecutivos", `controlId`) when the
+  last two effective controls of an active holder both require cleaning; resolvable like the
+  others; a new control re-opens it with a new key.
+- Reports: `bueno/cambio/faltante` and % en condiciones in units (good / counted units);
+  current state per assignment from its last effective control (by state for all units if the
+  assigned qty changed since). Rows, plantillas and totals add `limpio`, `sucio`, `pctLimpio`
+  (effective controls of the period with cleaning data; null when none). New `lineas`:
+  [{ id (null = "Sin línea"), name, kind, faltante, cambio }] from the last effective control
+  of the period of each holder (cajas only without tech/plantilla/especialidad filters).
+- `.txt` v2: export leaves out `cleaning` and the item quantity fields/`lineaId` (state is the
+  derived one, `qty` = expected); import maps state -> quantities like migration 011.
+
+## Stage 4 implementation notes
+- Migration 011: the `state` column stays (safer than replacing every read: history,
+  transitions, alerts, `.txt` and 2.1 readers keep working) and a CHECK keeps it equal to the
+  derived rule (except legacy items with qty 0, which only a `.txt` can bring). `qty` stays
+  equal to `qty_expected` (CHECK). Data migration: the item immutability trigger is disabled
+  only around one UPDATE inside the migration transaction and re-enabled right after (same
+  pattern as 005); `conteo-migration.test.js` checks the trigger is enabled (`tgenabled = 'O'`),
+  finalized items still reject writes, totals/versions of controls are unchanged.
+- Lock order unchanged: control row `FOR UPDATE` -> assignments `FOR SHARE` -> new líneas
+  `FOR SHARE` (sorted). Archiving a línea does not lock controls or assignments.
 
 ## Next step
 - E4.T1–E4.T3 (one delegated writer), then independent review, CI and the stage 4 PR.

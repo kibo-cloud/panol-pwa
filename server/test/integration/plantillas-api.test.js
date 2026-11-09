@@ -352,7 +352,7 @@ describe('controles, estado e informes', () => {
     const c = (await api.call('responsable', 'POST', '/api/controls', { techId: t.id, period: cur, items: { [aid]: { state: 'bueno' } } })).json().control;
     assert.equal(c.plantillaId, 'noche');
     await api.call('admin', 'POST', `/api/techs/${t.id}/move`, { plantillaId: 'tarde', from: today, reason: 'Cambio' });
-    const fin = await api.call('responsable', 'POST', `/api/controls/${c.id}/finalize`, undefined, ifMatch(c.version));
+    const fin = await api.call('responsable', 'POST', `/api/controls/${c.id}/finalize`, { cleaning: { status: 'limpio' } }, ifMatch(c.version));
     assert.equal(fin.statusCode, 200);
     assert.equal(fin.json().control.plantillaId, 'tarde');
     const [row] = await api.q('SELECT plantilla_id_snapshot, shift_id FROM controls WHERE id = $1', [c.id]);

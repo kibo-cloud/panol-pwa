@@ -63,7 +63,8 @@ test('computeReport: mes completo, por técnico y por turno', () => {
   assert.equal(b.fromControl, false);
   assert.deepEqual(R.shifts.map((s) => [s.id, s.ctl, s.pend]), [['manana', 2, 1], ['tarde', 0, 3]]);
   assert.equal(R.label, 'marzo 2026');
-  assert.deepEqual(R.totals, { techs: 2, total: 3, bueno: 1, cambio: 2, faltante: 0, pct: 33, repos: 1 });
+  // Etapa 4: limpieza (estos controles viejos no tienen dato).
+  assert.deepEqual(R.totals, { techs: 2, total: 3, bueno: 1, cambio: 2, faltante: 0, pct: 33, repos: 1, limpio: 0, sucio: 0, pctLimpio: null });
   const last = R.evo[R.evo.length - 1];
   assert.deepEqual([last.label, last.ctl, last.cambio, last.repos, last.recup], ['mar 26', 2, 2, 1, 1]);
   assert.equal(R.evo.length, 6);

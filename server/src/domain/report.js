@@ -3,6 +3,16 @@
 import { MONTHS } from './constants.js';
 import { pad, pnumOf, parsePkey, weekRange, zonedDate, daysIn, plabel, localDateISO } from './period.js';
 import { reportPlantillaOf } from './plantillas.js';
+import { asgUnits, hasMissing, hasChange } from './controls.js';
+import { holderKey } from './lineas.js';
+
+// Limpieza de los controles efectivos del período: limpios, que requieren limpieza y el % limpio
+// (null sin datos; los controles viejos no tienen dato y no cuentan).
+const cleaningOf = (cs) => {
+  const limpio = cs.filter((c) => c.cleaning && c.cleaning.status === 'limpio').length;
+  const sucio = cs.filter((c) => c.cleaning && c.cleaning.status === 'requiere_limpieza').length;
+  return { limpio, sucio, pctLimpio: limpio + sucio ? Math.round((limpio / (limpio + sucio)) * 100) : null };
+};
 
 export const prevMonth = (y, m) => (m > 1 ? { y, m: m - 1 } : { y: y - 1, m: 12 });
 export const monthRange = (y, m) => [zonedDate(y, m, 1), zonedDate(y, m, daysIn(y, m), 23, 59, 59, 999)];
@@ -20,6 +30,10 @@ const inPeriod = (pkey, y, m, weeks) => {
 };
 
 // f: { ym: 'YYYY-MM', w: 'all'|'1'..'4', shift: 'all'|id, tech: 'all'|id, especialidad: 'all'|'none'|id }
+// Etapa 4: unidades (% en condiciones = en buen estado / unidades controladas; "para recambio"
+// nunca cuenta como faltante), % limpio y `lineas`: faltantes y recambios del último control del
+// período de cada poseedor, por la línea indicada en el ítem (`id` null = sin línea). Las cajas
+// entran en `lineas` solo sin filtro de técnico, plantilla ni especialidad.
 // Etapa 3: filtro y columna de especialidad, y `tools`: las herramientas asignadas a los técnicos
 // del informe, en el orden personalizado (estado actual de cada asignación).
 // La plantilla de cada técnico es la del período (foto del último control, o el historial al
@@ -68,7 +82,7 @@ export function computeReport(d, filters = {}) {
     return {
       id: t.id, name: t.name, legajo: t.legajo, shiftId: pid, plantillaId: pid, shift: shiftName(pid), especialidadId: espOf(t), especialidad: espName(espOf(t)), total: i.total,
       bueno: ok, cambio: ch, faltante: fa, pct: den ? Math.round((ok / den) * 100) : null, ctl: cs.length, expected: started.length,
-      repos, recup, fromControl: !!last,
+      repos, recup, fromControl: !!last, ...cleaningOf(cs),
     };
   });
 
@@ -82,6 +96,7 @@ export function computeReport(d, filters = {}) {
     return {
       id: s.id, name: s.name, techs: rs.length, total: sum('total'), bueno: sum('bueno'), cambio: sum('cambio'), faltante: sum('faltante'),
       pct: den ? Math.round((sum('bueno') / den) * 100) : null, ctl: sum('ctl'), pend: Math.max(0, rs.length * started.length - sum('ctl')), repos: sum('repos'),
+      limpio: sum('limpio'), sucio: sum('sucio'), pctLimpio: sum('limpio') + sum('sucio') ? Math.round((sum('limpio') / (sum('limpio') + sum('sucio'))) * 100) : null,
     };
   });
 
@@ -117,7 +132,11 @@ export function computeReport(d, filters = {}) {
   const label = `${f.w === 'all' ? mlabel(y, m) : plabel({ y, m, w: +f.w })}${f.shift !== 'all' ? ', ' + shiftName(f.shift) : ''}${f.tech !== 'all' && techById[f.tech] ? ', ' + techById[f.tech].name : ''}${f.especialidad === 'none' ? ', sin especialidad' : f.especialidad !== 'all' ? ', ' + (espName(f.especialidad) || 'especialidad') : ''}`;
   const T = (k) => rows.reduce((a, r) => a + r[k], 0);
   const den = T('bueno') + T('cambio') + T('faltante');
-  const totals = { techs: rows.length, total: T('total'), bueno: T('bueno'), cambio: T('cambio'), faltante: T('faltante'), pct: den ? Math.round((T('bueno') / den) * 100) : 0, repos: T('repos') };
+  const cl = T('limpio') + T('sucio');
+  const totals = {
+    techs: rows.length, total: T('total'), bueno: T('bueno'), cambio: T('cambio'), faltante: T('faltante'), pct: den ? Math.round((T('bueno') / den) * 100) : 0, repos: T('repos'),
+    limpio: T('limpio'), sucio: T('sucio'), pctLimpio: cl ? Math.round((T('limpio') / cl) * 100) : null,
+  };
   // Herramientas en el orden personalizado, con el estado actual de sus asignaciones.
   const toolRows = [];
   for (const tool of d.tools) {
@@ -125,10 +144,35 @@ export function computeReport(d, filters = {}) {
     for (const id of ids) for (const a of d.asgByTech[id] || []) {
       if (a.toolId !== tool.id) continue;
       const q = a.qty || 1;
-      s[(d.stateOf[a.id] && d.stateOf[a.id].state) || 'pendiente'] += q;
+      const u = asgUnits(d.stateOf[a.id], q);
+      for (const k of ['bueno', 'cambio', 'faltante', 'pendiente']) s[k] += u[k];
       s.total += q;
     }
     if (s.total) toolRows.push({ id: tool.id, name: tool.name, categoryId: tool.categoryId ?? null, ...s });
   }
-  return { f, y, m, rows, shifts, plantillas: shifts, evo, label, started, totals, tools: toolRows };
+  // Faltantes y recambios por línea (último control efectivo del período de cada poseedor).
+  const withCajas = f.tech === 'all' && f.shift === 'all' && f.especialidad === 'all';
+  const lastByHolder = {};
+  for (const c of d.effList) {
+    if (c.period.y !== y || c.period.m !== m || !weeks.includes(c.period.w)) continue;
+    if (c.cajaId ? !withCajas : !ids.has(c.techId)) continue;
+    lastByHolder[holderKey(c)] = c;
+  }
+  const byLinea = {};
+  for (const c of Object.values(lastByHolder)) {
+    for (const it of Object.values(c.items || {})) {
+      if (!hasMissing(it) && !hasChange(it)) continue;
+      const k = it.lineaId || '';
+      const g = (byLinea[k] ||= { faltante: 0, cambio: 0 });
+      g.faltante += it.missing ?? (it.state === 'faltante' ? it.qty || 1 : 0);
+      g.cambio += it.change ?? (it.state === 'cambio' ? it.qty || 1 : 0);
+    }
+  }
+  const lineaList = d.lineas || [];
+  const lineas = [
+    ...lineaList.filter((l) => byLinea[l.id]).map((l) => ({ id: l.id, name: l.name, kind: l.kind, ...byLinea[l.id] })),
+    ...Object.keys(byLinea).filter((k) => k && !lineaList.some((l) => l.id === k)).map((k) => ({ id: k, name: k, kind: null, ...byLinea[k] })),
+    ...(byLinea[''] ? [{ id: null, name: 'Sin línea', kind: null, ...byLinea[''] }] : []),
+  ];
+  return { f, y, m, rows, shifts, plantillas: shifts, evo, label, started, totals, tools: toolRows, lineas };
 }
