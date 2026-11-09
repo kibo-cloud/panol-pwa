@@ -957,6 +957,23 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       buttons, cleaning required to finalize and its note, consecutive cleaning alert,
       change never counted as missing in report, optional línea and report by línea, old
       controls still readable, offline draft with quantities; CI green; PR.
+      [x] E2E items (route: delegated writer, commit `7c71cba`); [ ] CI green (pending, parent);
+      [ ] PR (pending, parent). New `t11-conteo` (5): steppers (≥44 px, clamped typing, live
+      "Faltan N" / "Están todas"), three radio buttons for qty = 1, each Finalizar reason in
+      order, motivo via chip, línea select, cleaning note required, confirmation in units
+      (4/1/1, cleaning, 2 alerts), stored quantities/línea/cleaning, detail and sheet;
+      consecutive cleaning alert shown and resolved in the UI; report row 3/2/1 = 50 % and
+      % limpio 0 % (UI cells and API); losses by línea (Línea Envasado 0/2, Sin línea 1/0);
+      2.0.0 `.txt` controls readable ("Sin dato de limpieza", quantities from state); offline
+      draft keeps `good/change/expected` and cleaning in IndexedDB and is resent with them;
+      every route + checklist + reports at 1280 and 390 without overflow or console/CSP errors.
+      Adapted specs (UI legitimately changed): `t6-flows` and `t9-plantillas` pick "Limpio"
+      before finalizing; `t10-kits-orden` reads the checklist order from `#ckitems` (the
+      cleaning card follows the tools).
+      Evidence (local, sequential): `npm test` 166/166; `npm run test:db` 168/168; `npm run
+      build` ok (0 inline script/style/handlers); `PANOL_E2E_BUILD=1 npm run test:e2e` 52
+      passed, 0 failed, 0 skipped (399 s). A first full run was 51/1 (the `t10` order assertion
+      included the new cleaning card title), fixed in the spec as above.
 
 ## Stage 4 API notes (for the frontend and later stages)
 - Control item (GET `/api/state`, `/api/controls`): `state` (derived: faltante if `missing` >
