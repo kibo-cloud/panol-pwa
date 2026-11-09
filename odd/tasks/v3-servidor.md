@@ -727,20 +727,113 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   ordering uses `tools_edit`; especialidades catalog uses `techs_edit`.
 
 ## Stage 3 tasks (branch `v3/etapa-3-kit-orden`, stacked on stage 2)
-- [ ] E3.T1 Backend: especialidades catalog + tech field, kits (base + per especialidad) with
+- [x] E3.T1 Backend: especialidades catalog + tech field, kits (base + per especialidad) with
       items and quantities, deliver-kit endpoint, ordering for categories and tools (insert at
       position, full-list reorder with version), report/state/export changes, `.txt` v2
       compatibility (especialidad and order are not in v2: export ignores, import keeps
       defaults); unit + integration tests.
-- [ ] E3.T2 Frontend: especialidad on tech form/sheet and filters, Configuración ›
+      Commit `dca6440`. Route: delegated writer. Code: migration `009_especialidades_kits_orden.sql`,
+      `domain/{orden,kits}.js`, `application/{orden,kits}.js`, `adapters/pg/kits-repo.js`,
+      `adapters/http/kits-routes.js`; catalog (tech `especialidadId`, tool `position`, category and
+      tool order scopes), derive (custom order), report (especialidad filter/column, `tools`),
+      state, `.txt` repo. Test-first: `unit/orden.test.js` + `unit/kits.test.js` RED (missing
+      modules) then GREEN 12/12; `integration/kits-orden-api.test.js` (13) written before running,
+      first run found 2 wrong expectations in the test itself (seed rows are inserted after the
+      migration, so they get the "append" order; `.txt` stamp must be ISO), no code change.
+      Evidence: `npm test` 149/149; `npm run test:db` 145/145 (new 13: 9 default especialidades
+      and empty base kit, especialidad CRUD perms/409/428/archive rules, tech field + report filter
+      and column, reorder categories (403/428/409 stale with `current`/409 `order_changed`/422
+      duplicates, tool/category versions unchanged by a reorder), tools per category and "sin
+      categoría", insert at position, category change appends and bumps both scopes, report tool
+      order, kit PUT perms/If-Match/422/400, per-especialidad kit unique + delete, base kit not
+      deletable, deliver: one movement per tool, idempotent replay, adicional the second time,
+      stale If-Match 409, chosen unit, short stock 422 `kit_stock` with `problems` and no
+      movement/audit/assignment written, deliver to a caja; `.txt` export without especialidad/
+      order, export -> dry-run = 0 changes, imported new tool appended, other orders unchanged).
+- [x] E3.T2 Frontend: especialidad on tech form/sheet and filters, Configuración ›
       Especialidades, Kits screen (edit base kit and per-especialidad kits, reorder),
       "Entregar kit" from the tech/caja sheet with a preview of what will be delivered and stock
       problems, ordering UI (drag and drop desktop, arrows mobile, insert at position),
       order applied everywhere listed above; design guide.
-- [ ] E3.T3 E2E: especialidad filter and report column, edit base kit, deliver a kit in one
+      Commit `db1da67`. Route: delegated writer. Code: `web/src/state/{orden,kits}.js` (pure),
+      `ui/sortable.js` (pointer events on a handle, Alt+↑/↓, 44 px arrows; re-finds the list by
+      scope and id when an SSE render replaces it mid-drag: found by the E2E drag test),
+      `features/config/view.js` (tabs Herramientas / Kits / Especialidades; pending order with
+      "Guardar orden"/"Descartar" and a conflict notice on 409; "Insertar en posición" in the new
+      tool form), `features/kits/deliver.js` ("Entregar kit" preview + one confirm), especialidad
+      in tech form/sheet/list and filters in Técnicos, Historial, Alertas and Reportes, report
+      column + "Por herramienta" table, CSV/Excel/PDF "Por herramienta" sheet and Especialidad
+      column, derive/control detail in custom order. Pure modules written with their tests (no
+      separate RED run). Evidence: `npm test` 154/154 (new `web/test/orden-kits.test.js` 5);
+      `npm run build` ok, `web/dist/index.html` with 0 inline script/style/handlers.
+- [x] E3.T3 E2E: especialidad filter and report column, edit base kit, deliver a kit in one
       step (one movement per tool, stock refused when short), reorder categories and tools on
       desktop (drag) and mobile (arrows), order reflected in control/ficha/inventario/report/
-      Excel, insert at position, concurrent reorder 409; CI green; PR.
+      Excel, insert at position, concurrent reorder 409; CI green (pending, parent); PR (pending,
+      parent).
+      Commit `a88f4fb`. Route: delegated writer. New `t10-kits-orden` (4): especialidad via the
+      tech form, Técnicos filter, report column/filter (UI + API); base kit edited in the UI (add,
+      qty, arrow reorder, save) and delivered from the sheet (preview, 3 movements, all entrega
+      inicial; second preview says Adicional), short stock named in the preview, confirm refused
+      with a message and 0 movements, API 422 `No se entregó nada.`; drag and drop (CDP mouse
+      events) of categories and tools at 1280 plus Alt+↑, order in control checklist, ficha,
+      inventario, report table and the Excel sheet "Por herramienta", insert at position 2; arrows
+      44 px at 390 without drag handle, two sessions reorder categories -> second gets "Otra
+      persona cambió el orden" and the first order is kept; all routes + config tabs + the kit
+      sheet at 390 and 1280 without overflow or console/CSP errors. Existing specs unchanged.
+      Evidence: see Stage 3 verification below.
+
+## Stage 3 verification (local, sequential)
+- `npm test` 154/154; `npm run test:db` 145/145; `npm run build` ok (0 inline script/style/
+  handlers in `web/dist/index.html`); `PANOL_E2E_BUILD=1 npm run test:e2e` 47 passed, 0 failed,
+  0 skipped (384 s). A first full run had 46/1: `t3-merge` "negative pool" read the state right
+  after clicking "Crear herramienta" without waiting for the sheet to close (race; it passed
+  alone). Fixed in the spec by waiting for the sheet to close (`1b31808`).
+
+## Stage 3 API notes (for the frontend and later stages)
+- `GET /api/state` adds `especialidades` (by id, incl. archived: name, order, archivedAt,
+  version), `kits` (by id: name, especialidadId (null = base kit), version, items [{toolId,
+  qty}] in order) and `orderVersions` ({ categories, 'tools:<categoryId>', 'tools:' }: version
+  of each order scope, 1 when never reordered). `techs[id].especialidadId`, `categories[id].order`
+  and `tools[id].order` (order inside its category) are new fields.
+- Especialidades (`techs_edit`): `GET /api/especialidades`, `POST` {name, order?} -> 201
+  {especialidad}, `PATCH /:id` {name?, order?} + If-Match, `POST /:id/archive` + If-Match (409
+  `especialidad_in_use` with active techs, `especialidad_has_kit`). Techs accept `especialidadId`
+  (null clears; archived refused 422 `invalid_especialidad`).
+- Kits: `GET /api/kits`; `POST /api/kits` {especialidadId, name?} (`kits_edit`, 409 if that
+  especialidad already has one); `PUT /api/kits/:id` {name?, items?: [{toolId, qty 1..10000}]}
+  + If-Match (full list, its order is the kit order); `DELETE /api/kits/:id` + If-Match (base kit
+  409 `kit_base`). `POST /api/kits/:id/deliver` (`movements_do`, Idempotency-Key, optional
+  If-Match = kit version -> 409 when stale) {holder: {techId}|{cajaId}, unitIds?: {toolId:
+  [unitId]}, reason?} -> 201 {kit: {id, version}, movements[], assignments[]}; one movement per
+  tool (per unit for serialized tools; units auto-picked by code when not given), entrega inicial
+  or adicional; 422 `kit_stock` {message "No se entregó nada. …", problems: [{toolId, toolName,
+  message}]} and nothing written. Audit `kit_deliver` + one `movement` per movement.
+- Order (`tools_edit`): `PUT /api/categories/order` {ids} and `PUT /api/tools/order`
+  {categoryId|null, ids} + If-Match (scope version) -> 200 {scope, ids, version} + ETag; 428
+  without If-Match; 409 `conflict` (stale) or `order_changed` (list differs from the current
+  set), both with `current: {scope, ids, version}`; 422 `invalid_order` for repeated ids.
+  `POST /api/tools` accepts `position` (1-based within its category; default end). A category or
+  tool created without position, a `.txt` import or a category change appends at the end and
+  bumps the scope version; changing only `sort_order` does not bump the row version.
+- `GET /api/reports?especialidad=<id>|none`: rows add `especialidadId`/`especialidad`; new
+  `tools` ([{id, name, categoryId, bueno, cambio, faltante, pendiente, total}] in custom order).
+- Permission `kits_edit` (admin by default; web PERMS parity updated).
+- `.txt` v2 export leaves out `especialidadId` and `order`; kits/especialidades are not exported.
+
+## Stage 3 implementation notes
+- Order scopes: `order_versions` row per scope, locked (`FOR UPDATE`) before the rows it orders
+  (createTool/createCategory/deleteCategory/updateTool category change lock the scope first).
+  Triggers (migration 009): `categories_order`/`tools_order` fill `sort_order` at the end when it
+  is NULL and on a category change; `touch_row_unless_order` keeps `version`/`updated_at` when only
+  `sort_order` changed. Backfill = alphabetical order at migration time.
+- Deliver kit locks: kit `FOR SHARE`, holder (tech or caja) `FOR SHARE`, then tools by id
+  `FOR UPDATE`; one inventory context, plans chained in memory (`planKitDelivery`), all applied or
+  none. `kit_items` cascade on tool delete (only demo clear deletes tools).
+- Especialidades/Kits live in Configuración de herramientas (tabs); the admin Configuración tab
+  is unchanged. Per-tech custom order: not implemented (stage 3 decision).
+- Follow-up: migration 009 backfill is exercised only on an empty schema in tests (seed rows
+  come after it); a dataset-with-rows migration test like `plantillas-migration` is not written.
 
 ## Next step
 - E3.T1–E3.T3 (one delegated writer), then independent review, CI and the stage 3 PR.
