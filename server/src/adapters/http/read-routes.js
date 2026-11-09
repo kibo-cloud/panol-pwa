@@ -19,6 +19,7 @@ export function registerReadRoutes(app) {
         shift: S.id,
         plantilla: S.id,
         tech: S.id,
+        especialidad: S.id,
       }),
     },
   }, async (req) => read.getReport(db, req.query));

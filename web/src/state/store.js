@@ -3,7 +3,7 @@
 import { api, setCsrf } from '../api/index.js';
 import { deriveState } from './derive.js';
 
-const COLS = ['techs', 'shiftChanges', 'categories', 'tools', 'units', 'assignments', 'controls', 'movements', 'alertRes', 'users', 'plantillas', 'plantillaHistory', 'lineas', 'cajas'];
+const COLS = ['techs', 'shiftChanges', 'categories', 'tools', 'units', 'assignments', 'controls', 'movements', 'alertRes', 'users', 'plantillas', 'plantillaHistory', 'lineas', 'cajas', 'especialidades', 'kits', 'orderVersions'];
 // Listas (no objetos por id): plantillas activas con forma de turno 2.1, rotaciones, cambios de
 // supervisor y la lista de turnos configurable.
 const LISTS = ['shifts', 'plantillaRotations', 'plantillaSupervisors', 'shiftLabels'];
@@ -61,3 +61,6 @@ export const holderName = (o) => (o && o.cajaId ? cajaName(o.cajaId) : (S.techs[
 export const canRotate = (p) => !!p && (can('plantilla_rotate') || (myRole() === 'supervisor' && p.supervisorUserId === ME.id));
 export const toolName = (id) => (S.tools[id] || {}).name || 'Herramienta eliminada';
 export const catName = (id) => (S.categories[id] || {}).name || 'Sin categoría';
+export const espName = (id) => (id ? (S.especialidades[id] || {}).name || 'Especialidad eliminada' : 'Sin especialidad');
+// Versión del orden de un alcance ('categories', 'tools:<id>'), para el If-Match del reordenar.
+export const orderVersion = (scope) => (S.orderVersions || {})[scope] || 1;

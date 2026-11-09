@@ -6,6 +6,7 @@ import { effectiveControls, controlHistory } from './controls.js';
 import { pendingReturns } from './alerts.js';
 import { poolsFromTransfers, emptyPool } from './pools.js';
 import { DEFAULT_SHIFTS } from './constants.js';
+import { orderTools } from './orden.js';
 
 export const toList = (o) => Object.entries(o || {}).map(([id, x]) => ({ id, ...x }));
 const byName = (a, b) => (a.name || '').localeCompare(b.name || '', 'es');
@@ -31,7 +32,10 @@ export function deriveState(S, { now = new Date() } = {}) {
   const plantillaHist = S.plantillaHistory || {};
   const techs = toList(S.techs).sort(byName);
   const activeTechs = techs.filter((t) => t.active !== false);
-  const tools = toList(S.tools).sort(byName);
+  // Orden personalizado (etapa 3): categoría y después la herramienta.
+  const tools = orderTools(toList(S.tools), toList(S.categories));
+  const rank = Object.fromEntries(tools.map((t, i) => [t.id, i]));
+  const byTool = (a, b) => (rank[a.toolId] ?? 1e9) - (rank[b.toolId] ?? 1e9) || toolNameOf(a.toolId).localeCompare(toolNameOf(b.toolId), 'es');
   const units = toList(S.units).sort((a, b) => (a.code || '').localeCompare(b.code || '', 'es', { numeric: true }));
   const unitsByTool = groupBy(units, 'toolId');
   const asgs = toList(S.assignments);
@@ -41,8 +45,8 @@ export function deriveState(S, { now = new Date() } = {}) {
   const asgByTech = groupBy(activeAsg.filter((a) => a.techId), 'techId');
   const asgByCaja = groupBy(activeAsg.filter((a) => a.cajaId), 'cajaId');
   const cajas = toList(S.cajas).sort(byName);
-  for (const k in asgByCaja) asgByCaja[k].sort((a, b) => toolNameOf(a.toolId).localeCompare(toolNameOf(b.toolId), 'es'));
-  for (const k in asgByTech) asgByTech[k].sort((a, b) => toolNameOf(a.toolId).localeCompare(toolNameOf(b.toolId), 'es'));
+  for (const k in asgByCaja) asgByCaja[k].sort(byTool);
+  for (const k in asgByTech) asgByTech[k].sort(byTool);
 
   const ctls = toList(S.controls).map((c) => ({ ...c, pkey: c.pkey || pkeyOf(c.period), pnum: c.pnum || pnumOf(c.period) }));
   const { eff, effList, drafts, supersededBy } = effectiveControls(ctls);
@@ -95,6 +99,7 @@ export function deriveState(S, { now = new Date() } = {}) {
     ctlMonth: effList.filter((c) => c.period && c.period.y === cur.y && c.period.m === cur.m).length,
   };
   return {
+    especialidadById: Object.fromEntries(toList(S.especialidades).map((e) => [e.id, e])),
     cur, curKey, curNum, today: localDateISO(now), shifts, shiftById, plantillaById, plantillaHist, techs, activeTechs, cajas, tools, units, unitsByTool, asgs, activeAsg, asgByTech, asgByCaja,
     ctls, eff, effList, effByTech, drafts, supersededBy, stateOf, hist, transitions, movs, pools, pendingReturns: pend,
     techInfo, cajaInfo, shiftInfo, kpi,

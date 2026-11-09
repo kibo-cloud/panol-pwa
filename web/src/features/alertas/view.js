@@ -3,11 +3,11 @@
 import { esc } from '../../ui/dom.js';
 import { icon } from '../../ui/icons.js';
 import { VIEWS, UI, render } from '../../ui/registry.js';
-import { ACT } from '../../ui/actions.js';
+import { ACT, CH } from '../../ui/actions.js';
 import { openModal } from '../../ui/modal.js';
 import { toast } from '../../ui/feedback.js';
 import { kpi, pageHead, emptyBox, alertList, field } from '../../ui/components.js';
-import { gateUI } from '../tecnicos/view.js';
+import { gateUI, espSelect } from '../tecnicos/view.js';
 import { api } from '../../api/index.js';
 import { S, derive, who, refresh } from '../../state/store.js';
 import { mineFirst } from '../../state/plantillas.js';
@@ -21,18 +21,20 @@ import { fdt } from '../../state/period.js';
 
 VIEWS.alertas = () => {
   const d = derive(); const tab = UI.alertTab; const pf = alertFilter(d);
-  const open = pf === 'all' ? d.alertsOpen : (d.alertsByPlantilla[pf] || []);
+  const espOk = (a) => !UI.alertEsp || UI.alertEsp === 'all' || (!a.cajaId && (UI.alertEsp === 'none' ? !(S.techs[a.techId] || {}).especialidadId : (S.techs[a.techId] || {}).especialidadId === UI.alertEsp));
+  const open = (pf === 'all' ? d.alertsOpen : (d.alertsByPlantilla[pf] || [])).filter(espOk);
   const chips = [['all', 'Todas'], ...mineFirst(d.shifts, d.myPlantilla.plantillaIds).map((p) => [p.id, p.name + (d.myPlantilla.plantillaIds.includes(p.id) ? ' (mi plantilla)' : '')]), ...(d.cajas.length ? [['cajas', 'Cajas compartidas']] : [])];
   const res = Object.entries(S.alertRes).map(([k, r]) => ({ key: k, ...r })).sort((a, b) => (b.at || '').localeCompare(a.at || ''));
   const byType = (t) => open.filter((a) => a.type === t).length;
   return pageHead('Alertas', 'Situaciones que requieren atención') +
   `<section class="kpis" data-css="margin-bottom:14px">${kpi(byType('faltante'), 'Faltantes', '', 'bad')}${kpi(byType('cambio') + byType('consecutiva'), 'Para cambio', '', 'warn', byType('consecutiva') ? `${byType('consecutiva')} en controles seguidos` : '')}${kpi(byType('devolucion'), 'Devoluciones pendientes', '', 'bad')}${kpi(byType('pendiente'), 'Controles pendientes', '', 'pend')}</section>
   <div class="fchips" data-css="margin-bottom:12px" aria-label="Filtrar por plantilla">${chips.map(([k, l]) => `<button class="fchip ${pf === k ? 'on' : ''}" data-act="alertPl" data-v="${esc(k)}" aria-pressed="${pf === k}">${esc(l)}${k === 'all' ? '' : ` (${(k === 'all' ? d.alertsOpen : d.alertsByPlantilla[k] || []).length})`}</button>`).join('')}</div>
-  <div class="seg" role="tablist" data-css="margin-bottom:12px;max-width:420px"><button role="tab" aria-selected="${tab === 'open'}" class="${tab === 'open' ? 'on' : ''}" data-act="alertTab" data-v="open">Abiertas (${open.length})</button><button role="tab" aria-selected="${tab === 'res'}" class="${tab === 'res' ? 'on' : ''}" data-act="alertTab" data-v="res">Resueltas (${res.length})</button></div>
+  <div class="toolbar">${espSelect('alert-esp', 'alertEsp', UI.alertEsp)}</div><div class="seg" role="tablist" data-css="margin-bottom:12px;max-width:420px"><button role="tab" aria-selected="${tab === 'open'}" class="${tab === 'open' ? 'on' : ''}" data-act="alertTab" data-v="open">Abiertas (${open.length})</button><button role="tab" aria-selected="${tab === 'res'}" class="${tab === 'res' ? 'on' : ''}" data-act="alertTab" data-v="res">Resueltas (${res.length})</button></div>
   ${tab === 'open' ? alertList(open, true) : res.length ? `<div class="list">${res.map((r) => `<div class="al"><span class="al-ic ok">${icon('ok', 16)}</span><div class="grow"><span class="t">${esc(r.title || 'Alerta')}</span><div class="s">${esc(r.text || '')}</div><div class="s" data-css="margin-top:4px">Resuelta por ${esc(who(r.by))} · ${fdt(r.at)}${r.note ? '. ' + esc(r.note) : ''}</div></div></div>`).join('')}</div>` : `<div class="list">${emptyBox('Todavía no se resolvieron alertas', '')}</div>`}`;
 };
 
 ACT.alertTab = (ds) => { UI.alertTab = ds.v; render(); };
+CH.alertEsp = (v) => { UI.alertEsp = v; render(); };
 ACT.alertPl = (ds) => { UI.alertPl = ds.v; render(); };
 ACT.alertPlMine = () => { UI.alertPl = null; };
 ACT.alertPlAll = () => { UI.alertPl = 'all'; };

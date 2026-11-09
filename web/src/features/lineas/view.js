@@ -10,6 +10,7 @@ import { toast, act, UErr } from '../../ui/feedback.js';
 import { kpi, pageHead, emptyBox, ctlBadge, stChip, mvList, field, optList, techOptions, weekCells, monthNav } from '../../ui/components.js';
 import { api, newIdempotencyKey } from '../../api/index.js';
 import { S, derive, can, who, refresh, toolName, catName } from '../../state/store.js';
+import { canDeliverKit } from '../kits/deliver.js';
 import { LINEA_KIND } from '../../state/constants.js';
 import { ST } from '../../state/constants.js';
 import { fdate, fdt, plabel, prevMonth, nextMonth } from '../../state/period.js';
@@ -87,7 +88,7 @@ VIEWS.caja = (id) => {
   const d = derive(); const k = S.cajas[id]; if (!k) return pageHead('Caja no encontrada', '', { back: '#lineas' });
   const hk = 'caja:' + id; const i = d.cajaInfo[id]; const list = d.asgByTech[hk] || []; const live = !k.archivedAt; const tab = UI.cajaTab;
   if (!UI.techMonth) UI.techMonth = { y: d.cur.y, m: d.cur.m };
-  const acts = [can('controls_do') && list.length && live ? `<a class="btn pri" href="#control-${esc(hk)}">${icon('check', 18)}Controlar</a>` : '', can('movements_do') && live ? `<button class="btn" data-act="asgNew" data-h="${esc(hk)}">${icon('plus', 16)}Asignar herramienta</button>` : '', can('lineas_edit') && live ? `<button class="btn" data-act="cajaEdit" data-k="${esc(id)}">Editar</button>` : ''].join('');
+  const acts = [can('controls_do') && list.length && live ? `<a class="btn pri" href="#control-${esc(hk)}">${icon('check', 18)}Controlar</a>` : '', can('movements_do') && live ? `<button class="btn" data-act="asgNew" data-h="${esc(hk)}">${icon('plus', 16)}Asignar herramienta</button>${canDeliverKit(hk) ? `<button class="btn" data-act="kitDeliver" data-h="${esc(hk)}">${icon('box', 16)}Entregar kit</button>` : ''}` : '', can('lineas_edit') && live ? `<button class="btn" data-act="cajaEdit" data-k="${esc(id)}">Editar</button>` : ''].join('');
   let body = '';
   if (tab === 'tools') body = list.length ? `<div class="list">${list.map((a) => { const s = d.stateOf[a.id]; const st = s ? s.state : 'pendiente'; const u = a.unitId && S.units[a.unitId]; return `<a class="row" href="#herramienta-${esc(a.toolId)}"><span class="light ${ST[st].cls}"></span><div class="grow"><div class="t ell">${esc(toolName(a.toolId))}${a.qty > 1 ? ` ×${a.qty}` : ''}</div><div class="s ell">${[catName((S.tools[a.toolId] || {}).categoryId), u ? 'Código ' + u.code : '', 'desde ' + fdate(a.since)].filter(Boolean).map(esc).join(', ')}</div>${s && s.note ? `<div class="s">${esc(s.note)}</div>` : ''}</div>${stChip(st)}</a>`; }).join('')}</div>` : `<div class="list">${emptyBox('Sin herramientas asignadas', 'Asigná herramientas a la caja para poder controlarla.', can('movements_do') && live ? `<button class="btn pri" data-act="asgNew" data-h="${esc(hk)}">Asignar herramienta</button>` : '')}</div>`;
   else if (tab === 'ctl') {

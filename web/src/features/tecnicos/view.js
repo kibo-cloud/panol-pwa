@@ -4,14 +4,15 @@
 import { esc } from '../../ui/dom.js';
 import { icon } from '../../ui/icons.js';
 import { VIEWS, UI, render } from '../../ui/registry.js';
-import { ACT, IN } from '../../ui/actions.js';
+import { ACT, IN, CH } from '../../ui/actions.js';
 import { openModal, modalRerender, MOD, closeModal, confirmBox } from '../../ui/modal.js';
 import { toast, act, UErr, tooLong } from '../../ui/feedback.js';
 import { kpi, pageHead, emptyBox, avatar, demoChip, ctlBadge, stChip, mvList, field, optList, weekCells, monthNav, plIcon, turnoText } from '../../ui/components.js';
 import { openTechMove, techHistory, historyLine } from '../plantillas/move.js';
+import { canDeliverKit } from '../kits/deliver.js';
 import { coverageOf, mineFirst } from '../../state/plantillas.js';
 import { api } from '../../api/index.js';
-import { S, derive, can, who, refresh, shiftName, toolName, catName } from '../../state/store.js';
+import { S, derive, can, who, refresh, shiftName, toolName, catName, espName } from '../../state/store.js';
 import { ST, LIM } from '../../state/constants.js';
 import { fdate, fdt, plabel, parsePkey, prevMonth, nextMonth, todayISO } from '../../state/period.js';
 
@@ -21,11 +22,12 @@ VIEWS.tecnicos = () => {
   const d = derive(); const q = UI.techQ.trim().toLowerCase();
   let list = d.techs.filter((t) => (UI.techInactive ? t.active === false : t.active !== false));
   if (UI.techShift !== 'all') list = list.filter((t) => t.shiftId === UI.techShift);
+  if (UI.techEsp && UI.techEsp !== 'all') list = list.filter((t) => (UI.techEsp === 'none' ? !t.especialidadId : t.especialidadId === UI.techEsp));
   if (q) list = list.filter((t) => (t.name || '').toLowerCase().includes(q) || String(t.legajo || '').toLowerCase().includes(q));
   return pageHead('Técnicos', `${d.activeTechs.length} activos, ${d.techs.length - d.activeTechs.length} inactivos`, { acts: can('techs_edit') ? `<button class="btn pri" data-act="techNew">${icon('plus', 16)}Nuevo técnico</button>` : '' }) +
-  `<div class="toolbar"><div class="search">${icon('search', 18)}<input id="techq" type="search" placeholder="Buscar por nombre o legajo" value="${esc(UI.techQ)}" data-in="techQ" aria-label="Buscar técnico"></div></div>
+  `<div class="toolbar"><div class="search">${icon('search', 18)}<input id="techq" type="search" placeholder="Buscar por nombre o legajo" value="${esc(UI.techQ)}" data-in="techQ" aria-label="Buscar técnico"></div>${espSelect('tech-esp', 'techEsp', UI.techEsp)}</div>
   <div class="fchips" data-css="margin-bottom:12px"><button class="fchip ${UI.techShift === 'all' ? 'on' : ''}" data-act="techShift" data-v="all">Todos</button>${mineFirst(d.shifts, d.myPlantilla.plantillaIds).map((s) => `<button class="fchip ${UI.techShift === s.id ? 'on' : ''}" data-act="techShift" data-v="${esc(s.id)}">${esc(s.name)}</button>`).join('')}<button class="fchip ${UI.techInactive ? 'on' : ''}" data-act="techInactive">Inactivos</button></div>
-  ${list.length ? `<div class="list">${list.map((t) => { const i = d.techInfo[t.id]; return `<a class="row" href="#tecnico-${esc(t.id)}">${avatar(t.name, t.active === false ? null : i.light)}<div class="grow"><div class="t ell">${esc(t.name)} ${demoChip(t)}</div><div class="s ell">Leg. ${esc(t.legajo)} · ${esc(shiftName(t.shiftId))} · ${i.total} herr.</div></div><div class="r">${t.active === false ? '<span class="chip">Inactivo</span>' : ctlBadge(i.curStatus)}</div></a>`; }).join('')}</div>` : `<div class="list">${emptyBox(q ? 'Ningún técnico coincide con la búsqueda' : 'No hay técnicos para mostrar', q ? 'Probá con otro nombre o legajo.' : '', !q && can('techs_edit') && !UI.techInactive ? '<button class="btn pri" data-act="techNew">Nuevo técnico</button>' : '')}</div>`}`;
+  ${list.length ? `<div class="list">${list.map((t) => { const i = d.techInfo[t.id]; return `<a class="row" href="#tecnico-${esc(t.id)}">${avatar(t.name, t.active === false ? null : i.light)}<div class="grow"><div class="t ell">${esc(t.name)} ${demoChip(t)}</div><div class="s ell">Leg. ${esc(t.legajo)} · ${esc(shiftName(t.shiftId))}${t.especialidadId ? ' · ' + esc(espName(t.especialidadId)) : ''} · ${i.total} herr.</div></div><div class="r">${t.active === false ? '<span class="chip">Inactivo</span>' : ctlBadge(i.curStatus)}</div></a>`; }).join('')}</div>` : `<div class="list">${emptyBox(q ? 'Ningún técnico coincide con la búsqueda' : 'No hay técnicos para mostrar', q ? 'Probá con otro nombre o legajo.' : '', !q && can('techs_edit') && !UI.techInactive ? '<button class="btn pri" data-act="techNew">Nuevo técnico</button>' : '')}</div>`}`;
 };
 
 // Plantilla actual en la ficha (con la cobertura temporal si la hay) y Cambiar de plantilla.
@@ -40,7 +42,7 @@ VIEWS.tecnico = (id) => {
   const d = derive(); const t = S.techs[id]; if (!t) return pageHead('Técnico no encontrado', '', { back: '#tecnicos' });
   const i = d.techInfo[id]; const list = d.asgByTech[id] || [];
   if (!UI.techMonth) UI.techMonth = { y: d.cur.y, m: d.cur.m };
-  const acts = [can('controls_do') && list.length && t.active !== false ? `<a class="btn pri" href="#control-${esc(id)}">${icon('check', 18)}Controlar</a>` : '', can('movements_do') && t.active !== false ? `<button class="btn" data-act="asgNew" data-h="${esc(id)}">${icon('plus', 16)}Asignar herramienta</button><button class="btn" data-act="goEntrega" data-t="${esc(id)}">Entregar herramienta</button>` : '', can('techs_edit') ? `<button class="btn" data-act="techEdit" data-t="${esc(id)}">Editar</button>` : ''].join('');
+  const acts = [can('controls_do') && list.length && t.active !== false ? `<a class="btn pri" href="#control-${esc(id)}">${icon('check', 18)}Controlar</a>` : '', can('movements_do') && t.active !== false ? `<button class="btn" data-act="asgNew" data-h="${esc(id)}">${icon('plus', 16)}Asignar herramienta</button><button class="btn" data-act="goEntrega" data-t="${esc(id)}">Entregar herramienta</button>${canDeliverKit(id) ? `<button class="btn" data-act="kitDeliver" data-h="${esc(id)}">${icon('box', 16)}Entregar kit</button>` : ''}` : '', can('techs_edit') ? `<button class="btn" data-act="techEdit" data-t="${esc(id)}">Editar</button>` : ''].join('');
   const tab = UI.techTab;
   let body = '';
   if (tab === 'tools') {
@@ -59,12 +61,15 @@ VIEWS.tecnico = (id) => {
     const hs = techHistory(id).map(historyLine);
     body = hs.length ? `<div class="list">${hs.map((h) => `<div class="row"><span class="light ${h.current ? 'ok' : h.temporary ? 'warn' : 'pend'}"></span><div class="grow"><div class="t">${esc(h.title)}${h.current ? ' <span class="chip ok">Actual</span>' : ''}${h.temporary ? ' <span class="chip warn">Cobertura</span>' : ''}</div><div class="s">${esc(h.sub)}</div>${h.meta ? `<div class="s">${esc(h.meta)}</div>` : ''}</div></div>`).join('')}</div>` : `<div class="list">${emptyBox('Sin plantilla', 'Todavía no está en ninguna plantilla.')}</div>`;
   }
-  return `<a class="backl" href="#tecnicos">${icon('back', 16)}Técnicos</a><div class="card" data-css="margin-bottom:12px"><div class="prof">${avatar(t.name, t.active === false ? null : i.light, true)}<div class="grow"><h1>${esc(t.name)} ${demoChip(t)}</h1><div class="s">Leg. ${esc(t.legajo)} · Alta ${fdate(t.alta || t.createdAt)}</div></div><span class="chip ${t.active === false ? 'pend' : 'ok'}">${t.active === false ? 'Inactivo' : 'Activo'}</span></div>${plantillaNow({ id, ...t })}${acts ? `<div class="toolbar" data-css="margin:0">${acts}</div>` : ''}</div>` +
+  return `<a class="backl" href="#tecnicos">${icon('back', 16)}Técnicos</a><div class="card" data-css="margin-bottom:12px"><div class="prof">${avatar(t.name, t.active === false ? null : i.light, true)}<div class="grow"><h1>${esc(t.name)} ${demoChip(t)}</h1><div class="s">Leg. ${esc(t.legajo)} · ${esc(espName(t.especialidadId))} · Alta ${fdate(t.alta || t.createdAt)}</div></div><span class="chip ${t.active === false ? 'pend' : 'ok'}">${t.active === false ? 'Inactivo' : 'Activo'}</span></div>${plantillaNow({ id, ...t })}${acts ? `<div class="toolbar" data-css="margin:0">${acts}</div>` : ''}</div>` +
   `<section class="kpis">${kpi(i.total, 'Herramientas asignadas')}${kpi(i.bueno, 'En buen estado', '', 'ok')}${kpi(i.cambio, 'Para cambio', '', 'warn')}${kpi(i.faltante, 'Faltantes', '', 'bad')}</section>
   <div class="tabs" role="tablist">${[['tools', 'Herramientas'], ['ctl', 'Controles'], ['nov', 'Novedades'], ['mov', 'Entregas y reposiciones'], ['shift', 'Plantillas']].map(([k, l]) => `<button role="tab" aria-selected="${tab === k}" class="${tab === k ? 'on' : ''}" data-act="techTab" data-v="${esc(k)}">${l}</button>`).join('')}</div>${body}`;
 };
 
 ACT.techShift = (ds) => { UI.techShift = ds.v; render(); };
+CH.techEsp = (v) => { UI.techEsp = v; render(); };
+// Filtro por especialidad (etapa 3): todas, sin especialidad o una en particular.
+export function espSelect(id, ch, sel) { const d = derive(); return `<select id="${id}" class="espsel" data-ch="${ch}" aria-label="Filtrar por especialidad">${optList([['all', 'Todas las especialidades'], ['none', 'Sin especialidad'], ...d.especialidades.filter((e) => !e.archivedAt || d.techs.some((t) => t.especialidadId === e.id)).map((e) => [e.id, e.name])], sel || 'all')}</select>`; }
 ACT.techInactive = () => { UI.techInactive = !UI.techInactive; render(); };
 IN.techQ = (v) => { UI.techQ = v; render(); };
 ACT.techTab = (ds) => { UI.techTab = ds.v; render(); };
@@ -72,7 +77,7 @@ ACT.techMonth = (ds) => { UI.techMonth = +ds.d < 0 ? prevMonth(UI.techMonth.y, U
 
 function techForm(t) {
   const d = derive();
-  return (st) => `${field('Nombre y apellido', `<input id="f-name" type="text" maxlength="120" data-mi="name" value="${esc(st.name)}" autocomplete="off">`, 'f-name')}${field('Legajo o identificador', `<input id="f-leg" type="text" maxlength="50" data-mi="legajo" value="${esc(st.legajo)}" autocomplete="off">`, 'f-leg')}${t ? '' : field('Plantilla', `<select id="f-shift" data-mi="shiftId">${optList(d.shifts.map((s) => [s.id, s.name]), st.shiftId)}</select>`, 'f-shift')}${field('Fecha de alta', `<input id="f-alta" type="date" data-mi="alta" value="${esc(st.alta)}">`, 'f-alta')}${t ? '<p class="muted sm">Para cambiar la plantilla usá Cambiar de plantilla, así queda registrado en el historial.</p>' : ''}`;
+  return (st) => `${field('Nombre y apellido', `<input id="f-name" type="text" maxlength="120" data-mi="name" value="${esc(st.name)}" autocomplete="off">`, 'f-name')}${field('Legajo o identificador', `<input id="f-leg" type="text" maxlength="50" data-mi="legajo" value="${esc(st.legajo)}" autocomplete="off">`, 'f-leg')}${t ? '' : field('Plantilla', `<select id="f-shift" data-mi="shiftId">${optList(d.shifts.map((s) => [s.id, s.name]), st.shiftId)}</select>`, 'f-shift')}${field('Especialidad', `<select id="f-esp" data-mi="especialidadId">${optList(d.especialidades.filter((e) => !e.archivedAt || e.id === st.especialidadId).map((e) => [e.id, e.name]), st.especialidadId, 'Sin especialidad')}</select>`, 'f-esp')}${field('Fecha de alta', `<input id="f-alta" type="date" data-mi="alta" value="${esc(st.alta)}">`, 'f-alta')}${t ? '<p class="muted sm">Para cambiar la plantilla usá Cambiar de plantilla, así queda registrado en el historial.</p>' : ''}`;
 }
 function validTech(st, exceptId) {
   const name = (st.name || '').trim(), leg = (st.legajo || '').trim();
@@ -81,13 +86,13 @@ function validTech(st, exceptId) {
   if (dup) throw new UErr(`El legajo ${leg} ya pertenece a ${dup[1].name}.`);
   return { name, leg };
 }
-const techSt = (t) => ({ name: t.name, legajo: t.legajo, alta: t.alta || (t.createdAt || '').slice(0, 10) });
+const techSt = (t) => ({ name: t.name, legajo: t.legajo, especialidadId: t.especialidadId || '', alta: t.alta || (t.createdAt || '').slice(0, 10) });
 
 ACT.techNew = () => {
   if (!gateUI('techs_edit')) return;
   openModal({ title: 'Nuevo técnico', render: techForm(null), actions: [{ label: 'Cancelar', close: true }, { label: 'Crear técnico', kind: 'pri', run: async (st) => {
     const { name, leg } = validTech(st);
-    const r = await api.createTech({ name, legajo: leg, plantillaId: st.shiftId || derive().shifts[0].id, alta: st.alta || todayISO() });
+    const r = await api.createTech({ name, legajo: leg, plantillaId: st.shiftId || derive().shifts[0].id, especialidadId: st.especialidadId || null, alta: st.alta || todayISO() });
     await refresh(); toast('Técnico creado'); location.hash = '#tecnico-' + r.tech.id;
   } }] });
   if (MOD) { MOD.st.shiftId = UI.techShift !== 'all' ? UI.techShift : (derive().shifts[0] || {}).id; MOD.st.alta = todayISO(); modalRerender(); }
@@ -98,7 +103,7 @@ ACT.techEdit = (ds) => {
     render: (st) => techForm(t)(st) + `<div class="field"><label>Estado</label>${t.active === false ? `<button class="btn" data-act="techActive" data-t="${esc(ds.t)}" data-v="1">Reactivar técnico</button>` : `<button class="btn danger" data-act="techActive" data-t="${esc(ds.t)}" data-v="0">Desactivar técnico</button>`}</div>`,
     actions: [{ label: 'Cancelar', close: true }, { label: 'Guardar cambios', kind: 'pri', run: async (st, m) => {
       const { name, leg } = validTech(st, ds.t);
-      await api.updateTech(ds.t, { name, legajo: leg, alta: st.alta || null }, m.rec.version); await refresh(); toast('Cambios guardados');
+      await api.updateTech(ds.t, { name, legajo: leg, especialidadId: st.especialidadId || null, alta: st.alta || null }, m.rec.version); await refresh(); toast('Cambios guardados');
     } }] });
   MOD.st = techSt(t); modalRerender();
 };

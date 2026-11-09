@@ -4,6 +4,7 @@ import { listRows, toApi } from './catalog-repo.js';
 import { loadControls } from './inventory-repo.js';
 import { loadHistory, groupByTech, currentMembership, loadRotations, loadSupervisorHistory, loadShiftLabels } from './plantilla-repo.js';
 import { shiftChangesFromHistory } from '../../domain/plantillas.js';
+import { loadKits, loadOrderVersions } from './kits-repo.js';
 
 const iso = (d) => (d instanceof Date ? d.toISOString() : d ?? null);
 const byId = (list) => Object.fromEntries(list.map(({ id, ...x }) => [id, x]));
@@ -52,8 +53,10 @@ export async function readState(q) {
   const { shifts, techs, shiftChanges } = P;
   const lineas = await listRows(q, 'lineas', 'ORDER BY sort_order, id');
   const cajas = await listRows(q, 'cajas', 'ORDER BY id');
-  const categories = await listRows(q, 'categories', 'ORDER BY id');
-  const tools = await listRows(q, 'tools', 'ORDER BY id');
+  const categories = await listRows(q, 'categories', 'ORDER BY sort_order, name, id');
+  const tools = await listRows(q, 'tools', 'ORDER BY category_id, sort_order, name, id');
+  const especialidades = await listRows(q, 'especialidades', 'ORDER BY sort_order, name, id');
+  const kits = await loadKits(q);
   const units = await listRows(q, 'units', 'ORDER BY id');
   const assignments = await listRows(q, 'assignments', 'ORDER BY id');
   const controls = await loadControls(q);
@@ -72,6 +75,9 @@ export async function readState(q) {
     lineas: byId(lineas),
     cajas: byId(cajas),
     categories: byId(categories),
+    especialidades: byId(especialidades),
+    kits: byId(kits),
+    orderVersions: await loadOrderVersions(q),
     tools: byId(tools),
     units: byId(units),
     assignments: byId(assignments),
