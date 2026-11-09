@@ -884,8 +884,48 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   lock order stays scope → row; `es-x-icu` instead of `und-x-icu`).
 - PR #3 `v3/etapa-3-kit-orden` → `v3/etapa-2-plantillas` (stacked).
 
+## Stage 4 decisions (parent, within PEDIDO §2.6 and the user's answers)
+- Count by quantity: for an assignment with qty > 1 the control records `qty_good`,
+  `qty_change` and `qty_missing` with `good + change + missing = expected` (the UI asks for
+  "en buen estado" and "requieren recambio"; missing is the rest). With qty = 1 the three
+  buttons Bueno / Cambio / Faltante stay. Any missing quantity requires a note (motivo).
+- "Requiere recambio" never counts as missing anywhere (reports, alerts, stock): no 0.5 tricks.
+- Item state derived for alerts and history: faltante if missing > 0, else cambio if
+  change > 0, else bueno. Consecutive alerts compare per assignment with the same rule.
+- Migration of existing control items: bueno → good = qty; cambio → change = qty;
+  faltante → missing = qty (notes kept). Finalized controls are immutable, so the migration
+  writes the quantity columns under the same controlled path used by other data migrations
+  (no trigger bypass outside the migration).
+- Cleaning, per control (user-confirmed): one item "Limpieza de herramientas y caja" with
+  Limpio / Requiere limpieza; "Requiere limpieza" requires a note. Required to finalize a new
+  control (it is part of the checklist); old/imported controls have it NULL ("sin dato").
+  Shown in the ficha, control detail, reports (% limpio) and the alert "limpieza" when two
+  consecutive effective controls of the same holder require cleaning. Printing in stage 10.
+- Optional line on missing or change items (user: optional, never blocks): a línea/sector
+  select on items with missing or change; reports group losses/breakages by línea.
+- Stage 7 will create purchase requests from missing/change quantities; this stage only
+  stores the counts and keeps a stable key per assignment for that.
+- `.txt` v2: export maps quantities back to a v2 item state with the derived rule (and
+  `qty`); cleaning and line are not in v2. Import of v2 items uses the migration mapping.
+
+## Stage 4 tasks (branch `v3/etapa-4-conteo`, stacked on stage 3)
+- [ ] E4.T1 Backend: migration (item quantity columns + check, item `linea_id`, control
+      cleaning status + note, data migration of existing items), domain (finalize validation
+      with quantities, cleaning and notes; derived item state; counts; alerts incl.
+      consecutive cleaning; reports by units and % limpio; losses by línea), API changes,
+      `.txt` mapping; unit + integration tests.
+- [ ] E4.T2 Frontend: checklist with quantity inputs (steppers ≥44px) for qty > 1 and the
+      three buttons for qty = 1, live "faltan N" with required motivo, optional línea on
+      missing/change, cleaning item with required note, finalize disabled with the exact
+      reason, control detail/ficha/history/report changes, offline draft compatible; design
+      guide.
+- [ ] E4.T3 E2E: quantity control with good/change/missing and required motivo, qty = 1
+      buttons, cleaning required to finalize and its note, consecutive cleaning alert,
+      change never counted as missing in report, optional línea and report by línea, old
+      controls still readable, offline draft with quantities; CI green; PR.
+
 ## Next step
-- Stage 4 (conteo por cantidad y limpieza) on `v3/etapa-4-conteo`, stacked on stage 3.
+- E4.T1–E4.T3 (one delegated writer), then independent review, CI and the stage 4 PR.
 - PRs #1, #2, #3 await user review (stacked: #1 → `v3-servidor`, #2 → stage 1, #3 → stage 2). Engram mirror of this document: pending (multiple active
   sessions). PR #1 awaits user review; after it is merged, rebase stage 2 onto `v3-servidor`.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
