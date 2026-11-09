@@ -102,6 +102,8 @@ export const tests = [
       await loginAs(page);
       await page.hash('#config');
       await page.act('toolNew'); await page.type('#f-tn', 'Negativa'); await page.modalBtn('Crear herramienta');
+      // The tool exists once the sheet closes (the request may still be running right after the click).
+      await page.waitFor("!document.querySelector('#modal-root:not([hidden]) .sheet')&&!document.body.classList.contains('busy')", 15000, 'tool created');
       const tool = idOf(await state(page), 'tools', 'Negativa');
       // The API never lets a pool go negative; the owner connection bypasses it on purpose.
       await srv.db.query("INSERT INTO movements (id, type, tool_id, qty) VALUES ('mneg', 'baja', $1, 2)", [tool]);
