@@ -1083,8 +1083,55 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   the draft sync no longer deletes drafts on any rejection (pre-existing policy changed).
 - PR #4 `v3/etapa-4-conteo` → `v3/etapa-3-kit-orden` (stacked).
 
+## Stage 5 decisions (parent, within PEDIDO §2.10)
+- One model for "Eliminar": logical archive by default for techs, cajas, tools (and their
+  units), categories, plantillas, líneas/sectores, especialidades, kits and users
+  (`archived_at`, `archived_by`, `archive_reason`, plus `version`). Archived records are hidden
+  from lists and selectors but stay in history, reports, audit and printing (names resolved
+  with an "(eliminado)" mark). Every existing hard DELETE route of stages 1–4 becomes archive.
+- Restore from Administración › Registros eliminados (filter by type, search, who/when/why),
+  restoring with its version; conflicts (e.g. an active name or legajo/code now taken) are
+  refused with a clear message.
+- Definitive deletion only when the record has no history (no movements, controls,
+  assignments, history ranges, audit references other than its own create/archive), with
+  double confirmation typing the exact name; the server re-checks "no history" in the same
+  transaction under a row lock. The audit entry keeps the name.
+- Archiving a tech or caja with tools assigned: the archive request must include a resolution
+  for every active assignment in the same step (devolución to a pool condition, or retiro);
+  the server applies those movements and the archive in ONE transaction, or refuses listing
+  what is pending. A plantilla can be archived only with no current members; a category only
+  when its active tools are archived or moved; a tool only with stock not assigned.
+- Anular movement: creates a counter-movement (`voids_movement_id` unique, reversed
+  transfers, same tools/units/holder) after checking the reversal is possible with current
+  stock and assignment state (refuse with the reason otherwise — e.g. a later movement depends
+  on it). The original is never deleted or edited; both show "Anulado"/"Anulación" in history.
+  A void cannot be voided; voiding an entrega closes/reopens assignments consistently.
+- Permissions: new `records_delete` (archive/restore/definitive) and `movements_void`, admin
+  only by default, configurable. Every action requires a motivo and goes to audit.
+- Users: archive = deactivate + hide; the last active admin cannot be archived; definitive
+  only for users with no audit/actions.
+- `.txt` v2: archived records are exported as active=false where v2 has the field and as
+  tombstones in `data.deleted` otherwise (so 2.1 merges do not resurrect them); import keeps
+  server archive state (a newer file record does not un-archive silently — it is reported).
+
+## Stage 5 tasks (branch `v3/etapa-5-eliminar`, stacked on stage 4)
+- [ ] E5.T1 Backend: migration (archive columns where missing, `voids_movement_id`, perms),
+      domain (history checks, archive preconditions, void planning with reversibility
+      checks), API (archive with resolutions, restore, definitive delete, list archived,
+      void movement), replace hard deletes, `.txt` mapping; unit + integration tests.
+- [ ] E5.T2 Frontend: "Eliminar" actions with motivo sheets (and the assignment resolution
+      step for techs/cajas), "Eliminar definitivamente" with typed-name confirmation,
+      Administración › Registros eliminados with restore, "Anular" on movements with motivo
+      and clear reasons when not possible, "(eliminado)" and "Anulado" marks in history,
+      reports and selectors; design guide.
+- [ ] E5.T3 E2E: archive and restore each type, archive a tech with tools resolving them in
+      the same step, definitive delete only without history (typed name), void an entrega and
+      a devolución (inventory reverted, original kept, void cannot be voided, refused when a
+      later movement depends), permissions (non-admin refused), `.txt` export tombstones; CI
+      green; PR.
+
 ## Next step
-- Stage 5 (eliminar y anular) on `v3/etapa-5-eliminar`, stacked on stage 4.
+- E5.T1–E5.T3 (one delegated writer), then independent review, CI and the stage 5 PR.
 - PRs #1–#4 await user review (stacked: #1 → `v3-servidor`, #2 → stage 1, #3 → stage 2). Engram mirror of this document: pending (multiple active
   sessions). PR #1 awaits user review; after it is merged, rebase stage 2 onto `v3-servidor`.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
