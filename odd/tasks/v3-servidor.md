@@ -1075,9 +1075,17 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 - Lock order unchanged: control row `FOR UPDATE` -> assignments `FOR SHARE` -> new líneas
   `FOR SHARE` (sorted). Archiving a línea does not lock controls or assignments.
 
+## Stage 4 close (parent)
+- CI run 42566597457 (with E4.V1): unit, integration, compose and E2E 53/53 green. Local
+  spot check `npm test` 169/169.
+- RDD: risk high; fallback independent verifier: PASS with issues (1 medium offline-draft
+  data loss, 1 low `.txt` count mismatch, 1 forward note for stage 7), all handled in E4.V1;
+  the draft sync no longer deletes drafts on any rejection (pre-existing policy changed).
+- PR #4 `v3/etapa-4-conteo` → `v3/etapa-3-kit-orden` (stacked).
+
 ## Next step
-- E4.T1–E4.T3 (one delegated writer), then independent review, CI and the stage 4 PR.
-- PRs #1, #2, #3 await user review (stacked: #1 → `v3-servidor`, #2 → stage 1, #3 → stage 2). Engram mirror of this document: pending (multiple active
+- Stage 5 (eliminar y anular) on `v3/etapa-5-eliminar`, stacked on stage 4.
+- PRs #1–#4 await user review (stacked: #1 → `v3-servidor`, #2 → stage 1, #3 → stage 2). Engram mirror of this document: pending (multiple active
   sessions). PR #1 awaits user review; after it is merged, rebase stage 2 onto `v3-servidor`.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);
