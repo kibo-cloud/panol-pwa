@@ -4,10 +4,12 @@
 //
 // kit: { items: [{ toolId, qty }] }. ctx: { tools: {id: herramienta}, units: [unidades],
 // pools: {toolId: {disponible}}, held: Set de toolIds que el poseedor ya tiene }.
-// chosen: { toolId: [unitId] } elegidas por el usuario (si faltan, se toman por código).
+// chosen: { toolId: [unitId] } elegidas por el usuario. opts.autoPick (solo al abrir la vista
+// previa): si no hay ninguna elegida se sugieren las primeras por código. Después de que el
+// usuario tocó las casillas, ninguna marcada es un problema ("elegí N unidades"), nunca "Listo".
 const byCode = (a, b) => (a.code || '').localeCompare(b.code || '', 'es', { numeric: true });
 
-export function kitPreview(kit, ctx, chosen = {}) {
+export function kitPreview(kit, ctx, chosen = {}, { autoPick = true } = {}) {
   const rows = [];
   for (const it of (kit && kit.items) || []) {
     const tool = ctx.tools[it.toolId];
@@ -19,7 +21,7 @@ export function kitPreview(kit, ctx, chosen = {}) {
       row.available = row.units.length;
       const ids = new Set(row.units.map((u) => u.id));
       const pick = (chosen[it.toolId] || []).filter((id) => ids.has(id));
-      row.chosen = pick.length ? pick : row.units.slice(0, it.qty).map((u) => u.id);
+      row.chosen = pick.length || !autoPick ? pick : row.units.slice(0, it.qty).map((u) => u.id);
       if (row.available < it.qty) row.problem = `se necesitan ${it.qty} ${it.qty === 1 ? 'unidad' : 'unidades'} y hay ${row.available} ${row.available === 1 ? 'disponible' : 'disponibles'}.`;
       else if (row.chosen.length !== it.qty) row.problem = `elegí ${it.qty} ${it.qty === 1 ? 'unidad' : 'unidades'}.`;
     } else {

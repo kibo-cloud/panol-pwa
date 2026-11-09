@@ -55,3 +55,15 @@ test('vista previa: problemas de stock nombrados, nada se puede confirmar', () =
   assert.equal(kitPreview({ items: [] }, ctx()).ok, false);
   assert.match(kitPreview({ items: [{ toolId: 't', qty: 2 }] }, ctx(), { t: ['u1'] }).problems[0], /elegí 2 unidades/);
 });
+
+test('vista previa: las unidades se sugieren solo al abrir; si el usuario desmarca todas, hay que elegir', () => {
+  const kit = { items: [{ toolId: 't', qty: 2 }] };
+  // Al abrir (autoPick) se toman las primeras por código.
+  assert.deepEqual(kitPreview(kit, ctx(), {}, { autoPick: true }).rows[0].chosen, ['u1', 'u2']);
+  // Después de tocar las casillas, ninguna marcada no es "Listo": se pide elegir y no se confirma.
+  const pv = kitPreview(kit, ctx(), {}, { autoPick: false });
+  assert.deepEqual(pv.rows[0].chosen, []);
+  assert.equal(pv.ok, false);
+  assert.deepEqual(pv.problems, ['Taladro: elegí 2 unidades.']);
+  assert.equal(deliverBody('t9', pv).unitIds, undefined);
+});

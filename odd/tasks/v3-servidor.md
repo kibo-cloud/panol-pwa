@@ -783,6 +783,36 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       sheet at 390 and 1280 without overflow or console/CSP errors. Existing specs unchanged.
       Evidence: see Stage 3 verification below.
 
+- [x] E3.V1 Independent review (PASS with issues) corrections, test-first. Route: delegated writer.
+      1. Reorder/insert-at-position vs deliver kit deadlock: RED `orden-concurrency` "reordenar y
+         entregar kit" = `40P01 deadlock detected` -> `writeOrder` locks rows by id first -> GREEN.
+      2. Archive especialidad vs assigning it: RED tech kept an archived especialidad and a kit was
+         created for one -> `lockActiveEspecialidad` (`FOR SHARE`) in `checkEspecialidad` and
+         `createKit` -> GREEN (422 `invalid_especialidad`); archive already locks `FOR UPDATE`
+         before counting (guard test: waits for an assignment in flight and answers 409).
+      3. Kit preview auto-picked units after the user unchecked all: RED web unit test (chose
+         `['u1','u2']`) -> `kitPreview(..., { autoPick })`, auto-pick only on first load
+         (`st._init`), chip "Elegí unidades", confirm refused with "elegí N unidades" -> GREEN.
+      4. `updateTool` scopes: no RED reachable on the current code (the If-Match check already
+         rejects a category that changed between the unlocked read and the row lock). The literal
+         suggestion (lock the row first) was tried and deadlocked against a reorder (`40P01`, test
+         "reordenar y cambiar de categoría a la vez"), so the order stays scope -> row: scopes sorted,
+         explicit 409 if the locked row's category differs, scopes bumped from the same sorted list.
+         Guard tests for both cases.
+      5. `.txt` import did not bump order versions: RED (`tools:cat-manuales` stayed 1) -> import
+         locks candidate scopes before applying and bumps the scopes whose members changed -> GREEN;
+         an open reorder with the old version gets 409.
+      6. Migration 010 (`es-x-icu` order for scopes at their initial version): RED
+         `orden-migration` with 009 only (database collation order differs from
+         `localeCompare('es')`) -> GREEN with 010; versions unchanged; a scope at version 2 untouched.
+         `es-x-icu` verified present in embedded-postgres 16 (Windows); `postgres:16.14` (Debian) is
+         built with ICU (CI run confirms).
+      Commits: `82d362c` (server, items 1, 2, 4, 5, 6 + tests) and the web commit after it (item 3 +
+      this entry).
+      Verification (local, sequential): `npm test` 155/155; `npm run test:db` 156/156 (new
+      `orden-concurrency` 7, `orden-migration` 4); `PANOL_E2E_BUILD=1 npm run test:e2e` 47 passed,
+      0 failed, 0 skipped (364 s).
+
 ## Stage 3 verification (local, sequential)
 - `npm test` 154/154; `npm run test:db` 145/145; `npm run build` ok (0 inline script/style/
   handlers in `web/dist/index.html`); `PANOL_E2E_BUILD=1 npm run test:e2e` 47 passed, 0 failed,
@@ -814,8 +844,10 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   without If-Match; 409 `conflict` (stale) or `order_changed` (list differs from the current
   set), both with `current: {scope, ids, version}`; 422 `invalid_order` for repeated ids.
   `POST /api/tools` accepts `position` (1-based within its category; default end). A category or
-  tool created without position, a `.txt` import or a category change appends at the end and
-  bumps the scope version; changing only `sort_order` does not bump the row version.
+  tool created without position or a category change appends at the end and bumps the scope
+  version; a `.txt` import appends new rows at the end and bumps every scope whose members it
+  changed (categories, the old and new tool scopes), so an open reorder screen gets a clean 409;
+  changing only `sort_order` does not bump the row version.
 - `GET /api/reports?especialidad=<id>|none`: rows add `especialidadId`/`especialidad`; new
   `tools` ([{id, name, categoryId, bueno, cambio, faltante, pendiente, total}] in custom order).
 - Permission `kits_edit` (admin by default; web PERMS parity updated).
@@ -826,14 +858,22 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   (createTool/createCategory/deleteCategory/updateTool category change lock the scope first).
   Triggers (migration 009): `categories_order`/`tools_order` fill `sort_order` at the end when it
   is NULL and on a category change; `touch_row_unless_order` keeps `version`/`updated_at` when only
-  `sort_order` changed. Backfill = alphabetical order at migration time.
+  `sort_order` changed. Backfill = alphabetical order at migration time; migration 010 recomputes
+  it with `name COLLATE "es-x-icu", id COLLATE "C"` (= `localeCompare('es')`, independent of the
+  database collation) for scopes still at their initial version (no `order_versions` row or
+  version 1), without bumping any version. Fallbacks inside 010: `und-x-icu`, then a deterministic
+  lower/unaccent expression with ñ between n and o (both target builds have `es-x-icu`).
+- Global lock order (E3.V1): order scope (`order_versions`, sorted) -> rows by id. `writeOrder`
+  locks the rows `ORDER BY id FOR UPDATE` before writing (reorder, insert at position);
+  `updateTool` derives the scopes from an unlocked read, locks them sorted, then the tool row, and
+  answers 409 if the category changed in between. Especialidad read `FOR SHARE` when assigned to a
+  tech or a kit; archive locks it `FOR UPDATE` before counting.
 - Deliver kit locks: kit `FOR SHARE`, holder (tech or caja) `FOR SHARE`, then tools by id
   `FOR UPDATE`; one inventory context, plans chained in memory (`planKitDelivery`), all applied or
   none. `kit_items` cascade on tool delete (only demo clear deletes tools).
 - Especialidades/Kits live in Configuración de herramientas (tabs); the admin Configuración tab
   is unchanged. Per-tech custom order: not implemented (stage 3 decision).
-- Follow-up: migration 009 backfill is exercised only on an empty schema in tests (seed rows
-  come after it); a dataset-with-rows migration test like `plantillas-migration` is not written.
+- Migration 009/010 backfill with existing rows: `integration/orden-migration.test.js` (E3.V1).
 
 ## Next step
 - E3.T1–E3.T3 (one delegated writer), then independent review, CI and the stage 3 PR.

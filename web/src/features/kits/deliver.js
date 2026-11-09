@@ -34,7 +34,8 @@ function chosenOf(st, kit) {
 function previewOf(hk, st) {
   const d = derive(); const kit = S.kits[st.kitId] ? { id: st.kitId, ...S.kits[st.kitId] } : null; if (!kit) return { kit: null, pv: null };
   const held = new Set((d.asgByTech[hk] || []).map((a) => a.toolId));
-  return { kit, pv: kitPreview(kit, { tools: S.tools, units: d.units, pools: d.pools, held }, chosenOf(st, kit)) };
+  // Las unidades se sugieren solo la primera vez que se muestra el kit (st._init).
+  return { kit, pv: kitPreview(kit, { tools: S.tools, units: d.units, pools: d.pools, held }, chosenOf(st, kit), { autoPick: st._init !== kit.id }) };
 }
 
 function render(hk) {
@@ -50,7 +51,7 @@ function render(hk) {
     if (!pv) return h;
     h += `<div class="list kitpv">${pv.rows.map((r) => `<div class="row"><div class="grow"><div class="t">${esc(r.name)} ×${r.qty} <span class="chip ${r.kind === 'adicional' ? 'pri' : ''}">${r.kind === 'adicional' ? 'Adicional' : 'Entrega inicial'}</span></div><div class="s">${r.serialized ? `${r.available} ${r.available === 1 ? 'unidad disponible' : 'unidades disponibles'}` : `${r.available} disponibles`}</div>
       ${r.serialized && r.units.length && !r.problem.startsWith('se necesitan') ? `<div class="unitpick" role="group" aria-label="Unidades de ${esc(r.name)}">${r.units.map((u) => `<label class="check"><input type="checkbox" data-mi="u:${esc(r.toolId)}:${esc(u.id)}" data-mr ${st[`u:${r.toolId}:${u.id}`] ? 'checked' : ''}>${esc(u.code)}</label>`).join('')}</div>` : ''}
-      ${r.problem ? `<div class="s kitprob">${icon('alert', 12)} ${esc(r.problem)}</div>` : ''}</div>${r.problem ? '<span class="chip bad">Falta stock</span>' : `<span class="chip ok">${icon('ok', 12)}Listo</span>`}</div>`).join('')}</div>`;
+      ${r.problem ? `<div class="s kitprob">${icon('alert', 12)} ${esc(r.problem)}</div>` : ''}</div>${r.problem ? `<span class="chip bad">${r.problem.startsWith('elegí') ? 'Elegí unidades' : 'Falta stock'}</span>` : `<span class="chip ok">${icon('ok', 12)}Listo</span>`}</div>`).join('')}</div>`;
     h += pv.ok ? `<p class="hint ok" data-css="margin-top:12px">${icon('ok', 16)}<span>Se registran ${pv.movements} ${pv.movements === 1 ? 'movimiento' : 'movimientos'}, uno por herramienta${pv.rows.some((r) => r.serialized && r.qty > 1) ? ' (y uno por unidad en las de código)' : ''}.</span></p>`
       : `<p class="hint warn" data-css="margin-top:12px">${icon('alert', 16)}<span>No se puede entregar el kit completo: ${esc(pv.problems.join(' '))} No se entrega nada hasta resolverlo.</span></p>`;
     h += field('Motivo', `<input id="kd-reason" type="text" maxlength="2000" data-mi="reason" value="${esc(st.reason || '')}" placeholder="Opcional (por defecto: Entrega del kit)">`, 'kd-reason');
