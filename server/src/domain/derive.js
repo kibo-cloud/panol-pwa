@@ -2,7 +2,7 @@
 // forma que `S` de 2.1 (objetos por id) y devuelve listas ordenadas, controles efectivos,
 // historial, inventario y resúmenes por técnico y por turno.
 import { periodOf, pkeyOf, pnumOf, localDateISO } from './period.js';
-import { effectiveControls, controlHistory } from './controls.js';
+import { effectiveControls, controlHistory, asgUnits } from './controls.js';
 import { pendingReturns } from './alerts.js';
 import { poolsFromTransfers, emptyPool } from './pools.js';
 import { DEFAULT_SHIFTS } from './constants.js';
@@ -60,10 +60,11 @@ export function deriveState(S, { now = new Date() } = {}) {
 
   const infoOf = (list, key) => {
     const s = emptySum();
+    // Etapa 4: por unidades (en buen estado, para recambio, faltantes, sin controlar).
     for (const a of list) {
-      const st = (stateOf[a.id] && stateOf[a.id].state) || 'pendiente';
       const q = a.qty || 1;
-      s[st] += q;
+      const u = asgUnits(stateOf[a.id], q);
+      for (const k of ['bueno', 'cambio', 'faltante', 'pendiente']) s[k] += u[k];
       s.total += q;
     }
     const curEff = eff[key + '|' + curKey];
@@ -100,6 +101,7 @@ export function deriveState(S, { now = new Date() } = {}) {
   };
   return {
     especialidadById: Object.fromEntries(toList(S.especialidades).map((e) => [e.id, e])),
+    lineas: toList(S.lineas).sort((a, b) => (a.order || 0) - (b.order || 0) || byName(a, b)),
     cur, curKey, curNum, today: localDateISO(now), shifts, shiftById, plantillaById, plantillaHist, techs, activeTechs, cajas, tools, units, unitsByTool, asgs, activeAsg, asgByTech, asgByCaja,
     ctls, eff, effList, effByTech, drafts, supersededBy, stateOf, hist, transitions, movs, pools, pendingReturns: pend,
     techInfo, cajaInfo, shiftInfo, kpi,

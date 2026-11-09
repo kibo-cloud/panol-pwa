@@ -58,7 +58,7 @@ test('borrador, guardado con If-Match, finalizar e inmutable', async () => {
   assert.deepEqual(noNote.json().missingNote, [asg[0].id]);
 
   const s2 = await api.call('responsable', 'PATCH', `/api/controls/${c.id}`, { items: { [asg[0].id]: { state: 'faltante', note: 'No está en el pañol' } } }, ifMatch(v1));
-  const fin = await api.call('responsable', 'POST', `/api/controls/${c.id}/finalize`, undefined, ifMatch(s2.json().control.version));
+  const fin = await api.call('responsable', 'POST', `/api/controls/${c.id}/finalize`, { cleaning: { status: 'limpio' } }, ifMatch(s2.json().control.version));
   assert.equal(fin.statusCode, 200);
   assert.equal(fin.json().control.status, 'finalizado');
   assert.ok(fin.json().control.finishedAt);
@@ -90,7 +90,7 @@ test('corrección: registro nuevo que reemplaza, con ítems copiados; el origina
   assert.equal(k.items[asg[0].id].note, 'No está en el pañol');
   assert.equal((await api.call('responsable', 'POST', '/api/controls', { correctionOf: id })).statusCode, 409);
   const s = await api.call('responsable', 'PATCH', `/api/controls/${k.id}`, { items: { [asg[0].id]: { state: 'bueno' } } }, ifMatch(k.version));
-  const fin = await api.call('responsable', 'POST', `/api/controls/${k.id}/finalize`, undefined, ifMatch(s.json().control.version));
+  const fin = await api.call('responsable', 'POST', `/api/controls/${k.id}/finalize`, { cleaning: { status: 'limpio' } }, ifMatch(s.json().control.version));
   assert.equal(fin.statusCode, 200);
   assert.equal((await api.q("SELECT 1 FROM audit_log WHERE action = 'control_correct' AND entity_id = $1", [k.id])).length, 1);
   const st = (await api.call('consulta', 'GET', '/api/state')).json();
@@ -110,7 +110,7 @@ test('reglas: período futuro, técnico inactivo, sin herramientas, ids y estado
   assert.equal((await api.call('responsable', 'POST', '/api/controls', { techId: 't-ana', period: cur, items: { x: { state: 'bueno', note: 'n'.repeat(2001) } } })).statusCode, 400);
   const tech = (await api.call('admin', 'POST', '/api/techs', { name: 'Sin Herramientas', legajo: 'SH-1' })).json().tech;
   const c = (await api.call('responsable', 'POST', '/api/controls', { techId: tech.id, period: prevP(cur) })).json().control;
-  const fin = await api.call('responsable', 'POST', `/api/controls/${c.id}/finalize`, undefined, ifMatch(c.version));
+  const fin = await api.call('responsable', 'POST', `/api/controls/${c.id}/finalize`, { cleaning: { status: 'limpio' } }, ifMatch(c.version));
   assert.equal(fin.json().message, 'Este técnico no tiene herramientas asignadas.');
 });
 

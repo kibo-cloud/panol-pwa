@@ -18,7 +18,7 @@ const fresh = async (page) => { await page.reload(); await page.ready(); };
 
 async function finishControl(page, hk) {
   await page.hash('#control-' + hk);
-  await page.act('ckAllOk'); await page.act('ckFinish'); await page.modalBtn('Confirmar y guardar');
+  await page.act('ckAllOk'); await page.act('ckClean'); await page.act('ckFinish'); await page.modalBtn('Confirmar y guardar');
   await page.waitFor("!!document.querySelector('#modal-root .success')", 15000, 'control saved');
   await page.eval("document.querySelector('#modal-root .scrim').click()");
   await sleep(200);

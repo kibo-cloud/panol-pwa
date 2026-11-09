@@ -3,13 +3,23 @@
 import { esc } from './dom.js';
 import { icon } from './icons.js';
 import { ST, MSHORT } from '../state/constants.js';
+import { CLEAN, qtyText } from '../state/conteo.js';
 import { S, derive, can, who, toolName, holderName } from '../state/store.js';
 import { holderKey } from '../state/plantillas.js';
-import { fdt, mlabel, pkeyOf, wrange, pnumOf } from '../state/period.js';
+import { fdt, mlabel, pkeyOf, wrange, pnumOf, plabel } from '../state/period.js';
 
 export const nf = (n) => Number(n || 0).toLocaleString('es-AR');
 const ST_IC = { bueno: 'ok', cambio: 'wrench', faltante: 'x', pendiente: 'clock' };
 export const stChip = (s) => `<span class="chip ${ST[s] ? ST[s].cls : 'pend'}">${icon(ST_IC[s] || 'clock', 12)}${ST[s] ? ST[s].label : esc(s)}</span>`;
+// Cantidades del último control de una asignación con más de 1 unidad (si no cambió la cantidad).
+export const qtyLine = (s, a) => { const t = s && s.expected === ((a && a.qty) || 1) ? qtyText(s) : ''; return t ? `<div class="s qline">${esc(t)}</div>` : ''; };
+// Limpieza del último control efectivo de un poseedor (ficha del técnico o de la caja).
+export function cleanSummary(hk) {
+  const l = derive().effByTech[hk] || []; const last = l[l.length - 1]; if (!last) return '';
+  return `<div class="card ctlclean" data-css="margin-bottom:12px"><div class="srow"><h2 class="si">Limpieza de herramientas y caja</h2>${cleanChip(last.cleaning)}</div><p class="muted xs" data-css="margin:6px 0 0">Último control: ${esc(plabel(last.period))}${last.cleaning && last.cleaning.status === 'requiere_limpieza' && last.cleaning.note ? '. ' + esc(last.cleaning.note) : ''}</p></div>`;
+}
+// Limpieza de un control (etapa 4): Limpio, Requiere limpieza o Sin dato (controles viejos).
+export const cleanChip = (cl) => { const c = cl && CLEAN[cl.status]; return c ? `<span class="chip ${c.cls}">${icon(cl.status === 'limpio' ? 'ok' : 'clean', 12)}${c.label}</span>` : `<span class="chip pend">${icon('clock', 12)}Sin dato de limpieza</span>`; };
 export const demoChip = (o) => (o && o.demo ? '<span class="chip demo">Demo</span>' : '');
 export function initials(n) { return String(n || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0] || '').join('').toUpperCase() || '?'; }
 const LIGHT_LABEL = { ok: 'Todo en buen estado', warn: 'Tiene herramientas para cambio', bad: 'Tiene faltantes', pend: 'Sin controlar' };
@@ -57,8 +67,9 @@ export function mvRow(m) {
   return `<div class="row"><span class="tag ${tg[1]}">${esc(tg[0])}</span><div class="grow"><div class="t">${esc(title)}</div><div class="s">${esc(meta)}</div>${m.reason || m.notes ? `<div class="s">${esc([m.reason, m.notes].filter(Boolean).join('. '))}</div>` : ''}</div>${demoChip(m)}</div>`;
 }
 export const mvList = (l) => (l.length ? `<div class="list">${l.map(mvRow).join('')}</div>` : `<div class="list">${emptyBox('Sin movimientos registrados', 'Las entregas, devoluciones y reposiciones aparecen acá.')}</div>`);
-const AL_IC = { faltante: 'x', cambio: 'wrench', consecutiva: 'alert', devolucion: 'swap', pendiente: 'clock' };
+const AL_IC = { faltante: 'x', cambio: 'wrench', consecutiva: 'alert', devolucion: 'swap', pendiente: 'clock', limpieza: 'clean' };
 function alertAction(a) {
+  if (a.type === 'limpieza' && a.controlId) return `<a class="btn sm" href="#controlver-${esc(a.controlId)}">Ver control</a>`;
   if (a.type === 'pendiente' && can('controls_do')) return `<a class="btn sm" href="${esc(a.href)}">Controlar</a>`;
   if ((a.type === 'cambio' || a.type === 'consecutiva' || a.type === 'faltante') && can('movements_do')) return `<button class="btn sm" data-act="goRepo" data-t="${esc(holderKey(a))}" data-a="${esc(a.asgId)}">Registrar reposición</button>`;
   if (a.type === 'devolucion' && can('movements_do')) return `<button class="btn sm" data-act="recvPending" data-m="${esc(a.movId)}">Recibir devolución</button>`;

@@ -114,7 +114,7 @@ describe('poseedor técnico o caja', () => {
     const tc = await api.call('responsable', 'POST', '/api/controls', { techId: 't-ana', period: cur });
     assert.notEqual(tc.statusCode, 500);
     await assert.rejects(api.q("INSERT INTO controls (id, caja_id, period_y, period_m, period_w, status) VALUES ('cx2', $1, $2, $3, $4, 'borrador')", [caja.id, cur.y, cur.m, cur.w]), (e) => e.code === '23505');
-    const fin = await api.call('responsable', 'POST', `/api/controls/${c.id}/finalize`, undefined, ifMatch(c.version));
+    const fin = await api.call('responsable', 'POST', `/api/controls/${c.id}/finalize`, { cleaning: { status: 'limpio' } }, ifMatch(c.version));
     assert.equal(fin.statusCode, 200, fin.body);
     const s = (await api.call('consulta', 'GET', '/api/state')).json();
     assert.equal(s.derived.effective[`caja:${caja.id}|${s.derived.curKey}`], c.id);

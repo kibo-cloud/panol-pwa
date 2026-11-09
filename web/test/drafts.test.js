@@ -65,12 +65,28 @@ test('un conflicto deja el borrador marcado y no se vuelve a mandar solo', async
   assert.equal(calls, 1);
 });
 
-test('un rechazo definitivo (422) se informa y se descarta', async () => {
+test('un rechazo (422/400) no borra el borrador: queda marcado para revisar con el mensaje', async () => {
   const st = memoryStore();
   await st.put(nextDraft(null, base, 'k1'));
-  const out = await flushDrafts(st, async () => { throw fail('validation'); });
-  assert.equal(out.failed.length, 1);
-  assert.deepEqual(await st.all(), []);
+  let calls = 0;
+  const send = async () => { calls++; throw Object.assign(fail('validation'), { message: 'Elegí un técnico activo.' }); };
+  const out = await flushDrafts(st, send);
+  assert.equal(out.review.length, 1);
+  const rec = await st.get('t-ana|2026-11-2');
+  assert.ok(rec, 'el borrador sigue en el equipo');
+  assert.deepEqual(rec.review, { message: 'Elegí un técnico activo.' });
+  assert.deepEqual(rec.items, base.items);
+  // No se reenvía solo: espera que la persona lo corrija o lo descarte.
+  await flushDrafts(st, send);
+  assert.equal(calls, 1);
+  // Al guardarlo de nuevo se quita la marca (y se vuelve a enviar).
+  const again = nextDraft(rec, { ...base, items: { a1: { state: 'cambio', note: 'x' } } }, 'k2');
+  assert.equal(again.review, undefined);
+  // Not found y forbidden tampoco lo borran.
+  const st2 = memoryStore();
+  await st2.put(nextDraft(null, base, 'k3'));
+  await flushDrafts(st2, async () => { throw fail('not_found'); });
+  assert.equal((await st2.all()).length, 1);
 });
 
 test('un error del servidor (500) se informa y el borrador queda para otro intento', async () => {

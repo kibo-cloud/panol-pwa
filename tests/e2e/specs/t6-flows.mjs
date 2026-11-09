@@ -97,7 +97,7 @@ export const tests = [
       assert(Object.values(st.assignments).some((a) => a.active && a.techId === tech), 'assignment');
       eq((await pool(page, tool)).disponible, 4, 'stock decreased');
       await page.hash('#control-' + tech);
-      await page.act('ckAllOk'); await page.act('ckFinish'); await page.modalBtn('Confirmar y guardar');
+      await page.act('ckAllOk'); await page.act('ckClean'); await page.act('ckFinish'); await page.modalBtn('Confirmar y guardar');
       await page.waitFor("!!document.querySelector('#modal-root .success')", 10000, 'control saved');
       st = await state(page);
       assert(Object.values(st.controls).some((c) => c.status === 'finalizado' && c.techId === tech), 'control finalized');

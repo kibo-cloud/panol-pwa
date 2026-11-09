@@ -92,7 +92,7 @@ export async function loadDemo(db, actor, { now = new Date() } = {}) {
       const asgs = (await c.query('SELECT id, tool_id, unit_id, qty FROM assignments WHERE tech_id = $1 AND active', [tech.id])).rows.map((r) => ({ id: r.id, toolId: r.tool_id, unitId: r.unit_id, qty: r.qty }));
       for (const [p, over] of [[p2, PLAN[i][0]], [p1, PLAN[i][1]]]) {
         const items = Object.fromEntries(asgs.map((a) => [a.id, over[tools[a.toolId].name] || { state: 'bueno', note: '' }]));
-        const doc = buildControlDoc({ tech, period: p, assignments: asgs, items, tools, units, categories: {}, status: 'finalizado' });
+        const doc = buildControlDoc({ tech, period: p, assignments: asgs, items, tools, units, categories: {}, status: 'finalizado', cleaning: { status: 'limpio' } });
         const at = zonedDate(p.y, p.m, Math.min((p.w - 1) * 7 + 3, daysIn(p.y, p.m)), 10, 30);
         await saveControl(c, `c-${tech.id}-${pkeyOf(p)}`, doc, { actorId: actor.id, startedAt: at, finishedAt: at, demo: true });
       }

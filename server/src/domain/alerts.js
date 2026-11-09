@@ -1,7 +1,10 @@
 // Alertas derivadas (portado de derive() de 2.1). Una alerta resuelta (alertRes[key]) no se
 // muestra; como la clave incluye el control o movimiento, un control nuevo la vuelve a abrir.
 import { periodOf, pkeyOf, plabel } from './period.js';
-import { effectiveControls, controlHistory } from './controls.js';
+import { effectiveControls, controlHistory, hasMissing, hasChange } from './controls.js';
+import { holderKey } from './lineas.js';
+
+const needsCleaning = (c) => !!c.cleaning && c.cleaning.status === 'requiere_limpieza';
 
 // data: { now, techs, cajas, tools, units, assignments, controls: [], movements: [], alertRes }
 // Las cajas compartidas (etapa 2) tienen las mismas alertas que un técnico, con `cajaId`.
@@ -33,6 +36,9 @@ export function deriveAlerts(data) {
     }
   }
 
+  // Etapa 4: por cantidad. Un ítem con faltantes da la alerta de faltante y uno con unidades para
+  // recambio la de cambio (pueden ser las dos); "consecutiva" si el control efectivo anterior de
+  // esa asignación también tenía unidades para recambio.
   for (const a of activeAsg) {
     const s = stateOf[a.id];
     if (!s) continue;
@@ -41,13 +47,36 @@ export function deriveAlerts(data) {
     const who = a.cajaId ? { cajaId: a.cajaId } : { techId: a.techId };
     const tn = (data.tools[a.toolId] || {}).name || 'Herramienta';
     const code = a.unitId && data.units[a.unitId] ? ` (${data.units[a.unitId].code})` : '';
-    const text = `${tn}${code}, ${t.name}${s.note ? '. ' + s.note : ''}`;
-    if (s.state === 'faltante') alerts.push({ key: `falt-${a.id}-${s.controlId}`, type: 'faltante', sev: 3, title: 'Herramienta faltante', text, ...who, asgId: a.id, at: s.at });
-    if (s.state === 'cambio') {
-      const h = hist[a.id] || [];
-      const cons = h.length >= 2 && h[h.length - 2].state === 'cambio';
-      alerts.push({ key: `${cons ? 'cons' : 'camb'}-${a.id}-${s.controlId}`, type: cons ? 'consecutiva' : 'cambio', sev: cons ? 3 : 2, title: cons ? 'Dañada en controles consecutivos' : 'Para cambio, reposición pendiente', text, ...who, asgId: a.id, at: s.at });
+    const many = s.expected > 1;
+    const text = (qty) => `${tn}${code}, ${t.name}${qty}${s.note ? '. ' + s.note : ''}`;
+    if (hasMissing(s)) {
+      alerts.push({ key: `falt-${a.id}-${s.controlId}`, type: 'faltante', sev: 3, title: 'Herramienta faltante', text: text(many ? `: faltan ${s.missing} de ${s.expected}` : ''), ...who, asgId: a.id, at: s.at, qty: s.missing ?? null });
     }
+    if (hasChange(s)) {
+      const h = hist[a.id] || [];
+      const cons = h.length >= 2 && hasChange(h[h.length - 2]);
+      alerts.push({
+        key: `${cons ? 'cons' : 'camb'}-${a.id}-${s.controlId}`, type: cons ? 'consecutiva' : 'cambio', sev: cons ? 3 : 2, title: cons ? 'Dañada en controles consecutivos' : 'Para cambio, reposición pendiente',
+        text: text(many ? `: ${s.change} de ${s.expected} para recambio` : ''), ...who, asgId: a.id, at: s.at, qty: s.change ?? null,
+      });
+    }
+  }
+
+  // Limpieza: los dos últimos controles efectivos del poseedor requieren limpieza.
+  const byHolder = {};
+  for (const c of effList) (byHolder[holderKey(c)] ||= []).push(c);
+  for (const [hk, cs] of Object.entries(byHolder)) {
+    if (cs.length < 2) continue;
+    const [prev, last] = cs.slice(-2);
+    if (!needsCleaning(prev) || !needsCleaning(last)) continue;
+    const isCaja = hk.startsWith('caja:');
+    const t = isCaja ? cajas[hk.slice(5)] : (data.techs || {})[hk];
+    if (!t || t.active === false || t.archivedAt) continue;
+    const note = last.cleaning && last.cleaning.note;
+    alerts.push({
+      key: `limp-${hk}-${last.id}`, type: 'limpieza', sev: 2, title: 'Requiere limpieza en controles consecutivos', text: `${t.name}${note ? '. ' + note : ''}`,
+      ...(isCaja ? { cajaId: hk.slice(5) } : { techId: hk }), controlId: last.id, at: last.finishedAt,
+    });
   }
 
   const movs = data.movements || [];

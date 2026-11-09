@@ -38,10 +38,12 @@ test('historial: estados y transiciones (bueno inicial no es transición)', () =
 
 test('finalizar: todas con estado y faltante con nota', () => {
   const asgs = [{ id: 'a1' }, { id: 'a2' }];
-  assert.deepEqual(validateFinalize(asgs, { a1: { state: 'bueno' } }), { ok: false, pending: ['a2'], missingNote: [] });
-  assert.deepEqual(validateFinalize(asgs, { a1: { state: 'bueno' }, a2: { state: 'faltante', note: '  ' } }), { ok: false, pending: [], missingNote: ['a2'] });
-  assert.deepEqual(validateFinalize(asgs, { a1: { state: 'bueno' }, a2: { state: 'faltante', note: 'perdida' } }), { ok: true, pending: [], missingNote: [] });
-  assert.equal(validateFinalize([], {}).ok, true);
+  // Etapa 4: además la limpieza (ver conteo.test.js).
+  const limpio = { status: 'limpio' };
+  assert.deepEqual(validateFinalize(asgs, { a1: { state: 'bueno' } }, limpio), { ok: false, pending: ['a2'], missingNote: [], cleaning: null });
+  assert.deepEqual(validateFinalize(asgs, { a1: { state: 'bueno' }, a2: { state: 'faltante', note: '  ' } }, limpio), { ok: false, pending: [], missingNote: ['a2'], cleaning: null });
+  assert.deepEqual(validateFinalize(asgs, { a1: { state: 'bueno' }, a2: { state: 'faltante', note: 'perdida' } }, limpio), { ok: true, pending: [], missingNote: [], cleaning: null });
+  assert.equal(validateFinalize([], {}, limpio).ok, true);
 });
 
 test('documento del control: copia de datos y conteos por cantidad', () => {
@@ -58,7 +60,10 @@ test('documento del control: copia de datos y conteos por cantidad', () => {
   assert.equal(doc.pkey, '2026-03-2');
   assert.equal(doc.pnum, 2026032);
   assert.deepEqual(doc.counts, { bueno: 1, cambio: 3, faltante: 0 });
-  assert.deepEqual(doc.items.a1, { state: 'cambio', note: 'gastada', toolId: 'pinza', toolName: 'Pinza', category: 'Manuales', unitId: null, unitCode: null, qty: 3 });
+  assert.deepEqual(doc.items.a1, {
+    state: 'cambio', note: 'gastada', toolId: 'pinza', toolName: 'Pinza', category: 'Manuales', unitId: null, unitCode: null, qty: 3,
+    expected: 3, good: 0, change: 3, missing: 0, lineaId: null,
+  });
   assert.equal(doc.items.a2.unitCode, 'TAL-001');
   assert.equal(doc.items.a3, undefined);
   assert.equal(doc.correction, false);

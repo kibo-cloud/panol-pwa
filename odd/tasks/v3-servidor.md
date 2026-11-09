@@ -884,9 +884,208 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   lock order stays scope → row; `es-x-icu` instead of `und-x-icu`).
 - PR #3 `v3/etapa-3-kit-orden` → `v3/etapa-2-plantillas` (stacked).
 
+## Stage 4 decisions (parent, within PEDIDO §2.6 and the user's answers)
+- Count by quantity: for an assignment with qty > 1 the control records `qty_good`,
+  `qty_change` and `qty_missing` with `good + change + missing = expected` (the UI asks for
+  "en buen estado" and "requieren recambio"; missing is the rest). With qty = 1 the three
+  buttons Bueno / Cambio / Faltante stay. Any missing quantity requires a note (motivo).
+- "Requiere recambio" never counts as missing anywhere (reports, alerts, stock): no 0.5 tricks.
+- Item state derived for alerts and history: faltante if missing > 0, else cambio if
+  change > 0, else bueno. Consecutive alerts compare per assignment with the same rule.
+- Migration of existing control items: bueno → good = qty; cambio → change = qty;
+  faltante → missing = qty (notes kept). Finalized controls are immutable, so the migration
+  writes the quantity columns under the same controlled path used by other data migrations
+  (no trigger bypass outside the migration).
+- Cleaning, per control (user-confirmed): one item "Limpieza de herramientas y caja" with
+  Limpio / Requiere limpieza; "Requiere limpieza" requires a note. Required to finalize a new
+  control (it is part of the checklist); old/imported controls have it NULL ("sin dato").
+  Shown in the ficha, control detail, reports (% limpio) and the alert "limpieza" when two
+  consecutive effective controls of the same holder require cleaning. Printing in stage 10.
+- Optional line on missing or change items (user: optional, never blocks): a línea/sector
+  select on items with missing or change; reports group losses/breakages by línea.
+- Stage 7 will create purchase requests from missing/change quantities; this stage only
+  stores the counts and keeps a stable key per assignment for that.
+  Record for stage 7 (E4.V1, no code yet): purchase requests must dedupe per assignment (or
+  unit) and period / effective control, never per alert key — a correction creates a new alert
+  key (`falt-<asg>-<ctl>` changes with the control id), so keying by alert would open a second
+  request for the same loss.
+- `.txt` v2: export maps quantities back to a v2 item state with the derived rule (and
+  `qty`); cleaning and line are not in v2. Import of v2 items uses the migration mapping.
+- Cleaning in corrections (parent, E4.V1): a correction of an old control whose corrected
+  control has NULL cleaning may be finalized without cleaning (it stays NULL, "sin dato"; if
+  "Requiere limpieza" is chosen the note is still required). New originals and corrections of
+  controls that had cleaning still require it. Domain `cleaningRequiredFor(corrected)` +
+  `validateFinalize(..., { cleaningRequired })`; the web Finalizar reason follows the same rule.
+- A línea never makes a draft fail (parent, E4.V1): only items with missing + change > 0 keep a
+  línea; an archived/unknown new línea is dropped to NULL with a non-fatal warning, and an
+  offline draft rejected by the server is kept on the device marked "necesita revisión".
+
+## Stage 4 tasks (branch `v3/etapa-4-conteo`, stacked on stage 3)
+- [x] E4.T1 Backend: migration (item quantity columns + check, item `linea_id`, control
+      cleaning status + note, data migration of existing items), domain (finalize validation
+      with quantities, cleaning and notes; derived item state; counts; alerts incl.
+      consecutive cleaning; reports by units and % limpio; losses by línea), API changes,
+      `.txt` mapping; unit + integration tests.
+      Route: delegated writer. Code: migration `011_conteo_limpieza.sql`, `domain/controls.js`
+      (`itemQuantities`, `itemState`, `asgUnits`, `cleanCleaning`, finalize with cleaning),
+      `domain/alerts.js` (faltante/cambio by quantity, `limpieza`), `domain/report.js` (units,
+      % limpio, `lineas`), `domain/derive.js`, `application/controls.js` (merge of quantities,
+      línea check `FOR SHARE`, cleaning, finalize body), `adapters/pg/{inventory,txt}-repo.js`,
+      `adapters/http/operation-routes.js` (strict item/cleaning schemas), demo cleaning.
+      Test-first: not observed (domain written first, then `unit/conteo.test.js` 6,
+      `integration/conteo-api.test.js` 9 and `integration/conteo-migration.test.js` 3). The first
+      run of the migration test was RED for a real defect (`control_items_state_check` already
+      existed as the column CHECK name) -> constraint renamed `control_items_state_derived_check`
+      -> GREEN. Existing tests changed only where the contract changed: `validateFinalize`
+      result has `cleaning`, item doc has the quantity fields, report totals have the cleaning
+      fields, and successful finalizes in 4 integration files send `{ cleaning: { status:
+      'limpio' } }` (the 422 expectations for pending/missing note are unchanged).
+      Evidence: `npm test` 161/161; `npm run test:db` 168/168.
+- [x] E4.T2 Frontend: checklist with quantity inputs (steppers ≥44px) for qty > 1 and the
+      three buttons for qty = 1, live "faltan N" with required motivo, optional línea on
+      missing/change, cleaning item with required note, finalize disabled with the exact
+      reason, control detail/ficha/history/report changes, offline draft compatible; design
+      guide.
+      Route: delegated writer. Code: `web/src/state/conteo.js` (pure: quantities, derived state,
+      summary and the exact Finalizar reason, units per assignment, % limpio, losses by línea),
+      `features/control/view.js` (qty = 1 radiogroup; qty > 1 "En buen estado" / "Requieren
+      recambio" steppers 46 px + numeric input clamped to the assigned qty, live "Faltan N" /
+      "Están todas", "Todas en buen estado"; motivo block with quick-phrase chips (required when
+      missing > 0, optional observation with change only); "Línea o sector donde se trabajaba
+      (opcional)" select; card "Limpieza de herramientas y caja" Limpio / Requiere limpieza with
+      required note and chips; Finalizar disabled with the reason in server order; confirmation
+      sheet in units with cleaning and the alert count; focus kept when a card re-renders),
+      `state/drafts.js` (cleaning in the offline record and request; old records still valid),
+      `state/derive.js` (quantities in `stateOf`, units in summaries), control detail (Bien /
+      Recambio / Faltan / Línea columns, cleaning card, "Sin dato de limpieza" for old ones),
+      tech and caja sheet (quantities line, last cleaning), history rows, alerts (`limpieza`
+      icon, KPI, "Ver control"), reports (% limpio KPI and columns, "Faltantes y recambios por
+      línea"), CSV/Excel/PDF (% limpio, "Por línea"), `api/index.js` (save/finalize bodies),
+      icon `clean`, styles in `v3.css` (classes only, no inline styles).
+      Test-first: not observed; `web/test/conteo.test.js` (5) written with the module.
+      Evidence: `npm test` 166/166; `npm run build` ok, `web/dist/index.html` has no inline
+      script/style/handlers (one module script tag).
+- [ ] E4.T3 E2E: quantity control with good/change/missing and required motivo, qty = 1
+      buttons, cleaning required to finalize and its note, consecutive cleaning alert,
+      change never counted as missing in report, optional línea and report by línea, old
+      controls still readable, offline draft with quantities; CI green; PR.
+      [x] E2E items (route: delegated writer, commit `7c71cba`); [ ] CI green (pending, parent);
+      [ ] PR (pending, parent). New `t11-conteo` (5): steppers (≥44 px, clamped typing, live
+      "Faltan N" / "Están todas"), three radio buttons for qty = 1, each Finalizar reason in
+      order, motivo via chip, línea select, cleaning note required, confirmation in units
+      (4/1/1, cleaning, 2 alerts), stored quantities/línea/cleaning, detail and sheet;
+      consecutive cleaning alert shown and resolved in the UI; report row 3/2/1 = 50 % and
+      % limpio 0 % (UI cells and API); losses by línea (Línea Envasado 0/2, Sin línea 1/0);
+      2.0.0 `.txt` controls readable ("Sin dato de limpieza", quantities from state); offline
+      draft keeps `good/change/expected` and cleaning in IndexedDB and is resent with them;
+      every route + checklist + reports at 1280 and 390 without overflow or console/CSP errors.
+      Adapted specs (UI legitimately changed): `t6-flows` and `t9-plantillas` pick "Limpio"
+      before finalizing; `t10-kits-orden` reads the checklist order from `#ckitems` (the
+      cleaning card follows the tools).
+      Evidence (local, sequential): `npm test` 166/166; `npm run test:db` 168/168; `npm run
+      build` ok (0 inline script/style/handlers); `PANOL_E2E_BUILD=1 npm run test:e2e` 52
+      passed, 0 failed, 0 skipped (399 s). A first full run was 51/1 (the `t10` order assertion
+      included the new cleaning card title), fixed in the spec as above.
+- [x] E4.V1 Correction task (review findings). Route: delegated writer (2+ non-trivial files:
+      server application/domain/adapter, web state/view, tests). Test-first per item:
+      1. MEDIUM, offline draft lost because of a línea. RED: `conteo-api` "línea archivada o
+         desconocida al guardar" (422 instead of 200) and the correction finalize with an
+         archived línea (422); `web/test/drafts` "un rechazo (422/400) no borra el borrador"
+         (draft deleted); `web/test/conteo` `apiItems` (missing export). GREEN: `resolveLineas`
+         in `application/controls.js` (create, PATCH, finalize) keeps `lineaId` only when the
+         resulting item has missing + change > 0 and drops a new archived/unknown one to NULL
+         with `warnings: [{ code: 'linea_dropped', assignmentId }]`; web sends every item
+         through `apiItem`/`apiItems` (draft record, PATCH/POST, finalize) and `setItem` clears
+         the línea when the item goes back to bueno; `flushDrafts`/`sendLocal` never delete a
+         draft on 400/422/404/403: it stays marked `review: { message }` with a visible "Este
+         borrador necesita revisión" banner (`#ckreview`, server message, "Guardar de nuevo" /
+         "Descartar borrador"), and is deleted only after a successful save or an explicit
+         discard; a `linea_dropped` warning shows a toast and clears the línea in the open
+         checklist. E2E `t11-conteo` "offline draft with a línea survives the línea being
+         archived elsewhere" (archived through `srv.app.inject` while the proxy is offline):
+         written with the fix, RED not observed.
+      2. LOW, `.txt` counts. RED: `conteo-api` ".txt v2: al importar, los totales salen de los
+         ítems" (count_* {2,0,1} vs items {0,0,3}). GREEN: `txt-repo.js` `countsOf(items)` on
+         insert and update of imported controls; lossy note in Stage 4 API notes.
+      3. DECISION, cleaning in corrections. RED: unit `cleaningRequiredFor` (missing export),
+         `conteo-api` "limpieza en correcciones" (422). GREEN: domain `cleaningRequiredFor` +
+         `validateFinalize(..., { cleaningRequired })`, finalize looks up the corrected control;
+         web `ckSummary(..., { cleaningRequired })`, the cleaning card says "Opcional: el control
+         que corregís no tiene dato de limpieza", the confirmation shows "Sin dato".
+      4. Stage 7 dedupe recorded under Stage 4 decisions (no code).
+      Contract change in an existing test: `conteo-api` no longer expects 422 `invalid_linea`.
+      Evidence (local, sequential): `npm test` 169/169; `npm run test:db` 172/172;
+      `PANOL_E2E_BUILD=1 npm run test:e2e` 53 passed, 0 failed, 0 skipped (394 s).
+      Commit: `fix(controls): keep offline drafts on línea and validation errors`.
+
+## Stage 4 API notes (for the frontend and later stages)
+- Control item (GET `/api/state`, `/api/controls`): `state` (derived: faltante if `missing` >
+  0, else cambio if `change` > 0, else bueno), `qty` (= `expected`), `expected`, `good`,
+  `change`, `missing`, `lineaId` (only on items with missing or change), `note`, plus the 2.1
+  copies. Control: `cleaning: { status: 'limpio' | 'requiere_limpieza' | null, note }`
+  (null = sin dato: old and imported controls). `counts` are units (Σ good / change / missing).
+- Input item (POST `/api/controls`, PATCH `/api/controls/:id`, POST `.../finalize`):
+  `{ state }` (three buttons, or a shortcut for all units) or `{ good, change }` (missing = the
+  rest; optional `missing` must match; optional `state` must match the derived one), optional
+  `expected` (the quantity it was counted against: if it is no longer the assigned qty the item
+  becomes pending, no error, so an offline draft is never lost), `note`, `lineaId` (only
+  considered when the resulting item has missing + change > 0, otherwise stored NULL; a línea
+  the item already had is kept even if archived). 400 on schema errors (missing `change`,
+  negatives, decimals, extra keys); 422 `invalid_count` (good + change > expected, sums or state
+  do not match). E4.V1: no more 422 `invalid_linea` — a new archived/unknown línea is stored
+  NULL and the 200/201 response adds `warnings: [{ code: 'linea_dropped', assignmentId }]`
+  (create, PATCH and finalize alike, so a synced offline draft can still finish).
+- `cleaning` in POST/PATCH/finalize: `{ status, note }` or null (clears); omitted keeps the
+  stored one. PATCH needs `items` or `cleaning`. Finalize accepts an optional body `{ items?,
+  cleaning? }` merged like a draft save in the same transaction. Finalize 422
+  `control_incomplete` messages, in order: "Falta(n) N herramienta(s) por controlar.",
+  "Completá el motivo de N faltante(s).", "Indicá la limpieza de herramientas y caja.",
+  "Completá la nota de limpieza." (extra `cleaning: 'pending' | 'note' | null`). Required for
+  every original and for corrections of controls that had cleaning (the correction copies the
+  source cleaning). E4.V1: a correction of a control with NULL cleaning may finalize without
+  it (stays NULL).
+- Corrections copy quantities, `expected`, notes, `lineaId` and cleaning.
+- Alerts: `falt-<asg>-<ctl>` when missing > 0 (text "…: faltan M de N" when N > 1, `qty`),
+  `camb-`/`cons-<asg>-<ctl>` when change > 0 (consecutive = the previous effective control of
+  that assignment also had change > 0); both can exist for one item. New `limp-<holderKey>-<ctl>`
+  (type `limpieza`, sev 2, "Requiere limpieza en controles consecutivos", `controlId`) when the
+  last two effective controls of an active holder both require cleaning; resolvable like the
+  others; a new control re-opens it with a new key.
+- Reports: `bueno/cambio/faltante` and % en condiciones in units (good / counted units);
+  current state per assignment from its last effective control (by state for all units if the
+  assigned qty changed since). Rows, plantillas and totals add `limpio`, `sucio`, `pctLimpio`
+  (effective controls of the period with cleaning data; null when none). New `lineas`:
+  [{ id (null = "Sin línea"), name, kind, faltante, cambio }] from the last effective control
+  of the period of each holder (cajas only without tech/plantilla/especialidad filters).
+- `.txt` v2: export leaves out `cleaning` and the item quantity fields/`lineaId` (state is the
+  derived one, `qty` = expected); import maps state -> quantities like migration 011.
+  `.txt` v2 is lossy for per-unit quantities: a control of 3 units with 2 good and 1 missing
+  exports as `faltante` x 3 and imports as 3 missing. E4.V1: on import the control `count_*`
+  are derived from the mapped items (the file's `counts` are ignored), so totals always equal
+  the items.
+
+## Stage 4 implementation notes
+- Migration 011: the `state` column stays (safer than replacing every read: history,
+  transitions, alerts, `.txt` and 2.1 readers keep working) and a CHECK keeps it equal to the
+  derived rule (except legacy items with qty 0, which only a `.txt` can bring). `qty` stays
+  equal to `qty_expected` (CHECK). Data migration: the item immutability trigger is disabled
+  only around one UPDATE inside the migration transaction and re-enabled right after (same
+  pattern as 005); `conteo-migration.test.js` checks the trigger is enabled (`tgenabled = 'O'`),
+  finalized items still reject writes, totals/versions of controls are unchanged.
+- Lock order unchanged: control row `FOR UPDATE` -> assignments `FOR SHARE` -> new líneas
+  `FOR SHARE` (sorted). Archiving a línea does not lock controls or assignments.
+
+## Stage 4 close (parent)
+- CI run 42566597457 (with E4.V1): unit, integration, compose and E2E 53/53 green. Local
+  spot check `npm test` 169/169.
+- RDD: risk high; fallback independent verifier: PASS with issues (1 medium offline-draft
+  data loss, 1 low `.txt` count mismatch, 1 forward note for stage 7), all handled in E4.V1;
+  the draft sync no longer deletes drafts on any rejection (pre-existing policy changed).
+- PR #4 `v3/etapa-4-conteo` → `v3/etapa-3-kit-orden` (stacked).
+
 ## Next step
-- Stage 4 (conteo por cantidad y limpieza) on `v3/etapa-4-conteo`, stacked on stage 3.
-- PRs #1, #2, #3 await user review (stacked: #1 → `v3-servidor`, #2 → stage 1, #3 → stage 2). Engram mirror of this document: pending (multiple active
+- Stage 5 (eliminar y anular) on `v3/etapa-5-eliminar`, stacked on stage 4.
+- PRs #1–#4 await user review (stacked: #1 → `v3-servidor`, #2 → stage 1, #3 → stage 2). Engram mirror of this document: pending (multiple active
   sessions). PR #1 awaits user review; after it is merged, rebase stage 2 onto `v3-servidor`.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);

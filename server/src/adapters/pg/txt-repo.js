@@ -13,6 +13,7 @@ import { stamp } from '../../importers/txt-v2/plan.js';
 import { readPlantillas } from './state-repo.js';
 import { loadHistory, insertRange, closeRange, rangesFromChanges, applyMovePlan, freeRangeId } from './plantilla-repo.js';
 import { planMove, effectiveRange } from '../../domain/plantillas.js';
+import { quantitiesOfState } from '../../domain/controls.js';
 import { DomainError } from '../../domain/errors.js';
 import { localDateISO } from '../../domain/period.js';
 import { newId } from '../../application/ids.js';
@@ -33,7 +34,10 @@ export async function loadTxtState(q) {
   // alertas resueltas no salen, y las unidades salen sin la caja.
   const noCaja = (list) => list.filter((r) => !r.cajaId).map(({ cajaId, ...r }) => r);
   for (const c of ['categories', 'tools', 'units', 'assignments', 'alertRes']) data[c] = strip(noCaja((await listRows(q, c, `ORDER BY ${TABLES[c].key}`)).map(({ order, ...r }) => (c === 'units' ? { ...r, cajaId: null } : r))));
-  data.controls = strip(noCaja((await loadControls(q)).sort((a, b) => (a.id < b.id ? -1 : 1))));
+  // Etapa 4: el .txt v2 no tiene cantidades por estado, línea ni limpieza. Cada ítem sale con su
+  // estado derivado (faltante si falta alguna unidad, si no cambio, si no bueno) y `qty`.
+  const v2Items = (items) => Object.fromEntries(Object.entries(items).map(([aid, { expected, good, change, missing, lineaId, ...it }]) => [aid, it]));
+  data.controls = strip(noCaja((await loadControls(q)).sort((a, b) => (a.id < b.id ? -1 : 1))).map(({ cleaning, ...c }) => ({ ...c, items: v2Items(c.items) })));
   data.movements = strip(noCaja(await loadMovementsFull(q)));
   data.audit = Object.fromEntries((await q.query('SELECT id, action, entity, entity_id, detail, at, actor_id FROM audit_log ORDER BY at, id')).rows.map((r) => [
     r.id, { action: r.action, entity: r.entity, entityId: r.entity_id, detail: r.detail, at: iso(r.at), by: r.actor_id },
@@ -76,11 +80,32 @@ async function updateGeneric(c, name, id, r) {
   await c.query(`UPDATE ${s.table} SET ${cols.map((x, i) => `${x[0]} = $${i + 2}`).join(', ')} WHERE ${s.key} = $1`, [id, ...cols.map((x) => x[1])]);
 }
 
+// Ítems del .txt v2 (estado y cantidad): las cantidades salen del estado, como en la migración
+// 011 (bueno -> todas en buen estado, cambio -> todas para recambio, faltante -> todas faltan).
+const itemQty = (it) => quantitiesOfState(it.state, it.qty ?? 1);
+
+// Totales del control importado: salen de los ítems tal como quedan (en unidades), no de los
+// `counts` del archivo. El .txt v2 no tiene cantidades por estado: un control de 3 unidades con
+// 2 buenas y 1 faltante vuelve como 3 faltantes, y sus totales tienen que coincidir con eso.
+function countsOf(items) {
+  const n = { bueno: 0, cambio: 0, faltante: 0 };
+  for (const it of Object.values(items || {})) {
+    const q = itemQty(it);
+    n.bueno += q.good;
+    n.cambio += q.change;
+    n.faltante += q.missing;
+  }
+  return n;
+}
+
 async function insertItems(c, id, items) {
   for (const [aid, it] of Object.entries(items)) {
+    const qty = it.qty ?? 1;
+    const q = itemQty(it);
     await c.query(
-      'INSERT INTO control_items (control_id, assignment_id, state, note, tool_id, tool_name, category, unit_id, unit_code, qty) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
-      [id, aid, it.state, it.note, it.toolId, it.toolName, it.category, it.unitId, it.unitCode, it.qty ?? 1],
+      `INSERT INTO control_items (control_id, assignment_id, state, note, tool_id, tool_name, category, unit_id, unit_code, qty,
+         qty_expected, qty_good, qty_change, qty_missing) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      [id, aid, it.state, it.note, it.toolId, it.toolName, it.category, it.unitId, it.unitCode, qty, qty, q.good, q.change, q.missing],
     );
   }
 }
@@ -91,11 +116,12 @@ const SNAPSHOT_SQL = (tech, ref, y, m, w, shift) =>
   `coalesce(plantilla_on(${tech}, least(coalesce(${ref}::timestamptz, now())::date, period_end(${y}, ${m}, ${w}))), (SELECT id FROM plantillas WHERE id = ${shift}))`;
 
 async function insertControl(c, id, r) {
+  const n = countsOf(r.items);
   await c.query(
     `INSERT INTO controls (id, tech_id, tech_name, shift_id, period_y, period_m, period_w, status, count_bueno, count_cambio, count_faltante,
        correction, supersedes_id, started_at, created_by, demo, imported, created_at, updated_at, plantilla_id_snapshot)
      VALUES ($1,$2,$3,$4,$5,$6,$7,'borrador',$8,$9,$10,$11,$12,$13,$14,$15,true,$16,$17,${SNAPSHOT_SQL('$19::text', '$18', '$5', '$6', '$7', '$20::text')})`,
-    [id, r.techId, r.techName, r.shiftId, r.period.y, r.period.m, r.period.w, r.counts.bueno, r.counts.cambio, r.counts.faltante,
+    [id, r.techId, r.techName, r.shiftId, r.period.y, r.period.m, r.period.w, n.bueno, n.cambio, n.faltante,
       r.correction, r.supersedes, r.startedAt, r.by, r.demo, r.createdAt ?? stampIso(r) ?? new Date(), stampIso(r) ?? new Date(), r.finishedAt ?? null, r.techId, r.shiftId ?? null],
   );
   await insertItems(c, id, r.items);
@@ -106,11 +132,12 @@ async function insertControl(c, id, r) {
 async function updateControl(c, id, r) {
   await c.query('DELETE FROM control_items WHERE control_id = $1', [id]);
   await insertItems(c, id, r.items);
+  const n = countsOf(r.items);
   await c.query(
     `UPDATE controls SET tech_name = $2, shift_id = $3, count_bueno = $4, count_cambio = $5, count_faltante = $6, started_at = $7,
        demo = $8, status = $9, finished_at = $10,
        plantilla_id_snapshot = ${SNAPSHOT_SQL('tech_id', '$10', 'period_y', 'period_m', 'period_w', '$3')} WHERE id = $1`,
-    [id, r.techName, r.shiftId, r.counts.bueno, r.counts.cambio, r.counts.faltante, r.startedAt, r.demo, r.status, r.status === 'finalizado' ? r.finishedAt : null],
+    [id, r.techName, r.shiftId, n.bueno, n.cambio, n.faltante, r.startedAt, r.demo, r.status, r.status === 'finalizado' ? r.finishedAt : null],
   );
 }
 
