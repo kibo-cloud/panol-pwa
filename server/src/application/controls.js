@@ -5,7 +5,7 @@
 // en faltantes y recambios, y limpieza por control (`cleaning`). Una corrección copia cantidades,
 // líneas y limpieza del control corregido.
 import { loadControls, saveControl, rewriteControl } from '../adapters/pg/inventory-repo.js';
-import { buildControlDoc, validateFinalize } from '../domain/controls.js';
+import { buildControlDoc, validateFinalize, itemQuantities, cleaningRequiredFor } from '../domain/controls.js';
 import { DomainError, notFoundError } from '../domain/errors.js';
 import { periodOf, pnumOf, pkeyOf, plabel, localDateISO } from '../domain/period.js';
 import { controlRefDate } from '../domain/plantillas.js';
@@ -62,14 +62,34 @@ function mergeItems(base, patch) {
   return out;
 }
 
-// Una línea nueva en un ítem tiene que existir y estar activa (FOR SHARE: no se archiva mientras
-// tanto). Las que ya tenía el ítem (o copió una corrección) se conservan aunque se archiven.
-async function checkLineas(c, base, patch) {
-  const ids = [...new Set(Object.entries(patch || {}).filter(([aid, v]) => v && v.lineaId && v.lineaId !== (base[aid] && base[aid].lineaId)).map(([, v]) => v.lineaId))].sort();
-  if (!ids.length) return;
+// Línea de los ítems enviados (sobre los ítems ya combinados, que se modifican). Solo cuenta si
+// el ítem resultante tiene faltantes o recambios; si no, queda sin línea. Una línea nueva tiene
+// que existir y estar activa (FOR SHARE: no se archiva mientras tanto); si no (por ejemplo, un
+// borrador guardado sin conexión que se reenvía después de que la archivaron) el ítem se guarda
+// sin línea y se avisa con `linea_dropped`: el borrador nunca se pierde por la línea. Las que ya
+// tenía el ítem (o copió una corrección) se conservan aunque se archiven.
+async function resolveLineas(c, ctx, base, patch, items) {
+  const qtyOf = Object.fromEntries(ctx.assignments.map((a) => [a.id, a.qty || 1]));
+  const check = [];
+  for (const [aid, v] of Object.entries(patch || {})) {
+    const it = items[aid];
+    if (!v || !it || !it.lineaId || it.lineaId === (base[aid] && base[aid].lineaId)) continue;
+    const q = qtyOf[aid] ? itemQuantities(it, qtyOf[aid]) : null;
+    if (!q || q.missing + q.change === 0) it.lineaId = null;
+    else check.push(aid);
+  }
+  if (!check.length) return [];
+  const ids = [...new Set(check.map((aid) => items[aid].lineaId))].sort();
   const ok = new Set((await c.query('SELECT id FROM lineas WHERE id = ANY($1) AND archived_at IS NULL ORDER BY id FOR SHARE', [ids])).rows.map((r) => r.id));
-  if (ids.some((x) => !ok.has(x))) throw rule('Elegí una línea o un sector activo.', 'invalid_linea');
+  const warnings = [];
+  for (const aid of check.sort()) {
+    if (ok.has(items[aid].lineaId)) continue;
+    items[aid].lineaId = null;
+    warnings.push({ code: 'linea_dropped', assignmentId: aid });
+  }
+  return warnings;
 }
+const withWarnings = (r, warnings) => (warnings.length ? { ...r, body: { ...r.body, warnings } } : r);
 
 // Limpieza: sin enviar se conserva la guardada; null la borra.
 const mergeCleaning = (cur, input) => (input === undefined ? cur || null : input);
@@ -118,7 +138,7 @@ export async function createControl(db, actor, input, { idempotencyKey, path, no
     }
     const ctx = await controlContext(c, holder, period, now);
     if (!ctx.holder || (!correctionOf && ctx.holder.active === false)) throw rule(holder.cajaId ? 'Elegí una caja activa.' : 'Elegí un técnico activo.', 'inactive_tech');
-    await checkLineas(c, base, input.items);
+    const warnings = await resolveLineas(c, ctx, base, input.items, items);
     const doc = docOf(ctx, period, items, 'borrador', correctionOf, cleaning);
     await saveControl(c, id, doc, { actorId: actor.id, startedAt: now, demo }).catch((e) => {
       if (e.code === '23505') throw rule(`Ya hay un control original para ${holder.cajaId ? 'esa caja' : 'ese técnico'} y período.`, 'control_exists', 409);
@@ -129,7 +149,7 @@ export async function createControl(db, actor, input, { idempotencyKey, path, no
       action: correctionOf ? 'control_correct_start' : 'control_start', entity: 'controls', id, version: r.body.control.version, event: 'create',
       detail: `${correctionOf ? 'Inicio de corrección de control' : 'Inicio de control'}: ${ctx.holder.name}, ${plabel(period).toLowerCase()}`,
     });
-    return r;
+    return withWarnings(r, warnings);
   });
 }
 
@@ -141,12 +161,13 @@ export async function saveDraft(db, actor, id, input, version, { idempotencyKey,
     checkVersion(cur, version, 'No se encontró el control.');
     const ctx = await controlContext(c, { techId: cur.techId, cajaId: cur.cajaId }, cur.period);
     const base = plainItems(cur.items);
-    await checkLineas(c, base, input.items);
-    const doc = docOf(ctx, cur.period, mergeItems(base, input.items), 'borrador', cur.supersedes, mergeCleaning(cur.cleaning, input.cleaning));
+    const items = mergeItems(base, input.items);
+    const warnings = await resolveLineas(c, ctx, base, input.items, items);
+    const doc = docOf(ctx, cur.period, items, 'borrador', cur.supersedes, mergeCleaning(cur.cleaning, input.cleaning));
     await rewriteControl(c, id, doc);
     const r = await response(c, id, 200);
     await notifyChange(c, { entity: 'controls', id, version: r.body.control.version, action: 'update' });
-    return r;
+    return withWarnings(r, warnings);
   });
 }
 
@@ -169,9 +190,12 @@ export async function finalizeControl(db, actor, id, version, input = {}, { idem
     const ctx = await controlContext(c, { techId: cur.techId, cajaId: cur.cajaId }, cur.period, now);
     if (!ctx.assignments.length) throw rule(cur.cajaId ? 'Esta caja no tiene herramientas asignadas.' : 'Este técnico no tiene herramientas asignadas.', 'no_assignments');
     const base = plainItems(cur.items);
-    await checkLineas(c, base, inp.items);
-    const doc = docOf(ctx, cur.period, mergeItems(base, inp.items), 'finalizado', cur.supersedes, mergeCleaning(cur.cleaning, inp.cleaning));
-    const v = validateFinalize(ctx.assignments, doc.items, doc.cleaning);
+    const items = mergeItems(base, inp.items);
+    const warnings = await resolveLineas(c, ctx, base, inp.items, items);
+    const doc = docOf(ctx, cur.period, items, 'finalizado', cur.supersedes, mergeCleaning(cur.cleaning, inp.cleaning));
+    // Limpieza: obligatoria salvo en la corrección de un control sin dato (queda sin dato).
+    const cleaningRequired = cleaningRequiredFor(cur.supersedes ? await getOne(c, cur.supersedes) : null);
+    const v = validateFinalize(ctx.assignments, doc.items, doc.cleaning, { cleaningRequired });
     if (!v.ok) throw rule(why(v), 'control_incomplete', 422, { pending: v.pending, missingNote: v.missingNote, cleaning: v.cleaning });
     await rewriteControl(c, id, doc, { finishedAt: now });
     const r = await response(c, id, 200);
@@ -179,6 +203,6 @@ export async function finalizeControl(db, actor, id, version, input = {}, { idem
       action: cur.correction ? 'control_correct' : 'control_finish', entity: 'controls', id, version: r.body.control.version, event: 'finalize',
       detail: `${cur.correction ? 'Corrección de control' : 'Control finalizado'}: ${ctx.holder.name}, ${plabel(cur.period).toLowerCase()} (${doc.counts.cambio} para cambio, ${doc.counts.faltante} faltantes${doc.cleaning.status === 'requiere_limpieza' ? ', requiere limpieza' : ''})`,
     });
-    return r;
+    return withWarnings(r, warnings);
   });
 }

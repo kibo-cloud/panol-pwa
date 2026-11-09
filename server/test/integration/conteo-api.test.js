@@ -59,11 +59,29 @@ describe('control por cantidad', () => {
     assert.match((await bad({ items: { [asg.pinza.id]: { good: 2, change: 1 } } }, 422, 'invalid_count')).message, /no pueden superar 2/);
     await bad({ items: { [asg.pinza.id]: { good: 1, change: 0, missing: 0 } } }, 422, 'invalid_count');
     await bad({ items: { [asg.pinza.id]: { good: 2, change: 0, state: 'cambio' } } }, 422, 'invalid_count');
-    assert.equal((await bad({ items: { [asg.pinza.id]: { good: 1, change: 0, lineaId: archived.id } } }, 422, 'invalid_linea')).message, 'Elegí una línea o un sector activo.');
-    await bad({ items: { [asg.pinza.id]: { good: 1, change: 0, lineaId: 'no-existe' } } }, 422, 'invalid_linea');
     // Nada cambió con los rechazos.
     const now = (await api.call('consulta', 'GET', `/api/controls/${c.id}`)).json().control;
     assert.equal(now.version, c.version);
+  });
+
+  test('línea archivada o desconocida al guardar: se guarda sin línea y avisa (no se pierde el borrador)', async () => {
+    let r = await patch(c, { items: { [asg.pinza.id]: { good: 1, change: 0, expected: 2, lineaId: archived.id } } });
+    assert.equal(r.statusCode, 200, r.body);
+    assert.deepEqual(r.json().warnings, [{ code: 'linea_dropped', assignmentId: asg.pinza.id }]);
+    c = r.json().control;
+    assert.deepEqual([c.items[asg.pinza.id].good, c.items[asg.pinza.id].missing, c.items[asg.pinza.id].lineaId], [1, 1, null]);
+    const db = (await api.q('SELECT linea_id FROM control_items WHERE control_id = $1 AND assignment_id = $2', [c.id, asg.pinza.id]))[0];
+    assert.equal(db.linea_id, null);
+    // Sin faltantes ni recambios la línea no se mira: sin aviso.
+    r = await patch(c, { items: { [asg.pinza.id]: { good: 2, change: 0, expected: 2, lineaId: 'no-existe' } } });
+    assert.equal(r.statusCode, 200, r.body);
+    assert.equal(r.json().warnings, undefined);
+    c = r.json().control;
+    assert.equal(c.items[asg.pinza.id].lineaId, null);
+    r = await patch(c, { items: { [asg.pinza.id]: { good: 1, change: 0, expected: 2, lineaId: 'no-existe' } } });
+    assert.equal(r.statusCode, 200, r.body);
+    assert.deepEqual(r.json().warnings, [{ code: 'linea_dropped', assignmentId: asg.pinza.id }]);
+    c = r.json().control;
   });
 
   test('finalizar exige motivo del faltante y limpieza (con nota si requiere)', async () => {
@@ -120,8 +138,11 @@ describe('control por cantidad', () => {
     // Contado con otra cantidad (el cliente contó 3, hoy hay 2): queda pendiente, sin error.
     k = (await patch(k, { items: { [asg.pinza.id]: { good: 3, change: 0, expected: 3 } } })).json().control;
     assert.equal(k.items[asg.pinza.id], undefined);
-    const fin = await finalize(k, { items: { [asg.pinza.id]: { good: 2, change: 0, expected: 2 } }, cleaning: LIMPIO });
+    // Finalizar sigue la misma regla: una línea archivada se deja sin línea y se avisa.
+    const fin = await finalize(k, { items: { [asg.pinza.id]: { good: 2, change: 0, expected: 2 }, [asg.destornillador.id]: { state: 'cambio', lineaId: archived.id } }, cleaning: LIMPIO });
     assert.equal(fin.statusCode, 200, fin.body);
+    assert.deepEqual(fin.json().warnings, [{ code: 'linea_dropped', assignmentId: asg.destornillador.id }]);
+    assert.equal(fin.json().control.items[asg.destornillador.id].lineaId, null);
     assert.deepEqual(fin.json().control.cleaning, { status: 'limpio', note: '' });
     assert.equal(fin.json().control.items[asg.pinza.id].lineaId, null);
     // La corrección (efectiva) ya no tiene faltante: la alerta de la pinza desaparece.
@@ -207,5 +228,56 @@ describe('informes y .txt v2', () => {
     const row = (await api.q("SELECT state, qty_expected, qty_good, qty_change, qty_missing, linea_id FROM control_items WHERE control_id = 'c-txt-conteo'"))[0];
     assert.deepEqual(row, { state: 'faltante', qty_expected: 3, qty_good: 0, qty_change: 0, qty_missing: 3, linea_id: null });
     assert.equal((await api.q("SELECT cleaning_status FROM controls WHERE id = 'c-txt-conteo'"))[0].cleaning_status, null);
+  });
+
+  test('.txt v2: al importar, los totales del control salen de los ítems (el .txt pierde las cantidades por unidad)', async () => {
+    const tech = (await api.call('admin', 'POST', '/api/techs', { name: 'Txt Conteo', legajo: 'TXT-3', shiftId: 'noche' })).json().tech;
+    const ent = await api.call('responsable', 'POST', '/api/movements', { type: 'entrega_inicial', techId: tech.id, toolId: 'tool-pinza', qty: 3 });
+    assert.equal(ent.statusCode, 201, ent.body);
+    const asgId = ent.json().assignments[0];
+    let k = (await api.call('responsable', 'POST', '/api/controls', { techId: tech.id, period: cur, items: { [asgId]: { good: 2, change: 0, expected: 3, note: 'Se perdió una' } } })).json().control;
+    k = (await finalize(k, { cleaning: LIMPIO })).json().control;
+    assert.deepEqual(k.counts, { bueno: 2, cambio: 0, faltante: 1 });
+    const p = JSON.parse((await api.call('admin', 'GET', '/api/export/txt')).body.slice(HEAD.length));
+    assert.deepEqual(p.data.controls[k.id].counts, { bueno: 2, cambio: 0, faltante: 1 });
+    const fresh = await setupApi();
+    try {
+      const rep = (await fresh.call('admin', 'POST', '/api/import/txt?mode=merge&dryRun=1', toTxt(p), { 'content-type': 'text/plain' })).json();
+      assert.equal(rep.canApply, true, JSON.stringify(rep.errors));
+      const ap = await fresh.call('admin', 'POST', `/api/import/txt?mode=merge&token=${encodeURIComponent(rep.token)}`, toTxt(p), { 'content-type': 'text/plain' });
+      assert.equal(ap.statusCode, 200, ap.body);
+      const ctl = (await fresh.q('SELECT count_bueno AS b, count_cambio AS c, count_faltante AS f FROM controls WHERE id = $1', [k.id]))[0];
+      const sum = (await fresh.q('SELECT sum(qty_good)::int AS b, sum(qty_change)::int AS c, sum(qty_missing)::int AS f FROM control_items WHERE control_id = $1', [k.id]))[0];
+      assert.deepEqual(sum, { b: 0, c: 0, f: 3 }, 'el .txt v2 solo tiene el estado: faltante -> faltan las 3');
+      assert.deepEqual(ctl, sum);
+    } finally {
+      await fresh.close();
+    }
+  });
+});
+
+describe('limpieza en correcciones', () => {
+  test('la corrección de un control sin dato de limpieza se finaliza sin limpieza (queda sin dato)', async () => {
+    const r = await api.call('responsable', 'POST', '/api/controls', { correctionOf: 'c-txt-conteo' });
+    assert.equal(r.statusCode, 201, r.body);
+    const k = r.json().control;
+    assert.equal(k.cleaning.status, null);
+    const bruno = await api.q("SELECT id FROM assignments WHERE tech_id = 't-bruno' AND active");
+    const fin = await finalize(k, { items: Object.fromEntries(bruno.map((a) => [a.id, { state: 'bueno' }])) });
+    assert.equal(fin.statusCode, 200, fin.body);
+    assert.deepEqual(fin.json().control.cleaning, { status: null, note: '' });
+  });
+
+  test('la corrección de un control con limpieza y un original nuevo la siguen exigiendo', async () => {
+    const [src] = await api.q("SELECT id FROM controls WHERE tech_id = 't-ana' AND status = 'finalizado' AND correction AND cleaning_status IS NOT NULL ORDER BY finished_at DESC LIMIT 1");
+    const k = (await api.call('responsable', 'POST', '/api/controls', { correctionOf: src.id })).json().control;
+    const fin = await finalize(k, { cleaning: null });
+    assert.equal(fin.statusCode, 422, fin.body);
+    assert.equal(fin.json().cleaning, 'pending');
+    const [carla] = await api.q("SELECT id FROM assignments WHERE tech_id = 't-carla' AND active");
+    const o = (await api.call('responsable', 'POST', '/api/controls', { techId: 't-carla', period: prevP(prevP(prevP(cur))), items: { [carla.id]: { state: 'bueno' } } })).json().control;
+    const f2 = await finalize(o);
+    assert.equal(f2.statusCode, 422, f2.body);
+    assert.equal(f2.json().message, 'Indicá la limpieza de herramientas y caja.');
   });
 });

@@ -106,7 +106,9 @@ export function controlHistory(effList) {
 // Para finalizar: cada asignación activa está contada, todo faltante tiene motivo y la limpieza
 // está indicada (con nota si requiere limpieza). `items` son los del documento (con cantidades).
 // cleaning: null (bien), 'pending' (sin indicar) o 'note' (requiere limpieza sin nota).
-export function validateFinalize(activeAssignments, items, cleaning) {
+// Con cleaningRequired: false (corrección de un control sin dato de limpieza) puede quedar sin
+// indicar; si se indica "requiere limpieza", la nota sigue siendo obligatoria.
+export function validateFinalize(activeAssignments, items, cleaning, { cleaningRequired = true } = {}) {
   const pending = [];
   const missingNote = [];
   for (const a of activeAssignments) {
@@ -115,9 +117,13 @@ export function validateFinalize(activeAssignments, items, cleaning) {
     else if (hasMissing(it) && !String(it.note || '').trim()) missingNote.push(a.id);
   }
   const cl = cleanCleaning(cleaning);
-  const cleaningIssue = !cl.status ? 'pending' : cl.status === 'requiere_limpieza' && !cl.note ? 'note' : null;
+  const cleaningIssue = !cl.status ? (cleaningRequired ? 'pending' : null) : cl.status === 'requiere_limpieza' && !cl.note ? 'note' : null;
   return { ok: !pending.length && !missingNote.length && !cleaningIssue, pending, missingNote, cleaning: cleaningIssue };
 }
+
+// Limpieza obligatoria para finalizar: siempre en un control original; en una corrección, solo si
+// el control corregido tenía dato de limpieza (uno viejo o importado sin dato puede seguir sin dato).
+export const cleaningRequiredFor = (corrected) => !corrected || !!(corrected.cleaning && corrected.cleaning.status);
 
 // Documento del control: copia nombre, categoría y código al momento del control, y cuenta
 // unidades (en buen estado, para recambio y faltantes). Solo entran las asignaciones activas

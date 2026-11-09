@@ -20,9 +20,9 @@ import { net } from '../../api/net.js';
 import { S, ME, derive, can, who, refresh, shiftName, catName } from '../../state/store.js';
 import { holderBody, holderKey } from '../../state/plantillas.js';
 import { ST, QUICK } from '../../state/constants.js';
-import { CLEAN, CLEAN_QUICK, itemQty, itemState, ckSummary, ckWhy, checklistItem } from '../../state/conteo.js';
+import { CLEAN, CLEAN_QUICK, itemQty, itemState, ckSummary, ckWhy, checklistItem, apiItem, apiItems, cleaningRequiredFor } from '../../state/conteo.js';
 import { pkeyOf, parsePkey, plabel, pshort, prevP, fdt, fhm, nowISO } from '../../state/period.js';
-import { draftKey, nextDraft, requestFor, flushDrafts, idbStore, memoryStore } from '../../state/drafts.js';
+import { draftKey, nextDraft, requestFor, flushDrafts, needsReview, reviewOf, idbStore, memoryStore } from '../../state/drafts.js';
 
 let store = null;
 const drafts = () => store || (store = typeof indexedDB !== 'undefined' ? idbStore() : memoryStore());
@@ -64,7 +64,9 @@ function initCheck(techId, period, opts = {}) {
   const src = ex || (correctionOf ? S.controls[correctionOf] : null);
   const items = itemsOf(src ? src.items : null);
   const effC = d.eff[techId + '|' + pk];
-  UI.ck = { techId, period, pk, key: draftKey(techId, period, correctionOf), controlId: ex ? ex.id : null, version: ex ? ex.version : null, items, cleaning: cleaningOf(src), correctionOf, locked: !correctionOf && !!effC, effId: effC ? effC.id : null, dirty: false, local: false, conflict: null, startedAt: (ex && ex.startedAt) || null, savedAt: ex ? ex.updatedAt : null };
+  // Limpieza: obligatoria salvo en la corrección de un control sin dato (puede seguir sin dato).
+  const cleaningRequired = cleaningRequiredFor(correctionOf ? S.controls[correctionOf] : null);
+  UI.ck = { techId, period, pk, key: draftKey(techId, period, correctionOf), controlId: ex ? ex.id : null, version: ex ? ex.version : null, items, cleaning: cleaningOf(src), cleaningRequired, correctionOf, locked: !correctionOf && !!effC, effId: effC ? effC.id : null, dirty: false, local: false, conflict: null, review: null, startedAt: (ex && ex.startedAt) || null, savedAt: ex ? ex.updatedAt : null };
   restoreLocal(UI.ck);
 }
 // Un borrador guardado en este equipo (p. ej. sin conexión) se recupera al abrir el control.
@@ -75,8 +77,9 @@ async function restoreLocal(ck) {
   if (rec.cleaning !== undefined) ck.cleaning = cleaningOf({ cleaning: rec.cleaning });
   if (rec.controlId && !ck.controlId) { ck.controlId = rec.controlId; ck.version = rec.version; }
   if (rec.conflict) ck.conflict = { current: S.controls[ck.controlId] || null };
+  if (rec.review) ck.review = rec.review;
   UI.forceCk = true; render();
-  if (!net.offline && !rec.conflict) sendLocal();
+  if (!net.offline && !rec.conflict && !rec.review) sendLocal();
 }
 
 VIEWS.ck = (techId) => {
@@ -96,7 +99,7 @@ VIEWS.ck = (techId) => {
     return head + `<div class="banner"><div><b>Ya hay un control finalizado para ${plabel(ck.period).toLowerCase()}.</b><div class="sm">Finalizado ${fdt(c.finishedAt)} por ${esc(who(c.by))}. Para cambiarlo, registrá una corrección: el original queda guardado.</div></div><div class="acts"><a class="btn sm" href="#controlver-${esc(ck.effId)}">Ver control</a><button class="btn sm pri" data-act="correct" data-c="${esc(ck.effId)}">Registrar corrección</button></div></div>`;
   }
   if (!list.length) return head + corr + `<div class="list">${emptyBox(t.kind === 'caja' ? 'Esta caja no tiene herramientas asignadas' : 'Este técnico no tiene herramientas asignadas', 'Asigná herramientas para poder controlarlo.', can('movements_do') ? `<button class="btn pri" data-act="asgNew" data-h="${esc(techId)}">Asignar herramienta</button>` : '')}</div>`;
-  return head + corr + `<div id="ckconf"></div><button class="allok" id="ckallok" data-act="ckAllOk">${icon('ok', 18)}<span id="ckallokt">Marcar pendientes como Buen estado</span></button>
+  return head + corr + `<div id="ckconf"></div><div id="ckreview"></div><button class="allok" id="ckallok" data-act="ckAllOk">${icon('ok', 18)}<span id="ckallokt">Marcar pendientes como Buen estado</span></button>
   <div class="items" id="ckitems">${list.map(ckItemHTML).join('')}</div>${ckCleanHTML()}<div class="ckpad"></div>
   <div class="ckfoot"><span class="why" id="ckwhy" aria-live="polite"></span><div class="bt"><button class="btn" data-act="ckSave">Guardar borrador</button><button class="btn pri" id="ckfin" data-act="ckFinish">FINALIZAR CONTROL</button></div></div>`;
 };
@@ -139,12 +142,15 @@ function ckCleanHTML() {
   const d = derive(); const cl = UI.ck.cleaning || {}; const st = CLEAN[cl.status] ? cl.status : null;
   const effs = d.effByTech[UI.ck.techId] || []; const last = effs.filter((c) => c.pkey !== UI.ck.pk).pop(); const prev = last && last.cleaning && CLEAN[last.cleaning.status];
   const empty = st === 'requiere_limpieza' && !(cl.note || '').trim();
-  return `<article class="item ckclean ${st ? CLEAN[st].cls : ''}" id="it-clean"><div class="item-h"><div data-css="min-width:0"><h2 class="item-name">Limpieza de herramientas y caja</h2><div class="s">Obligatorio para finalizar el control</div></div><span class="prev">Anterior<b data-css="color:${prev ? `var(--${prev.cls}-ink)` : 'var(--ink2)'}">${prev ? prev.label : 'Sin dato'}</b></span></div>
+  const sub = UI.ck.cleaningRequired === false ? 'Opcional: el control que corregís no tiene dato de limpieza' : 'Obligatorio para finalizar el control';
+  return `<article class="item ckclean ${st ? CLEAN[st].cls : ''}" id="it-clean"><div class="item-h"><div data-css="min-width:0"><h2 class="item-name">Limpieza de herramientas y caja</h2><div class="s">${sub}</div></div><span class="prev">Anterior<b data-css="color:${prev ? `var(--${prev.cls}-ink)` : 'var(--ink2)'}">${prev ? prev.label : 'Sin dato'}</b></span></div>
   <div class="pick two" role="radiogroup" aria-label="Limpieza de herramientas y caja">${[['limpio', 'ok'], ['requiere_limpieza', 'clean']].map(([s, ic]) => `<button type="button" role="radio" class="${CLEAN[s].cls}" aria-checked="${st === s}" data-act="ckClean" data-s="${s}">${icon(ic, 16)}${CLEAN[s].label}</button>`).join('')}</div>
   ${st === 'requiere_limpieza' ? `<div class="note warn"><label for="nt-clean">Nota de limpieza (obligatoria)</label><div class="quick" data-css="margin:0">${CLEAN_QUICK.map((x) => `<button type="button" class="qchip" data-act="ckCleanQuick" data-q="${esc(x)}">${esc(x)}</button>`).join('')}</div><textarea id="nt-clean" class="${empty ? 'empty' : ''}" data-in="ckCleanNote" rows="2" maxlength="2000" placeholder="Contá qué hay que limpiar">${esc(cl.note || '')}</textarea><span class="nerr" role="alert" id="ne-clean" ${empty ? '' : 'hidden'}>La nota es obligatoria si requiere limpieza.</span></div>` : ''}</article>`;
 }
 
-const ckStats = () => { const list = ckList(UI.ck); return { ...ckSummary(list, UI.ck.items, UI.ck.cleaning), list }; };
+const ckStats = () => { const list = ckList(UI.ck); return { ...ckSummary(list, UI.ck.items, UI.ck.cleaning, { cleaningRequired: UI.ck.cleaningRequired !== false }), list }; };
+// Aviso de un borrador que el servidor rechazó: queda en el equipo hasta corregirlo o descartarlo.
+const reviewHTML = (rv) => `<div class="banner warn" role="alert"><div><b>Este borrador necesita revisión</b><div class="sm">El servidor no lo aceptó: ${esc(rv.message)} Quedó guardado en este equipo; corregilo y guardalo de nuevo, o descartalo.</div></div><div class="acts"><button class="btn sm" data-act="ckDiscardLocal">Descartar borrador</button><button class="btn sm pri" data-act="ckSave">Guardar de nuevo</button></div></div>`;
 function savedText(ck) {
   if (ck.dirty) return 'Cambios sin guardar';
   if (ck.local) return 'Borrador guardado en este equipo' + (net.offline ? ' (sin conexión)' : '');
@@ -161,6 +167,7 @@ function ckUpdateProgress() {
   const why = ckWhy(c, net.offline);
   const w = $('#ckwhy'); if (w) w.textContent = why; const fb = $('#ckfin'); if (fb) fb.disabled = !!why;
   const cf = $('#ckconf'); if (cf) setHTML(cf, UI.ck.conflict ? CONFLICT_HTML('ckConflictReload', 'ckConflictKeep') : '');
+  const rv = $('#ckreview'); if (rv) setHTML(rv, UI.ck.review ? reviewHTML(UI.ck.review) : '');
 }
 VIEWS.ckRefresh = ckUpdateProgress;
 
@@ -171,7 +178,16 @@ function ckTouch() { UI.ck.dirty = true; ckUpdateProgress(); clearTimeout(draftT
 async function sendRequest(req) {
   const o = { idempotencyKey: req.idempotencyKey, allowOffline: true };
   const r = req.kind === 'create' ? await api.createControl(req.body, o) : await api.saveControl(req.id, { items: req.items, ...(req.cleaning !== undefined ? { cleaning: req.cleaning } : {}) }, req.version, o);
+  droppedLineas(r.control, r.warnings);
   return r.control;
+}
+// El servidor guardó sin línea los ítems cuya línea ya no está activa (p. ej. la archivaron
+// mientras el borrador esperaba sin conexión): se avisa y el checklist abierto la quita también.
+function droppedLineas(control, warnings) {
+  const ws = (warnings || []).filter((w) => w && w.code === 'linea_dropped'); if (!ws.length || !control) return;
+  const ck = UI.ck;
+  if (ck && ck.key === draftKey(holderKey(control), control.period, control.supersedes || null)) for (const w of ws) { const it = ck.items[w.assignmentId]; if (it) { it.lineaId = null; ckReplaceItem(w.assignmentId); } }
+  toast(ws.length === 1 ? 'La línea elegida en una herramienta ya no está activa: se guardó sin línea. Elegí otra si hace falta.' : `La línea elegida en ${ws.length} herramientas ya no está activa: se guardaron sin línea. Elegí otra si hace falta.`);
 }
 function adopt(ck, control) { ck.controlId = control.id; ck.version = control.version; ck.startedAt = control.startedAt; ck.savedAt = control.updatedAt; }
 
@@ -181,7 +197,7 @@ async function saveDraft(silent) {
   if (!ck.dirty && silent) return;
   ck.dirty = false;
   let prev = null; try { prev = await drafts().get(ck.key); } catch { prev = null; }
-  const rec = nextDraft(prev, { techId: ck.techId, period: ck.period, correctionOf: ck.correctionOf, controlId: ck.controlId, version: ck.version, items: { ...ck.items }, cleaning: { ...ck.cleaning } }, newIdempotencyKey());
+  const rec = nextDraft(prev, { techId: ck.techId, period: ck.period, correctionOf: ck.correctionOf, controlId: ck.controlId, version: ck.version, items: apiItems(ck.items, qtyOfAsg), cleaning: { ...ck.cleaning } }, newIdempotencyKey());
   try { await drafts().put(rec); ck.local = true; } catch (e) { console.warn(e); }
   if (ck.conflict) { if (!silent) toast('Resolvé el aviso de cambios antes de guardar.', 'err'); if (UI.ck === ck) ckUpdateProgress(); return; }
   if (net.offline) { if (!silent) toast('Sin conexión: el borrador quedó guardado en este equipo y se envía al volver la conexión.'); if (UI.ck === ck) ckUpdateProgress(); return; }
@@ -195,13 +211,14 @@ async function sendLocal(silent = true, ck = UI.ck) {
   ck.saving = true;
   try {
     const control = await sendRequest(requestFor(rec));
-    adopt(ck, control); ck.local = false;
+    adopt(ck, control); ck.local = false; ck.review = null;
     try { const cur = await drafts().get(ck.key); if (cur && cur.idemKey === rec.idemKey) await drafts().del(ck.key); else if (cur) { await drafts().put({ ...cur, controlId: control.id, version: control.version }); ck.local = true; } } catch (e) { console.warn(e); }
     if (!silent) toast('Borrador guardado');
     refresh().catch(() => {});
   } catch (e) {
     if (e.kind === 'network' || e.kind === 'offline') { if (!silent) toast('Sin conexión: el borrador quedó guardado en este equipo y se envía al volver la conexión.'); }
     else if (e.kind === 'conflict') { ck.conflict = { current: e.current }; await drafts().put({ ...rec, conflict: true }).catch(() => {}); }
+    else if (needsReview(e)) { ck.review = reviewOf(e); await drafts().put({ ...rec, review: ck.review }).catch(() => {}); toast(errMsg(e), 'err'); }
     else { ck.dirty = true; toast(errMsg(e), 'err'); }
   } finally { ck.saving = false; }
   if (UI.ck === ck) ckUpdateProgress();
@@ -212,6 +229,10 @@ hooks.online.push(async () => {
   const out = await flushDrafts(drafts(), sendRequest);
   for (const { rec, control } of out.sent) if (UI.ck && UI.ck.key === rec.key) { adopt(UI.ck, control); UI.ck.local = false; }
   for (const rec of out.conflicts) if (UI.ck && UI.ck.key === rec.key && !UI.ck.conflict) UI.ck.conflict = { current: S.controls[rec.controlId] || null };
+  // Rechazados: siguen en el equipo, marcados para revisar (con el aviso en el control).
+  for (const rec of out.review) if (UI.ck && UI.ck.key === rec.key) UI.ck.review = rec.review;
+  const nRev = out.review.length;
+  if (nRev) toast(nRev === 1 ? `Un borrador guardado sin conexión necesita revisión: ${out.review[0].review.message}` : `${nRev} borradores guardados sin conexión necesitan revisión. Abrí cada control para corregirlo.`, 'err');
   if (out.sent.length) { toast(out.sent.length === 1 ? 'Se envió el borrador guardado sin conexión.' : `Se enviaron ${out.sent.length} borradores guardados sin conexión.`); refresh().catch(() => {}); }
   for (const f of out.failed) toast(errMsg(f.error), 'err');
   if (UI.ck) ckUpdateProgress();
@@ -253,10 +274,12 @@ function swapCard(id, html) {
 }
 function ckReplaceItem(aid) { const a = S.assignments[aid]; if (a) swapCard('it-' + aid, ckItemHTML({ id: aid, ...a })); }
 const keepNote = (cur) => ({ note: (cur && cur.note) || '', lineaId: (cur && cur.lineaId) || null });
+// Guarda el ítem en la forma del pedido (apiItem): si quedó sin faltantes ni recambios, sin línea.
+const setItem = (aid, it) => { UI.ck.items[aid] = apiItem(it, qtyOfAsg(aid)); };
 
 ACT.ckSet = (ds) => {
   const ck = UI.ck; if (!ck) return; const cur = ck.items[ds.aid] || {};
-  ck.items[ds.aid] = { state: ds.s, expected: qtyOfAsg(ds.aid), ...keepNote(cur) }; ckReplaceItem(ds.aid);
+  setItem(ds.aid, { state: ds.s, expected: qtyOfAsg(ds.aid), ...keepNote(cur) }); ckReplaceItem(ds.aid);
   if (ds.s === 'faltante' && !(cur.note || '').trim()) { const ta = document.getElementById('nt-' + ds.aid); if (ta && matchMedia('(min-width:1024px)').matches) ta.focus(); }
   const it = document.getElementById('it-' + ds.aid); const b = it && it.querySelector(`[data-s="${CSS.escape(ds.s)}"]`); if (b && !it.contains(document.activeElement)) b.focus({ preventScroll: true });
   ckTouch();
@@ -267,18 +290,18 @@ function setQty(aid, k, value) {
   let good = q ? q.good : 0; let change = q ? q.change : 0;
   const v = Math.max(0, Math.floor(Number(value) || 0));
   if (k === 'good') good = Math.min(v, exp - change); else change = Math.min(v, exp - good);
-  ck.items[aid] = { good, change, expected: exp, ...keepNote(cur) }; ckReplaceItem(aid); ckTouch();
+  setItem(aid, { good, change, expected: exp, ...keepNote(cur) }); ckReplaceItem(aid); ckTouch();
 }
 ACT.ckStep = (ds) => { const q = itemQty(UI.ck && UI.ck.items[ds.aid], qtyOfAsg(ds.aid)); setQty(ds.aid, ds.k, (q ? q[ds.k] : 0) + Number(ds.d)); };
 CH.ckQty = (v, el) => setQty(el.dataset.aid, el.dataset.k, v);
-ACT.ckAllGood = (ds) => { const exp = qtyOfAsg(ds.aid); const cur = UI.ck && UI.ck.items[ds.aid]; if (!UI.ck) return; UI.ck.items[ds.aid] = { good: exp, change: 0, expected: exp, ...keepNote(cur) }; ckReplaceItem(ds.aid); ckTouch(); };
+ACT.ckAllGood = (ds) => { const exp = qtyOfAsg(ds.aid); const cur = UI.ck && UI.ck.items[ds.aid]; if (!UI.ck) return; setItem(ds.aid, { good: exp, change: 0, expected: exp, ...keepNote(cur) }); ckReplaceItem(ds.aid); ckTouch(); };
 CH.ckLinea = (v, el) => { const it = UI.ck && UI.ck.items[el.dataset.aid]; if (!it) return; it.lineaId = v || null; ckTouch(); };
 function ckNoteState(aid) { const it = UI.ck && UI.ck.items[aid]; const ta = document.getElementById('nt-' + aid); const er = document.getElementById('ne-' + aid); const q = itemQty(it, qtyOfAsg(aid)); const empty = q && q.missing > 0 && !(it.note || '').trim(); if (ta) ta.classList.toggle('empty', !!empty); if (er) er.hidden = !empty; }
 ACT.ckQuick = (ds) => { const it = UI.ck && UI.ck.items[ds.aid]; if (!it) return; it.note = ds.q; const ta = document.getElementById('nt-' + ds.aid); if (ta) ta.value = ds.q; ckNoteState(ds.aid); ckTouch(); };
 IN.ckNote = (v, el) => { const it = UI.ck && UI.ck.items[el.dataset.aid]; if (!it) return; it.note = v; ckNoteState(el.dataset.aid); ckTouch(); };
 ACT.ckAllOk = () => {
   const ck = UI.ck; if (!ck) return; let n = 0;
-  for (const a of ckList(ck)) { const exp = a.qty || 1; if (!itemQty(ck.items[a.id], exp)) { const cur = ck.items[a.id]; ck.items[a.id] = exp > 1 ? { good: exp, change: 0, expected: exp, ...keepNote(cur) } : { state: 'bueno', expected: 1, ...keepNote(cur) }; n++; ckReplaceItem(a.id); } }
+  for (const a of ckList(ck)) { const exp = a.qty || 1; if (!itemQty(ck.items[a.id], exp)) { const cur = ck.items[a.id]; setItem(a.id, exp > 1 ? { good: exp, change: 0, expected: exp, ...keepNote(cur) } : { state: 'bueno', expected: 1, ...keepNote(cur) }); n++; ckReplaceItem(a.id); } }
   if (n) { ckTouch(); toast(`${n} marcadas en buen estado`); } else toast('No quedan herramientas pendientes');
 };
 // Limpieza.
@@ -287,6 +310,13 @@ ACT.ckClean = (ds) => { const ck = UI.ck; if (!ck) return; ck.cleaning = { statu
 ACT.ckCleanQuick = (ds) => { const cl = UI.ck && UI.ck.cleaning; if (!cl) return; cl.note = ds.q; const ta = document.getElementById('nt-clean'); if (ta) ta.value = ds.q; ckCleanState(); ckTouch(); };
 IN.ckCleanNote = (v) => { const cl = UI.ck && UI.ck.cleaning; if (!cl) return; cl.note = v; ckCleanState(); ckTouch(); };
 ACT.ckSave = () => { if (UI.ck) { UI.ck.dirty = true; saveDraft(false); } };
+// Descarta el borrador guardado en este equipo (decisión explícita) y vuelve a lo del servidor.
+ACT.ckDiscardLocal = async () => {
+  const ck = UI.ck; if (!ck) return;
+  try { await drafts().del(ck.key); } catch (e) { console.warn(e); }
+  const { techId, period, correctionOf } = ck; UI.ck = null; initCheck(techId, period, { correctionOf }); UI.forceCk = true; render();
+  toast('Se descartó el borrador guardado en este equipo.');
+};
 CH.ckPeriod = (v) => { if (UI.ck && UI.ck.dirty) saveDraft(true); initCheck(UI.ck.techId, parsePkey(v)); UI.forceCk = true; render(); };
 ACT.ckCancelCorr = () => { const ck = UI.ck; if (!ck) return; const p = ck.period, t = ck.techId; UI.ck = null; initCheck(t, p); UI.forceCk = true; render(); };
 ACT.correct = (ds) => { const c = S.controls[ds.c]; if (!c || !gateUI('controls_do')) return; const hk = holderKey(c); UI.ck = null; UI.pendingCk = { techId: hk, period: c.period, correctionOf: ds.c }; if (location.hash === '#control-' + hk) { UI.forceCk = true; render(); } else location.hash = '#control-' + hk; };
@@ -314,13 +344,14 @@ ACT.ckFinish = async () => {
   const cleanAlert = ck.cleaning.status === 'requiere_limpieza' && prevEff && prevEff.cleaning && prevEff.cleaning.status === 'requiere_limpieza';
   const nAl = c.alerts + (cleanAlert ? 1 : 0);
   const cl = CLEAN[ck.cleaning.status];
-  openModal({ title: '¿Finalizar el control?', render: () => `<p class="muted" data-css="margin:0 0 14px">${esc(t.name)} · ${plabel(ck.period)}${ck.correctionOf ? ' (corrección)' : ''}. El registro no podrá editarse; las correcciones se hacen con un nuevo registro de auditoría.</p><div class="tiles3"><div class="tile3 ok"><b>${c.bueno}</b><span>Buen estado</span></div><div class="tile3 warn"><b>${c.cambio}</b><span>Para cambio</span></div><div class="tile3 bad"><b>${c.faltante}</b><span>Faltante</span></div></div><p class="muted xs" data-css="margin:8px 0 0">En unidades. Las que requieren recambio no cuentan como faltantes.</p><dl class="meta"><dt>Responsable</dt><dd>${esc(who(ME.id))}</dd><dt>Fecha y hora</dt><dd>${fdt(nowISO())}</dd><dt>Limpieza</dt><dd>${esc(cl ? cl.label : '—')}${ck.cleaning.status === 'requiere_limpieza' ? '. ' + esc(ck.cleaning.note.trim()) : ''}</dd><dt>Alertas</dt><dd>${nAl ? `Se generarán ${nAl} ${nAl === 1 ? 'alerta automática' : 'alertas automáticas'}` : 'No se generan alertas'}</dd></dl>`,
+  openModal({ title: '¿Finalizar el control?', render: () => `<p class="muted" data-css="margin:0 0 14px">${esc(t.name)} · ${plabel(ck.period)}${ck.correctionOf ? ' (corrección)' : ''}. El registro no podrá editarse; las correcciones se hacen con un nuevo registro de auditoría.</p><div class="tiles3"><div class="tile3 ok"><b>${c.bueno}</b><span>Buen estado</span></div><div class="tile3 warn"><b>${c.cambio}</b><span>Para cambio</span></div><div class="tile3 bad"><b>${c.faltante}</b><span>Faltante</span></div></div><p class="muted xs" data-css="margin:8px 0 0">En unidades. Las que requieren recambio no cuentan como faltantes.</p><dl class="meta"><dt>Responsable</dt><dd>${esc(who(ME.id))}</dd><dt>Fecha y hora</dt><dd>${fdt(nowISO())}</dd><dt>Limpieza</dt><dd>${esc(cl ? cl.label : 'Sin dato')}${ck.cleaning.status === 'requiere_limpieza' ? '. ' + esc(ck.cleaning.note.trim()) : ''}</dd><dt>Alertas</dt><dd>${nAl ? `Se generarán ${nAl} ${nAl === 1 ? 'alerta automática' : 'alertas automáticas'}` : 'No se generan alertas'}</dd></dl>`,
     actions: [{ label: 'Revisar', close: true }, { label: 'Confirmar y guardar', kind: 'pri', run: async () => {
       clearTimeout(draftTimer); ck.saving = true;
       try {
       // Primero queda guardado el borrador con todos los ítems y la limpieza; después se finaliza.
-      const items = { ...ck.items }; const cleaning = { ...ck.cleaning };
+      const items = apiItems(ck.items, qtyOfAsg); const cleaning = { ...ck.cleaning };
       const saved = ck.controlId ? await api.saveControl(ck.controlId, { items, cleaning }, ck.version) : await api.createControl(ck.correctionOf ? { correctionOf: ck.correctionOf, items, cleaning } : { ...holderBody(ck.techId), period: ck.period, items, cleaning });
+      droppedLineas(saved.control, saved.warnings);
       adopt(ck, saved.control);
       const fin = (await api.finalizeControl(ck.controlId, ck.version)).control;
       try { await drafts().del(ck.key); } catch (e) { console.warn(e); }

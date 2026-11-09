@@ -1,7 +1,7 @@
 // Etapa 4: conteo por cantidad y limpieza en el checklist (mismas reglas que el servidor).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { itemQty, ckSummary, ckWhy, checklistItem, apiItem, asgUnits, cleaningStats, lossesByLinea, qtyText } from '../src/state/conteo.js';
+import { itemQty, ckSummary, ckWhy, checklistItem, apiItem, apiItems, cleaningRequiredFor, asgUnits, cleaningStats, lossesByLinea, qtyText } from '../src/state/conteo.js';
 import { nextDraft, requestFor } from '../src/state/drafts.js';
 
 test('cantidades del checklist: botones, buen estado + recambio y pendientes', () => {
@@ -37,6 +37,27 @@ test('ítems: del servidor al checklist y al pedido (la línea solo con faltante
   assert.deepEqual(checklistItem({ state: 'bueno', expected: 1, good: 1, change: 0, missing: 0 }, 1), { note: '', lineaId: null, state: 'bueno', expected: 1 });
   assert.deepEqual(apiItem({ good: 5, change: 0, expected: 5, lineaId: 'l1' }, 5), { good: 5, change: 0, expected: 5, note: '', lineaId: null });
   assert.deepEqual(apiItem({ state: 'cambio', lineaId: 'l1' }, 1), { state: 'cambio', note: '', lineaId: 'l1' });
+});
+
+test('ítems al pedido y al borrador: todos por apiItem; la línea se borra si vuelve a buen estado', () => {
+  const qty = { a1: 5, a2: 1, a3: 1 };
+  const items = { a1: { good: 5, change: 0, expected: 5, note: '', lineaId: 'l1' }, a2: { state: 'bueno', expected: 1, note: 'x', lineaId: 'l1' }, a3: { state: 'faltante', expected: 1, note: 'perdida', lineaId: 'l2' } };
+  assert.deepEqual(apiItems(items, (aid) => qty[aid]), {
+    a1: { good: 5, change: 0, expected: 5, note: '', lineaId: null },
+    a2: { state: 'bueno', expected: 1, note: 'x', lineaId: null },
+    a3: { state: 'faltante', expected: 1, note: 'perdida', lineaId: 'l2' },
+  });
+});
+
+test('limpieza opcional en la corrección de un control sin dato', () => {
+  const list = [{ id: 'a1', qty: 1 }];
+  const items = { a1: { state: 'bueno', expected: 1 } };
+  assert.equal(ckWhy(ckSummary(list, items, { status: null })), 'Indicá la limpieza de herramientas y caja');
+  assert.equal(ckWhy(ckSummary(list, items, { status: null }, { cleaningRequired: false })), '');
+  assert.equal(ckWhy(ckSummary(list, items, { status: 'requiere_limpieza', note: '' }, { cleaningRequired: false })), 'Completá la nota de limpieza');
+  assert.equal(cleaningRequiredFor(null), true);
+  assert.equal(cleaningRequiredFor({ cleaning: { status: 'limpio' } }), true);
+  assert.equal(cleaningRequiredFor({ cleaning: { status: null, note: '' } }), false);
 });
 
 test('unidades, % limpio, pérdidas por línea y texto de cantidades', () => {

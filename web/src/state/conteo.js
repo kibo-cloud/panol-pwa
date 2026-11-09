@@ -52,10 +52,19 @@ export function apiItem(it, expected) {
   return { ...out, note: it.note || '', lineaId };
 }
 
+// Todos los ítems del checklist -> cuerpo del pedido y del borrador del equipo (siempre por
+// apiItem: un ítem que volvió a buen estado no manda la línea que tenía). qtyOf(aid) = unidades.
+export const apiItems = (items, qtyOf) => Object.fromEntries(Object.entries(items || {}).map(([aid, it]) => [aid, apiItem(it, qtyOf(aid))]));
+
+// Limpieza obligatoria para finalizar (como el servidor): siempre en un original; en una
+// corrección, solo si el control corregido tenía dato de limpieza.
+export const cleaningRequiredFor = (corrected) => !corrected || !!(corrected.cleaning && corrected.cleaning.status);
+
 // Resumen del checklist: unidades por estado, herramientas pendientes, faltantes sin motivo y
 // la limpieza (null = bien, 'pending' = sin indicar, 'note' = requiere limpieza sin nota).
 // list: asignaciones activas [{ id, qty }]; items: por asignación; cleaning: { status, note }.
-export function ckSummary(list, items, cleaning) {
+// cleaningRequired: false en la corrección de un control sin dato de limpieza (puede seguir sin dato).
+export function ckSummary(list, items, cleaning, { cleaningRequired = true } = {}) {
   const c = { bueno: 0, cambio: 0, faltante: 0, pendiente: 0, pendUnits: 0, noNote: 0, alerts: 0, n: list.length, first: null };
   for (const a of list) {
     const exp = a.qty || 1;
@@ -68,7 +77,7 @@ export function ckSummary(list, items, cleaning) {
     if (q.missing > 0 && !String(it.note || '').trim()) { c.noNote++; if (!c.first) c.first = a.id; }
   }
   const st = cleaning && CLEAN[cleaning.status] ? cleaning.status : null;
-  c.cleaning = !st ? 'pending' : st === 'requiere_limpieza' && !String(cleaning.note || '').trim() ? 'note' : null;
+  c.cleaning = !st ? (cleaningRequired ? 'pending' : null) : st === 'requiere_limpieza' && !String(cleaning.note || '').trim() ? 'note' : null;
   return c;
 }
 

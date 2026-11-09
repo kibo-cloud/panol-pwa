@@ -1,7 +1,7 @@
 // Etapa 4: conteo por cantidad, limpieza, alertas e informes por unidades.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { itemQuantities, itemState, validateFinalize, buildControlDoc, asgUnits } from '../../src/domain/controls.js';
+import { itemQuantities, itemState, validateFinalize, buildControlDoc, asgUnits, cleaningRequiredFor } from '../../src/domain/controls.js';
 import { deriveAlerts } from '../../src/domain/alerts.js';
 import { deriveState } from '../../src/domain/derive.js';
 import { computeReport } from '../../src/domain/report.js';
@@ -66,6 +66,20 @@ test('finalizar: faltante parcial con motivo y limpieza obligatoria (con nota si
   assert.equal(validateFinalize(asgs, items, { status: null }).cleaning, 'pending');
   assert.equal(validateFinalize(asgs, items, { status: 'requiere_limpieza', note: '  ' }).cleaning, 'note');
   assert.equal(validateFinalize(asgs, items, { status: 'requiere_limpieza', note: 'Grasa en la caja' }).ok, true);
+});
+
+test('finalizar: la corrección de un control sin dato de limpieza puede quedar sin dato', () => {
+  const asgs = [{ id: 'a1' }];
+  const items = { a1: q(1, 1, 0, 0) };
+  // Original nuevo o corrección de un control con limpieza: obligatoria.
+  assert.equal(cleaningRequiredFor(null), true);
+  assert.equal(cleaningRequiredFor({ cleaning: { status: 'limpio', note: '' } }), true);
+  assert.equal(cleaningRequiredFor({ cleaning: { status: null, note: '' } }), false);
+  assert.equal(cleaningRequiredFor({}), false);
+  assert.deepEqual(validateFinalize(asgs, items, null, { cleaningRequired: false }), { ok: true, pending: [], missingNote: [], cleaning: null });
+  // Si se indica "requiere limpieza", la nota sigue siendo obligatoria.
+  assert.equal(validateFinalize(asgs, items, { status: 'requiere_limpieza', note: ' ' }, { cleaningRequired: false }).cleaning, 'note');
+  assert.equal(validateFinalize(asgs, items, null).cleaning, 'pending');
 });
 
 test('unidades de una asignación: del último control, o por estado si cambió la cantidad', () => {

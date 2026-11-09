@@ -905,8 +905,20 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   select on items with missing or change; reports group losses/breakages by línea.
 - Stage 7 will create purchase requests from missing/change quantities; this stage only
   stores the counts and keeps a stable key per assignment for that.
+  Record for stage 7 (E4.V1, no code yet): purchase requests must dedupe per assignment (or
+  unit) and period / effective control, never per alert key — a correction creates a new alert
+  key (`falt-<asg>-<ctl>` changes with the control id), so keying by alert would open a second
+  request for the same loss.
 - `.txt` v2: export maps quantities back to a v2 item state with the derived rule (and
   `qty`); cleaning and line are not in v2. Import of v2 items uses the migration mapping.
+- Cleaning in corrections (parent, E4.V1): a correction of an old control whose corrected
+  control has NULL cleaning may be finalized without cleaning (it stays NULL, "sin dato"; if
+  "Requiere limpieza" is chosen the note is still required). New originals and corrections of
+  controls that had cleaning still require it. Domain `cleaningRequiredFor(corrected)` +
+  `validateFinalize(..., { cleaningRequired })`; the web Finalizar reason follows the same rule.
+- A línea never makes a draft fail (parent, E4.V1): only items with missing + change > 0 keep a
+  línea; an archived/unknown new línea is dropped to NULL with a non-fatal warning, and an
+  offline draft rejected by the server is kept on the device marked "necesita revisión".
 
 ## Stage 4 tasks (branch `v3/etapa-4-conteo`, stacked on stage 3)
 - [x] E4.T1 Backend: migration (item quantity columns + check, item `linea_id`, control
@@ -974,6 +986,37 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       build` ok (0 inline script/style/handlers); `PANOL_E2E_BUILD=1 npm run test:e2e` 52
       passed, 0 failed, 0 skipped (399 s). A first full run was 51/1 (the `t10` order assertion
       included the new cleaning card title), fixed in the spec as above.
+- [x] E4.V1 Correction task (review findings). Route: delegated writer (2+ non-trivial files:
+      server application/domain/adapter, web state/view, tests). Test-first per item:
+      1. MEDIUM, offline draft lost because of a línea. RED: `conteo-api` "línea archivada o
+         desconocida al guardar" (422 instead of 200) and the correction finalize with an
+         archived línea (422); `web/test/drafts` "un rechazo (422/400) no borra el borrador"
+         (draft deleted); `web/test/conteo` `apiItems` (missing export). GREEN: `resolveLineas`
+         in `application/controls.js` (create, PATCH, finalize) keeps `lineaId` only when the
+         resulting item has missing + change > 0 and drops a new archived/unknown one to NULL
+         with `warnings: [{ code: 'linea_dropped', assignmentId }]`; web sends every item
+         through `apiItem`/`apiItems` (draft record, PATCH/POST, finalize) and `setItem` clears
+         the línea when the item goes back to bueno; `flushDrafts`/`sendLocal` never delete a
+         draft on 400/422/404/403: it stays marked `review: { message }` with a visible "Este
+         borrador necesita revisión" banner (`#ckreview`, server message, "Guardar de nuevo" /
+         "Descartar borrador"), and is deleted only after a successful save or an explicit
+         discard; a `linea_dropped` warning shows a toast and clears the línea in the open
+         checklist. E2E `t11-conteo` "offline draft with a línea survives the línea being
+         archived elsewhere" (archived through `srv.app.inject` while the proxy is offline):
+         written with the fix, RED not observed.
+      2. LOW, `.txt` counts. RED: `conteo-api` ".txt v2: al importar, los totales salen de los
+         ítems" (count_* {2,0,1} vs items {0,0,3}). GREEN: `txt-repo.js` `countsOf(items)` on
+         insert and update of imported controls; lossy note in Stage 4 API notes.
+      3. DECISION, cleaning in corrections. RED: unit `cleaningRequiredFor` (missing export),
+         `conteo-api` "limpieza en correcciones" (422). GREEN: domain `cleaningRequiredFor` +
+         `validateFinalize(..., { cleaningRequired })`, finalize looks up the corrected control;
+         web `ckSummary(..., { cleaningRequired })`, the cleaning card says "Opcional: el control
+         que corregís no tiene dato de limpieza", the confirmation shows "Sin dato".
+      4. Stage 7 dedupe recorded under Stage 4 decisions (no code).
+      Contract change in an existing test: `conteo-api` no longer expects 422 `invalid_linea`.
+      Evidence (local, sequential): `npm test` 169/169; `npm run test:db` 172/172;
+      `PANOL_E2E_BUILD=1 npm run test:e2e` 53 passed, 0 failed, 0 skipped (394 s).
+      Commit: `fix(controls): keep offline drafts on línea and validation errors`.
 
 ## Stage 4 API notes (for the frontend and later stages)
 - Control item (GET `/api/state`, `/api/controls`): `state` (derived: faltante if `missing` >
@@ -985,18 +1028,22 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   `{ state }` (three buttons, or a shortcut for all units) or `{ good, change }` (missing = the
   rest; optional `missing` must match; optional `state` must match the derived one), optional
   `expected` (the quantity it was counted against: if it is no longer the assigned qty the item
-  becomes pending, no error, so an offline draft is never lost), `note`, `lineaId` (null or an
-  active línea; a línea the item already had is kept even if archived). 400 on schema errors
-  (missing `change`, negatives, decimals, extra keys); 422 `invalid_count` (good + change >
-  expected, sums or state do not match), 422 `invalid_linea`.
+  becomes pending, no error, so an offline draft is never lost), `note`, `lineaId` (only
+  considered when the resulting item has missing + change > 0, otherwise stored NULL; a línea
+  the item already had is kept even if archived). 400 on schema errors (missing `change`,
+  negatives, decimals, extra keys); 422 `invalid_count` (good + change > expected, sums or state
+  do not match). E4.V1: no more 422 `invalid_linea` — a new archived/unknown línea is stored
+  NULL and the 200/201 response adds `warnings: [{ code: 'linea_dropped', assignmentId }]`
+  (create, PATCH and finalize alike, so a synced offline draft can still finish).
 - `cleaning` in POST/PATCH/finalize: `{ status, note }` or null (clears); omitted keeps the
   stored one. PATCH needs `items` or `cleaning`. Finalize accepts an optional body `{ items?,
   cleaning? }` merged like a draft save in the same transaction. Finalize 422
   `control_incomplete` messages, in order: "Falta(n) N herramienta(s) por controlar.",
   "Completá el motivo de N faltante(s).", "Indicá la limpieza de herramientas y caja.",
   "Completá la nota de limpieza." (extra `cleaning: 'pending' | 'note' | null`). Required for
-  every finalize, corrections included (the correction copies the source cleaning, so a
-  correction of an old control must set it).
+  every original and for corrections of controls that had cleaning (the correction copies the
+  source cleaning). E4.V1: a correction of a control with NULL cleaning may finalize without
+  it (stays NULL).
 - Corrections copy quantities, `expected`, notes, `lineaId` and cleaning.
 - Alerts: `falt-<asg>-<ctl>` when missing > 0 (text "…: faltan M de N" when N > 1, `qty`),
   `camb-`/`cons-<asg>-<ctl>` when change > 0 (consecutive = the previous effective control of
@@ -1012,6 +1059,10 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   of the period of each holder (cajas only without tech/plantilla/especialidad filters).
 - `.txt` v2: export leaves out `cleaning` and the item quantity fields/`lineaId` (state is the
   derived one, `qty` = expected); import maps state -> quantities like migration 011.
+  `.txt` v2 is lossy for per-unit quantities: a control of 3 units with 2 good and 1 missing
+  exports as `faltante` x 3 and imports as 3 missing. E4.V1: on import the control `count_*`
+  are derived from the mapped items (the file's `counts` are ignored), so totals always equal
+  the items.
 
 ## Stage 4 implementation notes
 - Migration 011: the `state` column stays (safer than replacing every read: history,

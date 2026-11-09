@@ -6,7 +6,7 @@
 // controls still readable, an offline draft that keeps quantities and cleaning, and every
 // route at 1280 and 390 without overflow.
 import { sleep } from '../harness.mjs';
-import { assert, eq, loginAs, state, api, importFile, fixture, ROUTES } from '../app.mjs';
+import { assert, eq, loginAs, state, api, importFile, fixture, ROUTES, PASSWORD } from '../app.mjs';
 
 const idbDrafts = (page) => page.eval("new Promise((res,rej)=>{const r=indexedDB.open('panol-v3',1);r.onupgradeneeded=()=>r.result.createObjectStore('panol-drafts',{keyPath:'key'});r.onsuccess=()=>{const t=r.result.transaction('panol-drafts','readonly').objectStore('panol-drafts').getAll();t.onsuccess=()=>{res(t.result);r.result.close()};t.onerror=()=>rej(t.error)};r.onerror=()=>rej(r.error)})");
 const newTech = async (page, name, legajo) => { const r = await api(page, 'POST', '/api/techs', { name, legajo, plantillaId: 'manana' }); eq(r.status, 201, 'tech ' + name); return r.body.tech.id; };
@@ -211,6 +211,50 @@ export const tests = [
       eq(JSON.stringify([it.good, it.change, it.missing, it.state]), JSON.stringify([2, 1, 2, 'faltante']), 'server quantities');
       eq(d.cleaning.status, 'limpio', 'server cleaning');
       eq((await idbDrafts(page)).length, 0, 'local copy removed');
+    }
+  },
+  {
+    name: 'offline draft with a línea survives the línea being archived elsewhere: synced without the línea, nothing lost',
+    allowErrors: ['ERR_', 'net::'],
+    async fn(page, { srv }) {
+      await loginAs(page);
+      const s = await setup(page);
+      await page.hash('#control-' + s.tech);
+      await page.waitFor(`!!document.getElementById('it-${s.aLlave}')`, 10000, 'checklist');
+      srv.offline = true;
+      await page.waitFor("!document.getElementById('netbar').hidden", 15000, 'offline banner');
+      await page.toasts();
+      // 2 good + 1 for change of 5: 2 missing, with motivo and línea; pinza bueno with no línea.
+      await page.type(`#qgood-${s.aLlave}`, '2');
+      await page.type(`#qchange-${s.aLlave}`, '1');
+      await page.type('#nt-' + s.aLlave, 'Se perdieron en la línea');
+      await page.select('#ln-' + s.aLlave, s.linea);
+      await page.click(`#it-${s.aPinza} [data-act="ckSet"][data-s="bueno"]`);
+      await page.click('#it-clean [data-act="ckClean"][data-s="limpio"]');
+      await page.act('ckSave');
+      await page.waitFor("window.__toasts.some((t)=>t.includes('borrador quedó guardado en este equipo'))", 5000, 'saved on the device');
+      const local = await idbDrafts(page);
+      eq(local.length, 1, 'one local draft');
+      eq(local[0].items[s.aLlave].lineaId, s.linea, 'local draft keeps the línea');
+      eq(local[0].items[s.aPinza].lineaId, null, 'no línea on a good item');
+      // Another session archives the línea while this device is offline (straight to the app,
+      // the browser proxy is down).
+      const lg = await srv.app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'admin', password: PASSWORD } });
+      eq(lg.statusCode, 200, 'second session login');
+      const ver = (await srv.db.query('SELECT version FROM lineas WHERE id = $1', [s.linea])).rows[0].version;
+      const ar = await srv.app.inject({ method: 'POST', url: `/api/lineas/${s.linea}/archive`, headers: { cookie: [].concat(lg.headers['set-cookie'])[0].split(';')[0], 'x-csrf-token': lg.json().csrfToken, 'if-match': `"${ver}"` } });
+      eq(ar.statusCode, 200, 'línea archived: ' + ar.body);
+      srv.offline = false;
+      await page.waitFor("window.__toasts.some((t)=>t.includes('Se envió el borrador guardado sin conexión'))", 25000, 'draft resent');
+      assert((await page.toasts()).some((t) => t.includes('ya no está activa: se guardó sin línea')), 'línea dropped notice');
+      const d = Object.values((await state(page)).controls).find((c) => c.techId === s.tech && c.status === 'borrador');
+      assert(d, 'server draft');
+      const it = d.items[s.aLlave];
+      eq(JSON.stringify([it.good, it.change, it.missing, it.note, it.lineaId]), JSON.stringify([2, 1, 2, 'Se perdieron en la línea', null]), 'server keeps quantities and motivo, línea dropped');
+      eq(d.items[s.aPinza].state, 'bueno', 'other item kept');
+      eq(d.cleaning.status, 'limpio', 'server cleaning');
+      eq((await idbDrafts(page)).length, 0, 'local copy removed after the successful save');
+      assert(!(await page.text('#ckreview')), 'no review notice');
     }
   },
   {

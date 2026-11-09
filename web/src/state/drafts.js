@@ -31,12 +31,22 @@ export function requestFor(rec) {
   return { kind: 'save', id: rec.controlId, items: rec.items, ...cl, version: rec.version, idempotencyKey: rec.idemKey };
 }
 
+// Rechazos definitivos del servidor (400/422, 404, 403): reenviar lo mismo no sirve, pero el
+// borrador no se borra nunca por eso. Queda marcado "necesita revisión" con el mensaje del
+// servidor hasta que la persona lo corrija y lo guarde de nuevo, o lo descarte.
+const REVIEW_KINDS = new Set(['validation', 'not_found', 'forbidden']);
+export const needsReview = (e) => !!e && REVIEW_KINDS.has(e.kind);
+export const reviewOf = (e) => ({ message: String((e && e.message) || 'El servidor no aceptó el borrador.') });
+
 // Envía los borradores pendientes. `send(req)` devuelve el control guardado o lanza un error
-// con `kind` ('network'/'offline' corta el envío; 'conflict' deja el borrador marcado).
+// con `kind` ('network'/'offline' corta el envío; 'conflict' deja el borrador marcado; un
+// rechazo definitivo lo deja marcado para revisar). Solo se borra después de un envío exitoso.
+// Los marcados (conflicto o revisión) no se reenvían solos.
 export async function flushDrafts(store, send) {
-  const out = { sent: [], conflicts: [], failed: [], stopped: false };
+  const out = { sent: [], conflicts: [], review: [], failed: [], stopped: false };
   for (const rec of await store.all()) {
     if (rec.conflict) { out.conflicts.push(rec); continue; }
+    if (rec.review) continue; // ya avisado: se muestra al abrir el control
     try {
       const control = await send(requestFor(rec), rec);
       await store.del(rec.key);
@@ -44,8 +54,8 @@ export async function flushDrafts(store, send) {
     } catch (e) {
       if (e && (e.kind === 'network' || e.kind === 'offline')) { out.stopped = true; break; }
       if (e && e.kind === 'conflict') { await store.put({ ...rec, conflict: true }); out.conflicts.push(rec); continue; }
+      if (needsReview(e)) { const r = { ...rec, review: reviewOf(e) }; await store.put(r); out.review.push(r); continue; }
       out.failed.push({ rec, error: e });
-      if (e && (e.kind === 'validation' || e.kind === 'not_found' || e.kind === 'forbidden')) await store.del(rec.key);
     }
   }
   return out;
