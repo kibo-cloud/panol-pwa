@@ -1115,20 +1115,114 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   server archive state (a newer file record does not un-archive silently — it is reported).
 
 ## Stage 5 tasks (branch `v3/etapa-5-eliminar`, stacked on stage 4)
-- [ ] E5.T1 Backend: migration (archive columns where missing, `voids_movement_id`, perms),
+- [x] E5.T1 Backend: migration (archive columns where missing, `voids_movement_id`, perms),
       domain (history checks, archive preconditions, void planning with reversibility
       checks), API (archive with resolutions, restore, definitive delete, list archived,
       void movement), replace hard deletes, `.txt` mapping; unit + integration tests.
-- [ ] E5.T2 Frontend: "Eliminar" actions with motivo sheets (and the assignment resolution
+      Commit `f9b23fa`. Route: delegated writer. Code: migration `012_eliminar_anular.sql`,
+      `domain/{records,voids}.js`, `application/{records,voids}.js`,
+      `adapters/http/records-routes.js`; the old archive routes (plantillas, líneas, cajas,
+      especialidades) and the hard DELETEs of categories and kits are replaced by the generic
+      routes (the old app functions delegate). Test-first: `unit/permissions` (new keys) RED
+      then GREEN; `unit/voids.test.js` RED (missing module) then GREEN (first run found one wrong
+      fixture in the test, no code change); `unit/records.test.js` written with the module (no
+      RED); `integration/records-api.test.js` (17) written after the code, its first run found 3
+      test defects, no code change. Contract changes in existing tests: archive bodies need
+      `reason`; category/kit DELETE need `{reason, confirmName}`; a caja with tools answers 409
+      `pending_assignments`; `auth.test` permission list has the 2 new keys.
+- [x] E5.T2 Frontend: "Eliminar" actions with motivo sheets (and the assignment resolution
       step for techs/cajas), "Eliminar definitivamente" with typed-name confirmation,
       Administración › Registros eliminados with restore, "Anular" on movements with motivo
       and clear reasons when not possible, "(eliminado)" and "Anulado" marks in history,
       reports and selectors; design guide.
+      Commit `432e915`. Route: delegated writer. Code: `features/records/view.js` (delete sheet
+      fed by `GET …/delete-check`: blockers, one resolution select per assigned tool plus
+      "Devolver todas a disponibles", motivo with quick chips, the purge card only when
+      `canPurge`; purge sheet with the typed name; restore sheet; void sheet with the server's
+      exact reason and only "Cerrar"; Registros eliminados tab with type filter and search),
+      `state/derive.js` (lists and selectors without archived techs, cajas, categories, tools,
+      units and kits; `allTechs`/`allCajas`; `voidedBy`; pending returns without voided
+      reposiciones), `state/store.js` (name helpers add "(eliminado)"), `ui/components.js`
+      (`mvRow`: Anulado chip and strike, Anulación tag with "Anula: …", Anular button), Eliminar
+      in the tech, caja and plantilla sheets, líneas rows, config (categories, tool edit, kits,
+      especialidades) and admin users; the "Archivadas" chips and sections now point to
+      Registros eliminados; reports keep archived techs with controls in the period (marked);
+      classes in `v3.css`, no inline styles. `web/test/records.test.js` (2) written with the code.
 - [ ] E5.T3 E2E: archive and restore each type, archive a tech with tools resolving them in
       the same step, definitive delete only without history (typed name), void an entrega and
       a devolución (inventory reverted, original kept, void cannot be voided, refused when a
       later movement depends), permissions (non-admin refused), `.txt` export tombstones; CI
       green; PR.
+      [x] E2E items (route: delegated writer, commit: the `test(e2e)` commit after `432e915`);
+      [ ] CI green (pending, parent); [ ] PR (pending, parent). New `t12-eliminar` (7): a tech
+      with 2 tools archived from its sheet (pending-choice reason, reparación + retiro, pools,
+      hidden from Técnicos, Inactivos and the entrega selector, "(eliminado)" in the movement
+      history, restored from Registros eliminados); caja, plantilla, línea, categoría,
+      herramienta, kit and especialidad archived in the UI and a user via the API, who/why and
+      the type filter, all 8 restored, restore refused when the name is taken; definitive delete
+      (no purge with history, wrong typed name refused, purge, server 409 `has_history`, audit
+      keeps name and motivo); void an entrega (inventory reverted, original kept with Anulado,
+      Anulación without Anular, void of a void refused) and a devolución (the entrega refused
+      with the exact reason, devolución voided, assignment active again); responsable sees no
+      Eliminar/Anular/tab and gets 403; `.txt` export (archived tech inactive, category and purge
+      tombstones, no void pair); every route, Registros eliminados and the delete sheet at 1280
+      and 390 without overflow. Adapted: `t3-merge` (category delete is now archive with motivo,
+      same 409/428 intent) and `t11-conteo` (línea archive with motivo).
+      Evidence (local, sequential): see Stage 5 verification.
+
+## Stage 5 API notes (for the frontend and later stages)
+- Types: techs, cajas, tools, categories, plantillas, lineas, especialidades, kits, users
+  (`records_delete`; users also admin only). `GET /api/<type>/:id/delete-check` -> {name,
+  version, archived, hasHistory, history[], blockers[{code, message}], assignments[]
+  (techs/cajas), canPurge}.
+- `POST /api/<type>/:id/archive` {reason, resolutions?: [{assignmentId, action:
+  devolucion|retiro, cond?}]} + If-Match -> {<key>, movements[]}; 409 `pending_assignments`
+  {pending}; blockers keep their code (`tech_is_referente`, `tool_assigned`, `tool_pending`,
+  `category_has_tools`, `plantilla_has_techs`, `last_plantilla`, `linea_has_cajas`,
+  `especialidad_in_use`, `especialidad_has_kit`, `kit_base`, `self_deactivate`, `last_admin`);
+  `archived`. Techs, tools and users also get `active = false`; a tool's units are archived with
+  it and it leaves the kits; archive/restore of tools and categories bump the order scope
+  (archived rows are not part of the editable order).
+- `POST /api/<type>/:id/restore` {reason} + If-Match; 409 `duplicate` (active name taken),
+  `parent_archived` (category, línea or especialidad), `not_archived`. A restored user stays
+  inactive. Legajo and unit codes stay unique including archived rows (re-hiring = restore).
+- `DELETE /api/<type>/:id` {reason, confirmName} + If-Match: 422 `confirm_name`, 409
+  `has_history` {history}. History = movements, controls, assignments, units, plantilla ranges
+  beyond the first, rotations or supervisor changes, references, or any audit entry other than
+  its own create/archive/restore (an edit counts). Audit `<x>_archive|_restore|_delete` with the
+  motivo.
+- `GET /api/archived?type&q` -> {records: [{type, id, name, legajo, username, kind, version,
+  archivedAt, archivedBy, archivedByName, reason, hasHistory}]} (users only for an admin).
+- `POST /api/movements/:id/void` {reason} (Idempotency-Key, `movements_void`) -> 201 {movement
+  (type `anulacion`, `voidsMovementId`), voids}; 422 `void_not_possible` with the exact reason;
+  `GET /api/movements/:id/void-check` -> {ok, reason}. A recepción is not voidable. State rows
+  carry `archived`/`archivedAt`/`archivedBy`/`archiveReason`; movements `voidsMovementId`; users
+  `archived`.
+- `.txt` v2: archived techs/tools/users exported with active=false; archived categories left out
+  and tombstoned in `data.deleted`, as are definitive deletes (from the audit); voids and voided
+  originals are not exported. Import: a newer file record never un-archives (conflict reported),
+  tombstones of archived rows are no-ops, voided/void ids are not re-created (conflict).
+
+## Stage 5 implementation notes
+- Lock order kept: order scope -> row (tools, categories); holder FOR UPDATE -> tools by id for an
+  archive with resolutions; movements now take the holder FOR SHARE before the tool, so an
+  entrega in flight waits for an archive and then sees the holder inactive.
+- Void: dependents = later non-voided movements naming its assignments or units (or receiving
+  it); pools checked per (tool, pool) except externo; units must still be where the movement left
+  them; a void of a demo movement is demo. DB: CHECK type = anulacion ⇔ voids id, unique voids id,
+  an insert trigger refuses a void of a void; the ledger stays append-only.
+- Tech purge deletes its single creation range through `panol.purge = techs:<id>` (guard of
+  migration 012); outside that transaction the history stays append-only.
+- Deviations: `.txt` *replace* (initial migration only) and file tombstones of non-archived rows
+  keep the stage 1 hard-delete behaviour; archiving does not free legajos or unit codes.
+
+## Stage 5 verification (local, sequential)
+- `npm test` 184/184; `npm run test:db` 189/189 (a first full run was 188/1: `auth.test`
+  expected the old permission list, a contract change fixed in the test); `npm run build` ok,
+  `web/dist/index.html` with 0 inline script/style/handlers; `PANOL_E2E_BUILD=1 npm run
+  test:e2e` 60 passed, 0 failed, 0 skipped (451 s). While writing `t12`, two spec defects were
+  fixed in the spec (the Inactivos filter left on; a partial devolución without `qty`).
+- RDD / independent review, CI and the stage 5 PR: pending (parent).
 
 ## Next step
 - E5.T1–E5.T3 (one delegated writer), then independent review, CI and the stage 5 PR.
