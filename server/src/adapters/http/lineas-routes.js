@@ -18,8 +18,7 @@ export function registerLineasRoutes(app) {
     async (req, reply) => sendRow(reply, 'linea', await lineas.createLinea(db, actorOf(req), req.body), 201));
   app.patch('/api/lineas/:id', { ...perm('lineas_edit'), schema: { params: idParams, body: obj({ name: S.name, kind, order: S.int(0, 1000) }, [], { minProperties: 1 }) } },
     async (req, reply) => sendRow(reply, 'linea', await lineas.updateLinea(db, actorOf(req), req.params.id, req.body, requireVersion(req))));
-  app.post('/api/lineas/:id/archive', { ...perm('lineas_edit'), schema: { params: idParams } },
-    async (req, reply) => sendRow(reply, 'linea', await lineas.archiveLinea(db, actorOf(req), req.params.id, requireVersion(req))));
+  // Archivar líneas y cajas: records-routes.js (etapa 5, con motivo y resoluciones).
 
   app.get('/api/cajas', async () => ({ cajas: await listRows(db, 'cajas', 'ORDER BY name, id') }));
   const cajaBody = { name: S.name, lineaId: S.id, referenteTechId: S.idOrNull };
@@ -27,8 +26,6 @@ export function registerLineasRoutes(app) {
     async (req, reply) => sendRow(reply, 'caja', await lineas.createCaja(db, actorOf(req), req.body), 201));
   app.patch('/api/cajas/:id', { ...perm('lineas_edit'), schema: { params: idParams, body: obj(cajaBody, [], { minProperties: 1 }) } },
     async (req, reply) => sendRow(reply, 'caja', await lineas.updateCaja(db, actorOf(req), req.params.id, req.body, requireVersion(req))));
-  app.post('/api/cajas/:id/archive', { ...perm('lineas_edit'), schema: { params: idParams } },
-    async (req, reply) => sendRow(reply, 'caja', await lineas.archiveCaja(db, actorOf(req), req.params.id, requireVersion(req))));
 
   // Un poseedor exacto: { techId } o { cajaId }.
   const holder = { type: 'object', additionalProperties: false, minProperties: 1, maxProperties: 1, properties: { techId: S.id, cajaId: S.id } };

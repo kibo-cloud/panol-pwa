@@ -28,8 +28,7 @@ export function registerPlantillaRoutes(app) {
     schema: { params: idParams, body: obj({ name: S.name, order: S.int(0, 1000) }, [], { minProperties: 1 }) },
   }, async (req, reply) => sendRow(reply, 'plantilla', await plantillas.updatePlantilla(db, actorOf(req), req.params.id, req.body, requireVersion(req))));
 
-  app.post('/api/plantillas/:id/archive', { ...perm('plantillas_edit'), schema: { params: idParams } },
-    async (req, reply) => sendRow(reply, 'plantilla', await plantillas.archivePlantilla(db, actorOf(req), req.params.id, requireVersion(req))));
+  // Archivar: POST /api/plantillas/:id/archive en records-routes.js (etapa 5, con motivo).
 
   app.post('/api/plantillas/:id/rotate', {
     schema: { params: idParams, body: obj({ label: S.str(LIM.name, 1), from: S.dayOrNull }, ['label']) },

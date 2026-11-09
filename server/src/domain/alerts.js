@@ -96,5 +96,9 @@ export function deriveAlerts(data) {
 // Reposiciones sin devolver que todavía no se recibieron.
 export function pendingReturns(movements, resolved) {
   const r = resolved || new Set(movements.filter((m) => m.type === 'recepcion' && m.resolvesMovementId).map((m) => m.resolvesMovementId));
-  return movements.filter((m) => m.type === 'reposicion' && m.returned === false && !r.has(m.id));
+  const voided = voidedIds(movements);
+  return movements.filter((m) => m.type === 'reposicion' && m.returned === false && !r.has(m.id) && !voided.has(m.id));
 }
+
+// Etapa 5: ids de los movimientos anulados (los que nombra una anulación).
+export const voidedIds = (movements) => new Set(movements.filter((m) => m.voidsMovementId).map((m) => m.voidsMovementId));

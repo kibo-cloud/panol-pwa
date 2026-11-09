@@ -23,15 +23,18 @@ const fail = (msg) => {
 const unitCode = (ctx, id) => (id && ctx.units[id] ? ctx.units[id].code : '');
 
 // Poseedor del movimiento: un técnico activo o una caja activa (etapa 2), nunca los dos.
-function holderOf(ctx, m) {
+// inactiveHolder (etapa 5): al eliminar un técnico o una caja, sus herramientas se devuelven o se
+// retiran aunque el técnico ya esté desactivado (solo devolución y retiro).
+function holderOf(ctx, m, { inactiveHolder = false } = {}) {
   if (m.techId && m.cajaId) fail('Elegí un técnico o una caja, no los dos.');
+  const lenient = inactiveHolder && (m.type === 'devolucion' || m.type === 'retiro');
   if (m.cajaId) {
     const k = (ctx.cajas || {})[m.cajaId];
-    if (!k || k.archivedAt) fail('Elegí una caja activa.');
+    if (!k || (k.archivedAt && !lenient)) fail('Elegí una caja activa.');
     return { techId: null, cajaId: m.cajaId, name: k.name, caja: true };
   }
   const t = ctx.techs[m.techId];
-  if (!t || t.active === false) fail('Elegí un técnico activo.');
+  if (!t || (t.active === false && !lenient)) fail('Elegí un técnico activo.');
   return { techId: m.techId, cajaId: null, name: t.name, caja: false };
 }
 // Campos del poseedor en movimientos y asignaciones (la caja solo si es de una caja).
@@ -40,8 +43,8 @@ const holderFields = (h) => ({ techId: h.techId, ...(h.cajaId ? { cajaId: h.caja
 const heldBy = (h) => (h.cajaId ? { techId: null, cajaId: h.cajaId } : { techId: h.techId });
 
 // ctx: { techs, cajas, tools, units, assignments, pools, stateOf, pendingReturns }
-// opts: { at: ISO, newId: (prefijo) => id }
-export function planMovement(ctx, m, { at, newId }) {
+// opts: { at: ISO, newId: (prefijo) => id, inactiveHolder? }
+export function planMovement(ctx, m, { at, newId, inactiveHolder = false }) {
   requiredPermission(m.type);
   const reason = String(m.reason ?? '').trim();
   const notes = String(m.notes ?? '').trim();
@@ -52,7 +55,7 @@ export function planMovement(ctx, m, { at, newId }) {
   if (INV_TYPES.includes(m.type)) return planInventory(ctx, m, plan, { at, mid, notes, newId });
   if (m.type === 'recepcion') return planReception(ctx, m, plan, { at, mid, notes });
 
-  const h = holderOf(ctx, m);
+  const h = holderOf(ctx, m, { inactiveHolder });
   const activeOf = () => Object.entries(ctx.assignments).filter(([, a]) => a.active && sameHolder(a, h));
 
   if (m.type === 'entrega_inicial' || m.type === 'adicional') {

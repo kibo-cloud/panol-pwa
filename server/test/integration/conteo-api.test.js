@@ -18,7 +18,7 @@ before(async () => {
   asg = Object.fromEntries(rows.map((r) => [r.tool_id.replace('tool-', ''), r]));
   linea = (await api.call('admin', 'POST', '/api/lineas', { name: 'Línea Conteo', kind: 'linea' })).json().linea;
   archived = (await api.call('admin', 'POST', '/api/lineas', { name: 'Línea Vieja', kind: 'linea' })).json().linea;
-  await api.call('admin', 'POST', `/api/lineas/${archived.id}/archive`, undefined, ifMatch(archived.version));
+  await api.call('admin', 'POST', `/api/lineas/${archived.id}/archive`, { reason: 'Prueba' }, ifMatch(archived.version));
 });
 after(async () => {
   await api?.close();

@@ -16,6 +16,7 @@ import { cleanName } from '../domain/catalog.js';
 import { cleanKitName, cleanKitItems, planKitDelivery } from '../domain/kits.js';
 import { newId } from './ids.js';
 import { withTransaction, checkVersion, record, notifyChange, onUnique } from './common.js';
+import * as records from './records.js';
 import { idempotent } from './idempotency.js';
 
 const rule = (msg, code = 'invalid_input', status = 422) => new DomainError(msg, code, status);
@@ -57,20 +58,10 @@ export async function updateEspecialidad(db, actor, id, input, version) {
   });
 }
 
-// Baja lógica, solo si ningún técnico activo la tiene y no tiene kit (el historial queda). Se
-// bloquea FOR UPDATE antes de contar: espera a quien la está asignando (FOR SHARE).
-export async function archiveEspecialidad(db, actor, id, version) {
-  return withTransaction(db, async (c) => {
-    const cur = checkVersion(await repo.getRow(c, 'especialidades', id, { lock: true }), version, 'No se encontró la especialidad.');
-    if (cur.archivedAt) throw rule('La especialidad ya está archivada.', 'archived', 409);
-    const n = (await c.query('SELECT count(*)::int AS n FROM techs WHERE especialidad_id = $1 AND active', [id])).rows[0].n;
-    if (n) throw rule(`La especialidad tiene ${n} ${n === 1 ? 'técnico activo' : 'técnicos activos'}. Cambiales la especialidad antes de archivarla.`, 'especialidad_in_use', 409);
-    if ((await c.query('SELECT 1 FROM kits WHERE especialidad_id = $1', [id])).rows[0]) throw rule('La especialidad tiene un kit. Eliminalo antes de archivarla.', 'especialidad_has_kit', 409);
-    const row = await repo.updateRow(c, 'especialidades', id, { archivedAt: new Date() });
-    await record(c, actor, { action: 'especialidad_archive', entity: 'especialidades', id, version: row.version, event: 'delete', detail: `Baja de especialidad ${row.name}` });
-    return row;
-  });
-}
+// Baja lógica (etapa 5: records.js, con motivo), solo si ningún técnico activo la tiene y no tiene
+// un kit activo (el historial queda). Se bloquea FOR UPDATE antes de contar: espera a quien la
+// está asignando (FOR SHARE).
+export const archiveEspecialidad = (db, actor, id, version, reason = 'Especialidad archivada') => records.archiveRecord(db, actor, 'especialidades', id, { reason }, version).then((r) => r.record);
 
 // ---------------------------------------------------------------- kits
 const kitOr404 = (k) => {
@@ -83,7 +74,7 @@ export async function createKit(db, actor, input) {
     // FOR SHARE: no se crea un kit para una especialidad que se está archivando.
     const esp = await lockActiveEspecialidad(c, input.especialidadId);
     if (!esp) throw rule('Elegí una especialidad activa.', 'invalid_especialidad');
-    if ((await c.query('SELECT 1 FROM kits WHERE especialidad_id = $1', [esp.id])).rows[0]) throw rule(`Ya hay un kit para ${esp.name}.`, 'duplicate', 409);
+    if ((await c.query('SELECT 1 FROM kits WHERE especialidad_id = $1 AND archived_at IS NULL', [esp.id])).rows[0]) throw rule(`Ya hay un kit para ${esp.name}.`, 'duplicate', 409);
     const name = input.name !== undefined ? cleanKitName(input.name) : `Kit ${esp.name}`;
     const row = await repo.insertRow(c, 'kits', newId('kit'), { name, especialidadId: esp.id, by: actor.id }).catch(onUnique(`Ya hay un kit para ${esp.name}.`));
     await record(c, actor, { action: 'kit_create', entity: 'kits', id: row.id, version: row.version, event: 'create', detail: `Alta del kit ${name} (${esp.name})` });
@@ -95,6 +86,7 @@ export async function createKit(db, actor, input) {
 export async function updateKit(db, actor, id, input, version) {
   return withTransaction(db, async (c) => {
     const cur = checkVersion((await loadKits(c, { id, lock: 'UPDATE' }))[0], version, 'No se encontró el kit.');
+    if (cur.archivedAt) throw rule('El kit está eliminado. Restauralo desde Administración › Registros eliminados.', 'archived', 409);
     const name = input.name !== undefined ? cleanKitName(input.name) : cur.name;
     let items = cur.items;
     if (input.items !== undefined) {
@@ -114,21 +106,14 @@ export async function updateKit(db, actor, id, input, version) {
   });
 }
 
-export async function deleteKit(db, actor, id, version) {
-  return withTransaction(db, async (c) => {
-    const cur = checkVersion((await loadKits(c, { id, lock: 'UPDATE' }))[0], version, 'No se encontró el kit.');
-    if (!cur.especialidadId) throw rule('El kit base no se elimina: podés dejarlo vacío.', 'kit_base', 409);
-    await c.query('DELETE FROM kits WHERE id = $1', [id]);
-    await record(c, actor, { action: 'kit_delete', entity: 'kits', id, event: 'delete', detail: `Baja del kit ${cur.name}` });
-    return { ok: true };
-  });
-}
+// Eliminar un kit: records.js (etapa 5; el kit base no se elimina).
 
 // input: { holder: { techId } | { cajaId }, unitIds?: { toolId: [unitId] }, reason? }.
 // `version` (If-Match, opcional): la versión del kit que vio quien confirma la entrega.
 export async function deliverKit(db, actor, kitId, input, { idempotencyKey, path, version = null } = {}) {
   return idempotent(db, { userId: actor.id, key: idempotencyKey, method: 'POST', path, body: { kitId, version, ...input } }, async (c) => {
     const kit = kitOr404((await loadKits(c, { id: kitId, lock: 'SHARE' }))[0]);
+    if (kit.archivedAt) throw rule('El kit está eliminado.', 'archived', 409);
     if (version != null && kit.version !== version) throw new DomainError('El kit cambió mientras preparabas la entrega. Revisá la lista y confirmá de nuevo.', 'conflict', 409);
     const h = input.holder || {};
     const holderName = h.cajaId

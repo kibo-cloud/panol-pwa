@@ -65,6 +65,11 @@ export function planImport(server, file, { mode, actorId, now = new Date() }) {
   const assume = (collection, id, field, message) => assumptions.push({ collection, id, field, message });
   const sdoc = server.doc;
   const final = Object.fromEntries(COLS.map((c) => [c, { ...sdoc[c] }]));
+  // Etapa 5: lo eliminado (archivado) en el servidor sigue eliminado; un registro más nuevo del
+  // archivo no lo restaura en silencio (se informa). Las anulaciones y los movimientos anulados
+  // no están en el .txt v2: el archivo no los vuelve a crear.
+  const archived = server.archived || {};
+  const hidden = server.hidden || new Set();
 
   if (mode === 'replace') {
     if (server.ledger.movements > 0 || server.ledger.controls > 0) {
@@ -100,6 +105,14 @@ export function planImport(server, file, { mode, actorId, now = new Date() }) {
       for (const [id, r0] of Object.entries(file.data[c])) {
         const r = clamp(r0);
         const cur = final[c][id];
+        if (hidden.has(`${c}/${id}`)) {
+          conflict(c, id, 'El movimiento está anulado en el servidor: no se importa.');
+          continue;
+        }
+        if (cur && archived[`${c}/${id}`]) {
+          if (stamp(r) > stamp(cur) && !sameCols(c, cur, r)) conflict(c, id, 'Está eliminado en el servidor: se conserva eliminado. Si corresponde, restauralo desde Administración › Registros eliminados.');
+          continue;
+        }
         if (!cur) {
           final[c][id] = r;
           continue;
@@ -141,6 +154,8 @@ export function planImport(server, file, { mode, actorId, now = new Date() }) {
       }
       const cur = final[c][id];
       if (!cur || !(at > stamp(cur))) continue;
+      // Ya eliminado en el servidor: queda como está (archivado, con su historial).
+      if (archived[`${c}/${id}`]) continue;
       if (LEDGER.has(c)) {
         conflict(c, id, c === 'movements' ? 'El archivo lo borra, pero el libro de movimientos no se borra.' : 'El archivo lo borra, pero la auditoría no se borra.');
         continue;

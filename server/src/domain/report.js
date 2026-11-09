@@ -5,6 +5,7 @@ import { pad, pnumOf, parsePkey, weekRange, zonedDate, daysIn, plabel, localDate
 import { reportPlantillaOf } from './plantillas.js';
 import { asgUnits, hasMissing, hasChange } from './controls.js';
 import { holderKey } from './lineas.js';
+import { voidedIds } from './alerts.js';
 
 // Limpieza de los controles efectivos del período: limpios, que requieren limpieza y el % limpio
 // (null sin datos; los controles viejos no tienen dato y no cuentan).
@@ -40,6 +41,8 @@ const inPeriod = (pkey, y, m, weeks) => {
 // final del período), así un informe viejo no cambia cuando alguien se mueve de plantilla.
 // `plantilla` es otro nombre del filtro `shift`.
 export function computeReport(d, filters = {}) {
+  // Etapa 5: una reposición anulada no cuenta.
+  const voided = voidedIds(d.movs || []);
   const f = {
     ym: filters.ym || `${d.cur.y}-${pad(d.cur.m)}`,
     w: filters.w || 'all',
@@ -77,7 +80,7 @@ export function computeReport(d, filters = {}) {
     const ch = cn ? cn.cambio : i.cambio;
     const fa = cn ? cn.faltante : i.faltante;
     const den = ok + ch + fa;
-    const repos = d.movs.filter((x) => x.techId === t.id && x.type === 'reposicion' && inRange(x.at, range)).length;
+    const repos = d.movs.filter((x) => x.techId === t.id && x.type === 'reposicion' && !voided.has(x.id) && inRange(x.at, range)).length;
     const recup = d.transitions.filter((x) => x.techId === t.id && recovered(x) && inPeriod(x.pkey, y, m, weeks)).length;
     return {
       id: t.id, name: t.name, legajo: t.legajo, shiftId: pid, plantillaId: pid, shift: shiftName(pid), especialidadId: espOf(t), especialidad: espName(espOf(t)), total: i.total,
@@ -123,7 +126,7 @@ export function computeReport(d, filters = {}) {
     const r = monthRange(yy, mo);
     return {
       label: MONTHS[mo - 1].slice(0, 3) + ' ' + String(yy).slice(2), y: yy, m: mo, cambio: cam, faltante: fal, ctl,
-      repos: d.movs.filter((x) => ids.has(x.techId) && x.type === 'reposicion' && inRange(x.at, r)).length,
+      repos: d.movs.filter((x) => ids.has(x.techId) && x.type === 'reposicion' && !voided.has(x.id) && inRange(x.at, r)).length,
       recup: d.transitions.filter((x) => ids.has(x.techId) && recovered(x) && inPeriod(x.pkey, yy, mo)).length,
     };
   });

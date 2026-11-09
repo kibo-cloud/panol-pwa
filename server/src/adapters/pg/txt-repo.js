@@ -19,7 +19,10 @@ import { localDateISO } from '../../domain/period.js';
 import { newId } from '../../application/ids.js';
 
 const iso = (d) => (d instanceof Date ? d.toISOString() : d ?? null);
-const strip = (list) => Object.fromEntries(list.map(({ id, version, ...r }) => [id, r]));
+// Fuera del .txt v2: la versión y la baja lógica de la 3.0 (etapa 5; ver `archived`).
+const strip = (list) => Object.fromEntries(list.map(({ id, version, archived, archivedAt, archivedBy, archiveReason, ...r }) => [id, r]));
+// Colecciones del .txt v2 que la 3.0 elimina con baja lógica (y su acción de eliminación definitiva).
+const V2_ARCHIVABLE = { techs: 'tech_delete', tools: 'tool_delete', categories: 'category_delete', users: 'user_delete' };
 const maxIso = (rows) => rows.reduce((m, r) => (r.updated_at && (!m || r.updated_at > m) ? r.updated_at : m), null);
 
 // Estado con la forma de los datos de 2.1 (colecciones por id). Los usuarios van sin
@@ -38,7 +41,13 @@ export async function loadTxtState(q) {
   // estado derivado (faltante si falta alguna unidad, si no cambio, si no bueno) y `qty`.
   const v2Items = (items) => Object.fromEntries(Object.entries(items).map(([aid, { expected, good, change, missing, lineaId, ...it }]) => [aid, it]));
   data.controls = strip(noCaja((await loadControls(q)).sort((a, b) => (a.id < b.id ? -1 : 1))).map(({ cleaning, ...c }) => ({ ...c, items: v2Items(c.items) })));
-  data.movements = strip(noCaja(await loadMovementsFull(q)));
+  // Etapa 5: el .txt v2 no tiene anulaciones. Ni la anulación ni el movimiento anulado salen
+  // (se compensan entre sí en el stock); `hidden` los nombra para que una importación no los
+  // vuelva a crear.
+  const allMovs = await loadMovementsFull(q);
+  const voided = new Set(allMovs.filter((m) => m.voidsMovementId).map((m) => m.voidsMovementId));
+  const hidden = new Set(allMovs.filter((m) => m.voidsMovementId || voided.has(m.id)).map((m) => `movements/${m.id}`));
+  data.movements = strip(noCaja(allMovs.filter((m) => !hidden.has(`movements/${m.id}`)).map(({ voidsMovementId, ...m }) => m)));
   data.audit = Object.fromEntries((await q.query('SELECT id, action, entity, entity_id, detail, at, actor_id FROM audit_log ORDER BY at, id')).rows.map((r) => [
     r.id, { action: r.action, entity: r.entity, entityId: r.entity_id, detail: r.detail, at: iso(r.at), by: r.actor_id },
   ]));
@@ -56,7 +65,17 @@ export async function loadTxtState(q) {
     data.config.permisos = { ...p, updatedAt: iso(maxIso(perms)) };
   }
   const ledger = (await q.query('SELECT (SELECT count(*) FROM movements) AS movements, (SELECT count(*) FROM controls) AS controls')).rows[0];
-  return { data, creds, ledger };
+  // Etapa 5: registros eliminados (archivados) de las colecciones del v2, y los eliminados
+  // definitivamente (por la auditoría), para las marcas de borrado del archivo exportado.
+  const archived = {};
+  for (const c of Object.keys(V2_ARCHIVABLE)) {
+    for (const r of (await q.query(`SELECT id, archived_at FROM ${c} WHERE archived_at IS NOT NULL`)).rows) archived[`${c}/${r.id}`] = iso(r.archived_at);
+  }
+  const tombstones = {};
+  for (const r of (await q.query('SELECT entity, entity_id, max(at) AS at FROM audit_log WHERE action = ANY($1) GROUP BY entity, entity_id', [Object.values(V2_ARCHIVABLE)])).rows) {
+    if (V2_ARCHIVABLE[r.entity] && r.entity_id) tombstones[`${r.entity}/${r.entity_id}`] = iso(r.at);
+  }
+  return { data, creds, ledger, archived, hidden, tombstones };
 }
 
 // ---------------------------------------------------------------- aplicar un plan
@@ -64,7 +83,7 @@ const stampIso = (r) => (Number.isFinite(stamp(r)) ? new Date(stamp(r)).toISOStr
 
 // Campos de la 3.0 que el .txt v2 no tiene: una importación no los toca.
 // El orden y la especialidad conservan su valor (una herramienta nueva va al final del orden).
-const V3_ONLY = new Set(['cajaId', 'especialidadId', 'order']);
+const V3_ONLY = new Set(['cajaId', 'especialidadId', 'order', 'archivedAt', 'archivedBy', 'archiveReason']);
 const v2Cols = (s) => Object.entries(s.cols).filter(([k]) => !V3_ONLY.has(k));
 
 async function insertGeneric(c, name, id, r) {

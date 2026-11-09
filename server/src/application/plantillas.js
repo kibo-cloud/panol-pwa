@@ -11,6 +11,7 @@ import { validDay } from '../domain/catalog.js';
 import { localDateISO } from '../domain/period.js';
 import { newId } from './ids.js';
 import { withTransaction, checkVersion, record, notifyChange, onUnique } from './common.js';
+import * as records from './records.js';
 import { idempotent } from './idempotency.js';
 
 const rule = (msg, code = 'invalid_input', status = 422) => new DomainError(msg, code, status);
@@ -101,23 +102,9 @@ export async function updatePlantilla(db, actor, id, input, version) {
   });
 }
 
-// Baja lógica: solo sin técnicos actuales ni futuros, y tiene que quedar al menos una.
-export async function archivePlantilla(db, actor, id, version) {
-  return withTransaction(db, async (c) => {
-    const cur = checkVersion(await repo.getRow(c, 'plantillas', id, { lock: true }), version, 'No se encontró la plantilla.');
-    if (cur.archivedAt) throw rule('La plantilla ya está archivada.', 'archived', 409);
-    const busy = (await c.query(
-      "SELECT 1 FROM tech_plantilla_history WHERE plantilla_id = $1 AND (valid_to IS NULL OR valid_to > current_date) AND (valid_from IS NULL OR valid_to IS NULL OR valid_to > valid_from) LIMIT 1",
-      [id],
-    )).rows[0];
-    if (busy) throw rule('La plantilla tiene técnicos.', 'plantilla_has_techs', 409);
-    await repo.lockName(c, 'plantillas.archive');
-    if ((await c.query('SELECT count(*)::int AS n FROM plantillas WHERE archived_at IS NULL')).rows[0].n <= 1) throw rule('Tiene que quedar al menos una plantilla.', 'last_plantilla', 409);
-    const row = await repo.updateRow(c, 'plantillas', id, { archivedAt: new Date() });
-    await record(c, actor, { action: 'plantilla_archive', entity: 'plantillas', id, version: row.version, event: 'delete', detail: `Plantilla archivada: ${cur.name}` });
-    return row;
-  });
-}
+// Baja lógica (etapa 5: records.js, con motivo): solo sin técnicos actuales ni futuros, y tiene
+// que quedar al menos una.
+export const archivePlantilla = (db, actor, id, version, reason = 'Plantilla archivada') => records.archiveRecord(db, actor, 'plantillas', id, { reason }, version).then((r) => r.record);
 
 export async function rotatePlantilla(db, actor, id, input, version) {
   const overrides = await loadOverrides(db);
@@ -220,8 +207,10 @@ export async function moveSelected(db, actor, sourceId, input, { idempotencyKey,
 export async function listPlantillas(db) {
   const rows = await repo.listRows(db, 'plantillas', 'ORDER BY sort_order, id');
   const members = await prepo.currentMembership(db);
+  // Los técnicos eliminados (archivados) no cuentan como integrantes.
+  const archived = new Set((await db.query('SELECT id FROM techs WHERE archived_at IS NOT NULL')).rows.map((r) => r.id));
   const count = {};
-  for (const p of Object.values(members)) count[p] = (count[p] || 0) + 1;
+  for (const [t, p] of Object.entries(members)) if (!archived.has(t)) count[p] = (count[p] || 0) + 1;
   return rows.map((p) => ({ ...p, members: count[p.id] || 0 }));
 }
 

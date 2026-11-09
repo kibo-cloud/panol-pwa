@@ -42,12 +42,12 @@ describe('especialidades', () => {
     assert.equal(set.statusCode, 200);
     assert.equal(set.json().tech.especialidadId, e.id);
     const v = ren.json().especialidad.version;
-    const busy = await api.call('admin', 'POST', `/api/especialidades/${e.id}/archive`, undefined, ifMatch(v));
+    const busy = await api.call('admin', 'POST', `/api/especialidades/${e.id}/archive`, { reason: 'Prueba' }, ifMatch(v));
     assert.equal(busy.statusCode, 409);
     assert.equal(busy.json().error, 'especialidad_in_use');
     const clear = await api.call('admin', 'PATCH', '/api/techs/t-carla', { especialidadId: null }, ifMatch(set.json().tech.version));
     assert.equal(clear.json().tech.especialidadId, null);
-    const arch = await api.call('admin', 'POST', `/api/especialidades/${e.id}/archive`, undefined, ifMatch(v));
+    const arch = await api.call('admin', 'POST', `/api/especialidades/${e.id}/archive`, { reason: 'Prueba' }, ifMatch(v));
     assert.equal(arch.statusCode, 200);
     assert.ok(arch.json().especialidad.archivedAt);
     // Una especialidad archivada no se asigna.
@@ -160,7 +160,7 @@ describe('kits', () => {
     assert.equal((await api.call('admin', 'PUT', '/api/kits/kit-base', { items: [] }, ifMatch(k.version))).statusCode, 409);
     assert.equal((await api.call('admin', 'PUT', '/api/kits/kit-base', { items: [items[0], items[0]] }, ifMatch(k.version + 1))).statusCode, 422);
     assert.equal((await api.call('admin', 'PUT', '/api/kits/kit-base', { items: [{ toolId: 'tool-pinza', qty: 0 }] }, ifMatch(k.version + 1))).statusCode, 400);
-    assert.equal((await api.call('admin', 'DELETE', '/api/kits/kit-base', undefined, ifMatch(k.version + 1))).statusCode, 409);
+    assert.equal((await api.call('admin', 'DELETE', '/api/kits/kit-base', { reason: 'x', confirmName: 'Kit base' }, ifMatch(k.version + 1))).statusCode, 409);
     assert.deepEqual((await state()).kits['kit-base'].items, items);
   });
 
@@ -171,7 +171,7 @@ describe('kits', () => {
     assert.equal(kitElec.name, 'Kit Electricista');
     assert.equal((await api.call('admin', 'POST', '/api/kits', { especialidadId: 'esp-electricista' })).statusCode, 409);
     const tmp = (await api.call('admin', 'POST', '/api/kits', { especialidadId: 'esp-soldador' })).json().kit;
-    assert.equal((await api.call('admin', 'DELETE', `/api/kits/${tmp.id}`, undefined, ifMatch(tmp.version))).statusCode, 200);
+    assert.equal((await api.call('admin', 'DELETE', `/api/kits/${tmp.id}`, { reason: 'Prueba', confirmName: tmp.name }, ifMatch(tmp.version))).statusCode, 200);
     const up = await api.call('admin', 'PUT', `/api/kits/${kitElec.id}`, { items: [{ toolId: 'tool-pinza', qty: 1 }, { toolId: 'tool-taladro', qty: 1 }] }, ifMatch(kitElec.version));
     assert.equal(up.statusCode, 200);
     kitElec = up.json().kit;

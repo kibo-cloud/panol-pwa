@@ -38,8 +38,7 @@ export function registerCatalogRoutes(app) {
     async (req, reply) => sendRow(reply, 'category', await catalog.createCategory(db, actorOf(req), req.body), 201));
   app.patch('/api/categories/:id', { ...perm('tools_edit'), schema: { params: idParams, body: obj({ name: S.name }, ['name']) } },
     async (req, reply) => sendRow(reply, 'category', await catalog.updateCategory(db, actorOf(req), req.params.id, req.body, requireVersion(req))));
-  app.delete('/api/categories/:id', { ...perm('tools_edit'), schema: { params: idParams } },
-    async (req) => catalog.deleteCategory(db, actorOf(req), req.params.id, requireVersion(req)));
+  // Eliminar categorías: records-routes.js (etapa 5: baja lógica o definitiva sin historial).
 
   // ------------------------------------------------------------ herramientas y unidades
   const toolBody = { name: S.name, description: S.text, categoryId: S.idOrNull, serialized: S.bool };

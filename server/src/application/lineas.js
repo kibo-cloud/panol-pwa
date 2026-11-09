@@ -8,6 +8,7 @@ import { newId } from './ids.js';
 import { withTransaction, checkVersion, record } from './common.js';
 import { idempotent } from './idempotency.js';
 import { applyMovement } from './movements.js';
+import * as records from './records.js';
 
 const rule = (msg, code = 'invalid_input', status = 422) => new DomainError(msg, code, status);
 const changed = (set, cur) => Object.fromEntries(Object.entries(set).filter(([k, v]) => v !== undefined && v !== cur[k]));
@@ -47,16 +48,8 @@ export async function updateLinea(db, actor, id, input, version) {
   });
 }
 
-export async function archiveLinea(db, actor, id, version) {
-  return withTransaction(db, async (c) => {
-    const cur = checkVersion(await repo.getRow(c, 'lineas', id, { lock: true }), version, 'No se encontró la línea.');
-    if (cur.archivedAt) throw rule('La línea ya está archivada.', 'archived', 409);
-    if ((await c.query('SELECT 1 FROM cajas WHERE linea_id = $1 AND archived_at IS NULL LIMIT 1', [id])).rows[0]) throw rule('La línea tiene cajas activas.', 'linea_has_cajas', 409);
-    const row = await repo.updateRow(c, 'lineas', id, { archivedAt: new Date() });
-    await record(c, actor, { action: 'linea_archive', entity: 'lineas', id, version: row.version, event: 'delete', detail: `Baja de ${kindLabel(row.kind)} ${row.name}` });
-    return row;
-  });
-}
+// Baja lógica (etapa 5: records.js, con motivo): solo sin cajas activas.
+export const archiveLinea = (db, actor, id, version, reason = 'Línea archivada') => records.archiveRecord(db, actor, 'lineas', id, { reason }, version).then((r) => r.record);
 
 // ---------------------------------------------------------------- cajas
 const CAJA_DUP = 'Ya existe una caja con ese nombre.';
@@ -101,17 +94,8 @@ export async function updateCaja(db, actor, id, input, version) {
   });
 }
 
-// Baja lógica, solo sin herramientas asignadas (el historial de controles y movimientos queda).
-export async function archiveCaja(db, actor, id, version) {
-  return withTransaction(db, async (c) => {
-    const cur = checkVersion(await repo.getRow(c, 'cajas', id, { lock: true }), version, 'No se encontró la caja.');
-    if (cur.archivedAt) throw rule('La caja ya está archivada.', 'archived', 409);
-    if ((await c.query('SELECT 1 FROM assignments WHERE caja_id = $1 AND active LIMIT 1', [id])).rows[0]) throw rule('La caja tiene herramientas asignadas.', 'caja_has_tools', 409);
-    const row = await repo.updateRow(c, 'cajas', id, { archivedAt: new Date() });
-    await record(c, actor, { action: 'caja_archive', entity: 'cajas', id, version: row.version, event: 'delete', detail: `Baja de caja ${row.name}` });
-    return row;
-  });
-}
+// Baja lógica (etapa 5: records.js): las herramientas asignadas se resuelven en el mismo paso.
+export const archiveCaja = (db, actor, id, version, reason = 'Caja archivada', resolutions = []) => records.archiveRecord(db, actor, 'cajas', id, { reason, resolutions }, version).then((r) => r.record);
 
 // ---------------------------------------------------------------- alta de asignación
 // holder: { techId } o { cajaId }. Por cantidad: un movimiento (entrega inicial, o adicional
