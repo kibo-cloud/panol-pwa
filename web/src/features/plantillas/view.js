@@ -6,7 +6,7 @@ import { esc } from '../../ui/dom.js';
 import { icon } from '../../ui/icons.js';
 import { VIEWS, UI, render } from '../../ui/registry.js';
 import { ACT, IN, CH } from '../../ui/actions.js';
-import { openModal, modalRerender, MOD, confirmBox } from '../../ui/modal.js';
+import { openModal, modalRerender, MOD } from '../../ui/modal.js';
 import { toast, act, UErr } from '../../ui/feedback.js';
 import { kpi, pageHead, emptyBox, avatar, demoChip, ctlBadge, sbar, cnts, plIcon, field, turnoText } from '../../ui/components.js';
 import { api } from '../../api/index.js';
@@ -15,6 +15,7 @@ import { plabel, fdate, todayISO } from '../../state/period.js';
 import { toggleId, pruneSelection, allSelected, coverageOf, daysBetween, mineFirst } from '../../state/plantillas.js';
 import { LIM } from '../../state/constants.js';
 import { openMoveSelected } from './move.js';
+import { deleteBtn, archivedBanner } from '../records/view.js';
 
 const supName = (p) => (p.supervisorUserId ? who(p.supervisorUserId) : 'Sin supervisor');
 const lastCtlText = (lastAt) => { const n = daysBetween(lastAt, todayISO()); return n == null ? 'Sin controles todavía' : n === 0 ? 'Último control hoy' : n === 1 ? 'Último control ayer' : `Último control hace ${n} días`; };
@@ -33,7 +34,8 @@ VIEWS.plantillas = () => {
   return pageHead('Plantillas', `${d.shifts.length} ${d.shifts.length === 1 ? 'plantilla' : 'plantillas'}, ${d.kpi.techs} técnicos activos`, { acts }) +
     (mine.length ? `<h2 class="sec" data-css="margin-top:0">Mi plantilla</h2><div class="g3">${mine.map(plantillaCard).join('')}</div><h2 class="sec">Otras plantillas</h2>` : '') +
     (rest.length ? `<div class="g3">${rest.map(plantillaCard).join('')}</div>` : mine.length ? '' : `<div class="list">${emptyBox('No hay plantillas', 'Creá la primera plantilla para agrupar a los técnicos.')}</div>`) +
-    (d.archivedPlantillas.length ? `<h2 class="sec">Archivadas</h2><div class="list">${d.archivedPlantillas.map((p) => `<div class="row"><div class="grow"><div class="t">${esc(p.name)}</div><div class="s">Archivada el ${fdate(p.archivedAt)}</div></div></div>`).join('')}</div>` : '');
+    // Etapa 5: las eliminadas se ven (y se restauran) en Administración › Registros eliminados.
+    (d.archivedPlantillas.length && can('records_delete') ? `<p class="muted sm">${d.archivedPlantillas.length} ${d.archivedPlantillas.length === 1 ? 'plantilla eliminada' : 'plantillas eliminadas'}: se ven en Administración › Registros eliminados.</p>` : '');
 };
 
 function memberCard(t, sel, selectable) {
@@ -70,7 +72,8 @@ VIEWS.plantilla = (id) => {
   const selBar = mv && members.length ? `<div class="selbar" role="region" aria-label="Técnicos seleccionados"><span class="grow"><b>${sel.length ? `${sel.length} ${sel.length === 1 ? 'seleccionado' : 'seleccionados'}` : 'Ninguno seleccionado'}</b><span class="s" data-css="display:block">${sel.length ? 'Se mueven todos juntos, en un solo paso.' : 'Tildá a los técnicos que querés mover.'}</span></span><button class="btn sm" data-act="plSelAll">${allSelected(sel, members.map((t) => t.id)) ? 'Quitar todos' : 'Seleccionar todos'}</button><button class="btn sm pri" data-act="plMoveSel" data-p="${esc(id)}" ${sel.length ? '' : 'disabled aria-disabled="true"'}>${icon('swap', 16)}Mover seleccionados</button></div>` : '';
   const rot = (S.plantillaRotations || []).filter((r) => r.plantillaId === id).slice().reverse().map((r) => ({ change: `${r.fromLabel || 'Sin turno'} → ${r.label}`, meta: `Desde el ${fdate(r.from)} · ${who(r.by)}` }));
   const sups = (S.plantillaSupervisors || []).filter((r) => r.plantillaId === id).slice().reverse().map((r) => ({ change: r.fromUserId ? `${who(r.fromUserId)} → ${r.supervisorUserId ? who(r.supervisorUserId) : 'Sin supervisor'}` : `Supervisor: ${r.supervisorUserId ? who(r.supervisorUserId) : 'sin supervisor'}`, meta: `Desde el ${fdate(r.from)} · ${who(r.by)}` }));
-  const archiveBox = edit ? `<section class="card" data-css="margin-top:12px"><h2 class="si">Archivar plantilla</h2>${members.length ? `<p class="muted sm" data-css="margin:6px 0 10px">Para archivarla, mové antes a sus ${members.length} ${members.length === 1 ? 'técnico' : 'técnicos'} a otra plantilla.</p><button class="btn danger" disabled aria-disabled="true">Archivar</button>` : `<p class="muted sm" data-css="margin:6px 0 10px">No tiene técnicos. Queda en el historial y en los informes anteriores.</p><button class="btn danger" data-act="plArchive" data-p="${esc(id)}">Archivar</button>`}</section>` : '';
+  // Etapa 5: Eliminar (solo sin técnicos; si tiene, el servidor lo explica) o el aviso si ya lo está.
+  const archiveBox = archived ? archivedBanner(p, 'plantillas') : edit && can('records_delete') ? `<section class="card" data-css="margin-top:12px"><h2 class="si">Eliminar plantilla</h2>${members.length ? `<p class="muted sm" data-css="margin:6px 0 10px">Para eliminarla, mové antes a sus ${members.length} ${members.length === 1 ? 'técnico' : 'técnicos'} a otra plantilla.</p><button class="btn danger" disabled aria-disabled="true">Eliminar</button>` : `<p class="muted sm" data-css="margin:6px 0 10px">No tiene técnicos. Queda en el historial y en los informes anteriores.</p>${deleteBtn('plantillas', id, { back: '#plantillas' })}`}</section>` : '';
   return `<a class="backl" href="#plantillas">${icon('back', 16)}Plantillas</a><div class="ph"><div data-css="display:flex;align-items:center;gap:12px"><span class="tile">${icon(plIcon(p), 20)}</span><div><h1>${esc(p.name)}${archived ? ' <span class="chip">Archivada</span>' : ''}</h1><div class="sub">${esc(supName(p))} · ${p.currentShiftLabel ? 'Turno actual: ' + esc(p.currentShiftLabel) : 'Sin turno actual'} · ${plabel(d.cur)}</div></div></div>${acts ? `<div class="acts">${acts}</div>` : ''}</div>
   <section class="kpis k3" data-css="margin-bottom:12px">${kpi(`${i.done}<small> /${i.techs}</small>`, 'Controlados')}${kpi(i.tools, 'Herramientas')}${kpi(den ? Math.round(i.sum.bueno / den * 100) + '%' : '—', 'En condiciones', '', 'ok')}</section>
   <div class="toolbar"><div class="search">${icon('search', 18)}<input id="turq" type="search" placeholder="Buscar por nombre o legajo" value="${esc(UI.turnoQ || '')}" data-in="turnoQ" aria-label="Buscar técnico"></div></div>
@@ -146,11 +149,6 @@ ACT.plRename = (ds) => {
     } }] });
   MOD.st = { name: p.name }; modalRerender();
 };
-ACT.plArchive = async (ds) => {
-  const p = derive().plantillaById[ds.p]; if (!p || !can('plantillas_edit')) return;
-  if (!await confirmBox('Archivar plantilla', `${esc(p.name)} deja de aparecer en las listas. Su historial y los controles anteriores se conservan.`, 'Archivar', 'danger')) return;
-  const ok = await act(async () => { await api.archivePlantilla(ds.p, p.version); await refresh(); return true; }, 'Plantilla archivada');
-  if (ok) location.hash = '#plantillas';
-};
+// Eliminar una plantilla: features/records/view.js (etapa 5).
 
 export { plantillaName };

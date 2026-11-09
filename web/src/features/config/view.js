@@ -7,7 +7,7 @@ import { esc } from '../../ui/dom.js';
 import { icon } from '../../ui/icons.js';
 import { VIEWS, UI, render } from '../../ui/registry.js';
 import { ACT, IN, CH } from '../../ui/actions.js';
-import { openModal, modalRerender, MOD, confirmBox } from '../../ui/modal.js';
+import { openModal, modalRerender, MOD } from '../../ui/modal.js';
 import { toast, act, UErr, tooLong, errMsg } from '../../ui/feedback.js';
 import { pageHead, emptyBox, demoChip, field, optList } from '../../ui/components.js';
 import { ordControls, registerScope } from '../../ui/sortable.js';
@@ -16,6 +16,7 @@ import { api } from '../../api/index.js';
 import { S, derive, can, refresh, espName, orderVersion } from '../../state/store.js';
 import { CATEGORY_SCOPE, toolScope, sameOrder } from '../../state/orden.js';
 import { LIM } from '../../state/constants.js';
+import { deleteBtn } from '../records/view.js';
 
 // Ediciones en curso: orden por alcance, avisos de conflicto y kits.
 Object.assign(UI, { cfgTab: UI.cfgTab || 'tools', ord: {}, ordConflict: {}, kitEd: {}, kitConflict: {}, kitNewEsp: '' });
@@ -73,7 +74,7 @@ ACT.ordSave = async (ds) => {
 function toolsTab(d, ce) {
   const catItems = viewIds(CATEGORY_SCOPE).map((id) => {
     const c = S.categories[id]; const n = d.tools.filter((t) => t.categoryId === id).length;
-    return { id, label: c.name, body: `<div class="grow"><div class="t">${esc(c.name)} ${demoChip(c)}</div><div class="s">${n} ${n === 1 ? 'herramienta' : 'herramientas'}</div></div>${ce ? `<span class="r"><button class="btn sm" data-act="catEdit" data-c="${esc(id)}">Editar</button>${n ? '' : `<button class="btn sm danger" data-act="catDel" data-c="${esc(id)}">Eliminar</button>`}</span>` : ''}` };
+    return { id, label: c.name, body: `<div class="grow"><div class="t">${esc(c.name)} ${demoChip(c)}</div><div class="s">${n} ${n === 1 ? 'herramienta' : 'herramientas'}</div></div>${ce ? `<span class="r"><button class="btn sm" data-act="catEdit" data-c="${esc(id)}">Editar</button>${deleteBtn('categories', id, { sm: true })}</span>` : ''}` };
   });
   const toolBody = (t) => { const p = d.pools[t.id]; return `<a class="grow" href="#herramienta-${esc(t.id)}"><div class="t ell">${esc(t.name)} ${t.active === false ? '<span class="chip">Inactiva</span>' : ''} ${demoChip(t)}</div><div class="s ell">${t.serialized ? 'por código' : 'por cantidad'}, ${p.asignado} asignadas, ${p.disponible} disponibles</div></a>${ce ? `<span class="r"><button class="btn sm" data-act="toolEdit" data-t="${esc(t.id)}">Editar</button><button class="btn sm" data-act="toolToggle" data-t="${esc(t.id)}">${t.active === false ? 'Activar' : 'Desactivar'}</button></span>` : ''}`; };
   const groups = [...viewIds(CATEGORY_SCOPE).map((id) => ({ id, name: S.categories[id].name })), { id: '', name: 'Sin categoría' }]
@@ -100,7 +101,7 @@ const toolLabel = (id) => (S.tools[id] || {}).name || 'Herramienta eliminada';
 
 function kitCard(k, ke) {
   const items = kitItems(k.id); const total = items.reduce((a, it) => a + it.qty, 0);
-  const head = `<div class="srow"><div><h2 class="si">${esc(k.name)}</h2><div class="muted sm">${k.especialidadId ? 'Especialidad ' + esc(espName(k.especialidadId)) : 'Para todos los técnicos'} · ${items.length} ${items.length === 1 ? 'herramienta' : 'herramientas'}, ${total} en total</div></div>${ke && k.especialidadId ? `<button class="btn sm danger" data-act="kitDelete" data-k="${esc(k.id)}">Eliminar kit</button>` : ''}</div>`;
+  const head = `<div class="srow"><div><h2 class="si">${esc(k.name)}</h2><div class="muted sm">${k.especialidadId ? 'Especialidad ' + esc(espName(k.especialidadId)) : 'Para todos los técnicos'} · ${items.length} ${items.length === 1 ? 'herramienta' : 'herramientas'}, ${total} en total</div></div>${k.especialidadId ? deleteBtn('kits', k.id, { sm: true }) : ''}</div>`;
   if (!ke) return `<section class="card kitcard" data-kit="${esc(k.id)}">${head}${items.length ? `<div class="list">${items.map((it) => `<div class="row"><div class="grow t">${esc(toolLabel(it.toolId))}</div><span class="chip">×${it.qty}</span></div>`).join('')}</div>` : '<p class="muted sm">Todavía no tiene herramientas.</p>'}</section>`;
   const add = (UI.kitEd[k.id] || {}).add || {};
   const scope = 'kit:' + k.id;
@@ -151,11 +152,6 @@ ACT.kitNew = async () => {
   const esp = UI.kitNewEsp; if (!esp) { toast('Elegí la especialidad del kit.', 'err'); return; }
   await act(async () => { await api.createKit({ especialidadId: esp }); UI.kitNewEsp = ''; await refresh(); }, 'Kit creado');
 };
-ACT.kitDelete = async (ds) => {
-  const k = kitOf(ds.k); if (!k || !gateUI('kits_edit')) return;
-  if (!await confirmBox('Eliminar kit', `Se elimina ${esc(k.name)}. Las entregas ya registradas no cambian.`, 'Eliminar', 'danger')) return;
-  await act(async () => { await api.deleteKit(ds.k, k.version); delete UI.kitEd[ds.k]; await refresh(); }, 'Kit eliminado');
-};
 
 // ------------------------------------------------------------------ pestaña Especialidades
 function espTab(d) {
@@ -163,8 +159,8 @@ function espTab(d) {
   const n = (id) => d.activeTechs.filter((t) => t.especialidadId === id).length;
   return `<p class="hint">${icon('info', 16)}<span>La especialidad de cada técnico se elige al editarlo. Sirve para filtrar y aparece en los reportes.</span></p>
   ${te ? `<div class="toolbar"><button class="btn pri" data-act="espNew">${icon('plus', 16)}Nueva especialidad</button></div>` : ''}
-  <div class="list">${live.map((e) => `<div class="row"><div class="grow"><div class="t">${esc(e.name)}</div><div class="s">${n(e.id)} ${n(e.id) === 1 ? 'técnico activo' : 'técnicos activos'}${d.kits.some((k) => k.especialidadId === e.id) ? ', con kit propio' : ''}</div></div>${te ? `<span class="r"><button class="btn sm" data-act="espEdit" data-e="${esc(e.id)}">Editar</button><button class="btn sm danger" data-act="espArchive" data-e="${esc(e.id)}">Archivar</button></span>` : ''}</div>`).join('') || emptyBox('Sin especialidades', '')}</div>
-  ${arch.length ? `<p class="muted sm" data-css="margin-top:10px">Archivadas: ${arch.map((e) => esc(e.name)).join(', ')}.</p>` : ''}`;
+  <div class="list">${live.map((e) => `<div class="row"><div class="grow"><div class="t">${esc(e.name)}</div><div class="s">${n(e.id)} ${n(e.id) === 1 ? 'técnico activo' : 'técnicos activos'}${d.kits.some((k) => k.especialidadId === e.id) ? ', con kit propio' : ''}</div></div>${te ? `<span class="r"><button class="btn sm" data-act="espEdit" data-e="${esc(e.id)}">Editar</button>${deleteBtn('especialidades', e.id, { sm: true })}</span>` : ''}</div>`).join('') || emptyBox('Sin especialidades', '')}</div>
+  ${arch.length ? `<p class="muted sm" data-css="margin-top:10px">${arch.length} ${arch.length === 1 ? 'especialidad eliminada' : 'especialidades eliminadas'}: se ven en Administración › Registros eliminados.</p>` : ''}`;
 }
 const espForm = (st) => field('Nombre de la especialidad', `<input id="f-en" type="text" maxlength="120" data-mi="name" value="${esc(st.name || '')}">`, 'f-en');
 function validEsp(st, except) { const n = (st.name || '').trim(); if (n.length < 2) throw new UErr('Ingresá un nombre.'); tooLong(n, LIM.name, 'El nombre'); if (Object.entries(S.especialidades).some(([id, e]) => id !== except && !e.archivedAt && e.name.toLowerCase() === n.toLowerCase())) throw new UErr('Ya existe una especialidad con ese nombre.'); return n; }
@@ -173,11 +169,6 @@ ACT.espEdit = (ds) => {
   const e = S.especialidades[ds.e]; if (!e || !gateUI('techs_edit')) return;
   openModal({ title: 'Editar especialidad', render: espForm, rec: { get: () => S.especialidades[ds.e], version: e.version }, reload: (cur) => ({ name: cur.name }), actions: [{ label: 'Cancelar', close: true }, { label: 'Guardar', kind: 'pri', run: async (st, m) => { await api.updateEspecialidad(ds.e, { name: validEsp(st, ds.e) }, m.rec.version); await refresh(); toast('Especialidad actualizada'); } }] });
   MOD.st = { name: e.name }; modalRerender();
-};
-ACT.espArchive = async (ds) => {
-  const e = S.especialidades[ds.e]; if (!e || !gateUI('techs_edit')) return;
-  if (!await confirmBox('Archivar especialidad', `${esc(e.name)} deja de ofrecerse para los técnicos. Solo se puede si ningún técnico activo la tiene y no tiene kit.`, 'Archivar', 'danger')) return;
-  await act(async () => { await api.archiveEspecialidad(ds.e, e.version); await refresh(); }, 'Especialidad archivada');
 };
 
 // ------------------------------------------------------------------ vista
@@ -194,18 +185,12 @@ ACT.cfgTab = (ds) => { UI.cfgTab = ds.v; if (location.hash !== '#config') locati
 
 // ------------------------------------------------------------------ categorías
 function catForm(st) { return field('Nombre de la categoría', `<input id="f-cn" type="text" maxlength="120" data-mi="name" value="${esc(st.name || '')}">`, 'f-cn'); }
-function validCat(st, except) { const n = (st.name || '').trim(); if (n.length < 2) throw new UErr('Ingresá un nombre.'); tooLong(n, LIM.name, 'El nombre'); if (Object.entries(S.categories).some(([id, c]) => id !== except && c.name.toLowerCase() === n.toLowerCase())) throw new UErr('Ya existe esa categoría.'); return n; }
+function validCat(st, except) { const n = (st.name || '').trim(); if (n.length < 2) throw new UErr('Ingresá un nombre.'); tooLong(n, LIM.name, 'El nombre'); if (Object.entries(S.categories).some(([id, c]) => id !== except && !c.archived && c.name.toLowerCase() === n.toLowerCase())) throw new UErr('Ya existe esa categoría.'); return n; }
 ACT.catNew = () => { if (!gateUI('tools_edit')) return; openModal({ title: 'Nueva categoría', render: catForm, actions: [{ label: 'Cancelar', close: true }, { label: 'Crear', kind: 'pri', run: async (st) => { await api.createCategory({ name: validCat(st) }); await refresh(); toast('Categoría creada'); } }] }); };
 ACT.catEdit = (ds) => {
   const c = S.categories[ds.c]; if (!c || !gateUI('tools_edit')) return;
   openModal({ title: 'Editar categoría', render: catForm, rec: { get: () => S.categories[ds.c], version: c.version }, reload: (cur) => ({ name: cur.name }), actions: [{ label: 'Cancelar', close: true }, { label: 'Guardar', kind: 'pri', run: async (st, m) => { await api.updateCategory(ds.c, { name: validCat(st, ds.c) }, m.rec.version); await refresh(); toast('Categoría actualizada'); } }] });
   MOD.st = { name: c.name }; modalRerender();
-};
-ACT.catDel = async (ds) => {
-  const c = S.categories[ds.c]; if (!c || !gateUI('tools_edit')) return;
-  if (Object.values(S.tools).some((t) => t.categoryId === ds.c)) { toast('La categoría tiene herramientas.', 'err'); return; }
-  if (!await confirmBox('Eliminar categoría', `Se elimina ${esc(c.name)}.`, 'Eliminar', 'danger')) return;
-  await act(async () => { await api.deleteCategory(ds.c, c.version); await refresh(); }, 'Categoría eliminada');
 };
 
 // ------------------------------------------------------------------ herramientas
@@ -221,7 +206,7 @@ function toolForm(t) {
   ${field('Seguimiento', hasMov ? `<p class="muted" data-css="margin:0">${t.serialized ? 'Por código individual' : 'Por cantidad'}. No se puede cambiar porque ya tiene movimientos.</p>` : `<div class="opts">${[['1', 'Por código individual: cada unidad tiene su código'], ['0', 'Por cantidad: se controla el total, sin código']].map(([v, l]) => `<button type="button" class="opt ${st.serialized === v ? 'on' : ''}" data-act="mset" data-k="serialized" data-v="${esc(v)}">${l}</button>`).join('')}</div>`)}
   ${t ? '' : st.serialized === '1' ? field('Códigos iniciales (uno por línea, opcional)', `<textarea id="f-tk" data-mi="codes" rows="3" placeholder="TAL-001&#10;TAL-002">${esc(st.codes || '')}</textarea>`, 'f-tk') : field('Stock inicial disponible (opcional)', `<input id="f-ts" type="number" min="0" inputmode="numeric" data-mi="stock" value="${esc(st.stock || '')}">`, 'f-ts')}`;
 }
-function validTool(st, except) { const n = (st.name || '').trim(); if (n.length < 2) throw new UErr('Ingresá el nombre.'); tooLong(n, LIM.name, 'El nombre'); tooLong(st.description, LIM.text, 'La descripción'); if (Object.entries(S.tools).some(([id, t]) => id !== except && t.name.toLowerCase() === n.toLowerCase())) throw new UErr('Ya existe una herramienta con ese nombre.'); return n; }
+function validTool(st, except) { const n = (st.name || '').trim(); if (n.length < 2) throw new UErr('Ingresá el nombre.'); tooLong(n, LIM.name, 'El nombre'); tooLong(st.description, LIM.text, 'La descripción'); if (Object.entries(S.tools).some(([id, t]) => id !== except && !t.archived && t.name.toLowerCase() === n.toLowerCase())) throw new UErr('Ya existe una herramienta con ese nombre.'); return n; }
 const toolSt = (t) => ({ name: t.name, description: t.description || '', categoryId: t.categoryId || '', serialized: t.serialized ? '1' : '0' });
 
 ACT.toolNew = () => {
@@ -238,7 +223,7 @@ ACT.toolNew = () => {
 };
 ACT.toolEdit = (ds) => {
   const t = S.tools[ds.t]; if (!t || !gateUI('tools_edit')) return; const hasMov = Object.values(S.movements).some((m) => m.toolId === ds.t);
-  openModal({ title: 'Editar herramienta', render: toolForm({ id: ds.t, ...t }), rec: { get: () => S.tools[ds.t], version: t.version }, reload: toolSt, actions: [{ label: 'Cancelar', close: true }, { label: 'Guardar cambios', kind: 'pri', run: async (st, m) => {
+  openModal({ title: 'Editar herramienta', render: (st) => toolForm({ id: ds.t, ...t })(st) + (deleteBtn('tools', ds.t) ? `<div class="field"><label>Eliminar</label>${deleteBtn('tools', ds.t)}</div>` : ''), rec: { get: () => S.tools[ds.t], version: t.version }, reload: toolSt, actions: [{ label: 'Cancelar', close: true }, { label: 'Guardar cambios', kind: 'pri', run: async (st, m) => {
     const n = validTool(st, ds.t);
     await api.updateTool(ds.t, { name: n, description: (st.description || '').trim(), categoryId: st.categoryId || null, ...(hasMov ? {} : { serialized: st.serialized === '1' }) }, m.rec.version);
     await refresh(); toast('Cambios guardados');

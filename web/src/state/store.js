@@ -50,17 +50,22 @@ export function derive() {
 }
 
 export const myRole = () => ME.role || 'consulta';
+// Etapa 5: un registro eliminado (archivado) sigue en el historial con la marca "(eliminado)".
+export const isArchived = (r) => !!(r && (r.archived || r.archivedAt));
+export const markArchived = (r, name) => (isArchived(r) ? `${name} (eliminado)` : name);
 export function can(p) { if (myRole() === 'admin') return true; return !!(ME.permissions && ME.permissions[p]); }
-export function who(id) { if (!id) return '—'; const u = S.users[id]; if (!u) return 'Usuario eliminado'; return id === ME.id ? u.name + ' (vos)' : u.name; }
-export const shiftName = (id) => { const s = derive().plantillaById[id]; return s ? s.name : 'Sin plantilla'; };
+export function who(id) { if (!id) return '—'; const u = S.users[id]; if (!u) return 'Usuario eliminado'; return id === ME.id ? u.name + ' (vos)' : markArchived(u, u.name); }
+export const shiftName = (id) => { const s = derive().plantillaById[id]; return s ? markArchived(s, s.name) : 'Sin plantilla'; };
 export const plantillaName = shiftName;
-export const cajaName = (id) => (S.cajas[id] || {}).name || 'Caja eliminada';
+export const cajaName = (id) => { const k = S.cajas[id]; return k ? markArchived(k, k.name) : 'Caja eliminada'; };
+export const techName = (id) => { const t = S.techs[id]; return t ? markArchived(t, t.name) : ''; };
 // Nombre del poseedor de una asignación, control o movimiento (técnico o caja).
-export const holderName = (o) => (o && o.cajaId ? cajaName(o.cajaId) : (S.techs[o && o.techId] || {}).name || '');
+export const holderName = (o) => (o && o.cajaId ? cajaName(o.cajaId) : techName(o && o.techId));
 // Rota quien tiene plantilla_rotate o el supervisor de esa plantilla (como el servidor).
 export const canRotate = (p) => !!p && (can('plantilla_rotate') || (myRole() === 'supervisor' && p.supervisorUserId === ME.id));
-export const toolName = (id) => (S.tools[id] || {}).name || 'Herramienta eliminada';
-export const catName = (id) => (S.categories[id] || {}).name || 'Sin categoría';
-export const espName = (id) => (id ? (S.especialidades[id] || {}).name || 'Especialidad eliminada' : 'Sin especialidad');
+export const toolName = (id) => { const t = S.tools[id]; return t ? markArchived(t, t.name) : 'Herramienta eliminada'; };
+export const catName = (id) => { const g = S.categories[id]; return g ? markArchived(g, g.name) : 'Sin categoría'; };
+export const espName = (id) => { if (!id) return 'Sin especialidad'; const e = S.especialidades[id]; return e ? markArchived(e, e.name) : 'Especialidad eliminada'; };
+export const lineaName = (id) => { const l = S.lineas[id]; return l ? markArchived(l, l.name) : 'Línea eliminada'; };
 // Versión del orden de un alcance ('categories', 'tools:<id>'), para el If-Match del reordenar.
 export const orderVersion = (scope) => (S.orderVersions || {})[scope] || 1;

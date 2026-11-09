@@ -15,6 +15,7 @@ import { ROLES, ROLE_KEYS, PERMS, PERMS_HIDDEN, POOL, LIM } from '../../state/co
 import { validateShiftLabels } from '../../state/plantillas.js';
 import { fdate, fdt } from '../../state/period.js';
 import { parseRoute } from '../../ui/router.js';
+import { deleteBtn, deletedTab } from '../records/view.js';
 
 // Datos que solo ve un administrador: se piden al abrir la pestaña.
 const AD = { users: null, perms: null, pending: {}, audit: null, labels: null, loading: {} };
@@ -43,7 +44,7 @@ function usersTab() {
   if (!isAdm()) return mine + '<p class="hint">Solo un administrador puede ver y administrar los usuarios y los permisos.</p>';
   load('users'); load('perms');
   const users = (AD.users || []).slice().sort((a, b) => (a.active === false) - (b.active === false) || (a.name || '').localeCompare(b.name || '', 'es'));
-  const list = !AD.users ? loading : `<div class="list">${users.map((u) => `<div class="row" data-css="flex-wrap:wrap">${avatar(u.name)}<div class="grow"><div class="t">${esc(u.name)}${u.id === ME.id ? ' (vos)' : ''}</div><div class="s">${esc(u.username)} · ${ROLES[u.role] || ''}${u.active === false ? ' · inactivo' : ''}${u.mustChangePassword ? ' · debe cambiar la contraseña' : ''} · alta ${fdate(u.createdAt)}</div></div><div class="r"><button class="btn sm" data-act="userEdit" data-u="${esc(u.id)}">Editar</button><button class="btn sm" data-act="userReset" data-u="${esc(u.id)}">Restablecer contraseña</button>${u.id === ME.id ? '' : `<button class="btn sm ${u.active === false ? '' : 'danger'}" data-act="userToggle" data-u="${esc(u.id)}">${u.active === false ? 'Reactivar' : 'Desactivar'}</button>`}</div></div>`).join('')}</div>`;
+  const list = !AD.users ? loading : `<div class="list">${users.map((u) => `<div class="row" data-css="flex-wrap:wrap">${avatar(u.name)}<div class="grow"><div class="t">${esc(u.name)}${u.id === ME.id ? ' (vos)' : ''}</div><div class="s">${esc(u.username)} · ${ROLES[u.role] || ''}${u.active === false ? ' · inactivo' : ''}${u.mustChangePassword ? ' · debe cambiar la contraseña' : ''} · alta ${fdate(u.createdAt)}</div></div><div class="r"><button class="btn sm" data-act="userEdit" data-u="${esc(u.id)}">Editar</button><button class="btn sm" data-act="userReset" data-u="${esc(u.id)}">Restablecer contraseña</button>${u.id === ME.id ? '' : `<button class="btn sm ${u.active === false ? '' : 'danger'}" data-act="userToggle" data-u="${esc(u.id)}">${u.active === false ? 'Reactivar' : 'Desactivar'}</button>${deleteBtn('users', u.id, { sm: true })}`}</div></div>`).join('')}</div>`;
   return mine + `<div class="srow" data-css="margin-top:22px"><h2 class="si">Usuarios</h2><button class="btn sm pri" data-act="userNew">${icon('plus', 16)}Nuevo usuario</button></div>${list}
   <h2 class="sec">Permisos por perfil</h2><p class="muted sm" data-css="margin-top:-4px">El perfil Administrador tiene acceso total.</p>${permMatrix()}`;
 }
@@ -99,8 +100,8 @@ function auditTab() {
 
 VIEWS.admin = () => {
   const tab = UI.adminTab;
-  const tabs = [['users', 'Usuarios y permisos'], ['config', 'Configuración'], ['data', 'Datos e integridad'], ['audit', 'Auditoría']];
-  const body = tab === 'users' ? usersTab() : tab === 'config' || tab === 'shifts' ? configTab() : tab === 'data' ? dataTab() : auditTab();
+  const tabs = [['users', 'Usuarios y permisos'], ['config', 'Configuración'], ['data', 'Datos e integridad'], ...(can('records_delete') ? [['deleted', 'Registros eliminados']] : []), ['audit', 'Auditoría']];
+  const body = tab === 'users' ? usersTab() : tab === 'deleted' ? deletedTab() : tab === 'config' || tab === 'shifts' ? configTab() : tab === 'data' ? dataTab() : auditTab();
   return pageHead('Administración', 'Usuarios, permisos, configuración y registros del sistema') + `<div class="tabs">${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="adminTab" data-v="${esc(k)}">${l}</button>`).join('')}</div>${body}`;
 };
 ACT.adminTab = (ds) => { UI.adminTab = ds.v; if (location.hash !== '#admin') location.hash = '#admin'; else render(); };

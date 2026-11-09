@@ -6,7 +6,7 @@ import { icon } from '../../ui/icons.js';
 import { VIEWS, UI, render } from '../../ui/registry.js';
 import { CH } from '../../ui/actions.js';
 import { kpi, pageHead, emptyBox, field, optList, lineChart } from '../../ui/components.js';
-import { S, derive, can, shiftName, espName, toolName, catName } from '../../state/store.js';
+import { S, derive, can, shiftName, espName, toolName, catName, markArchived } from '../../state/store.js';
 import { MONTHS } from '../../state/constants.js';
 import { pad, pnumOf, weekRange, monthRange, inRange, parsePkey, prevMonth, mlabel, plabel } from '../../state/period.js';
 import { reportPlantillaOf, periodEndDay, mineFirst, holderKey } from '../../state/plantillas.js';
@@ -20,17 +20,19 @@ export function computeReport() {
   const started = weeks.filter((w) => pnumOf({ y, m, w }) <= d.curNum);
   const endDay = periodEndDay({ y, m, w: Math.max(...weeks) });
   const lastOf = (t) => { const cs = (d.effByTech[t.id] || []).filter((c) => c.period.y === y && c.period.m === m && weeks.includes(c.period.w)); return cs[cs.length - 1] || null; };
-  const plOf = {}; for (const t of d.activeTechs) plOf[t.id] = reportPlantillaOf(t, { lastControl: lastOf(t), ranges: (S.plantillaHistory || {})[t.id], day: endDay });
+  // Etapa 5: un técnico eliminado sigue en los informes de los períodos en que tuvo controles.
+  const base = [...d.activeTechs, ...d.allTechs.filter((t) => t.archived && (d.effByTech[t.id] || []).some((c) => c.period.y === y && c.period.m === m))];
+  const plOf = {}; for (const t of base) plOf[t.id] = reportPlantillaOf(t, { lastControl: lastOf(t), ranges: (S.plantillaHistory || {})[t.id], day: endDay });
   const esp = f.esp || 'all'; const espOk = (t) => esp === 'all' || (esp === 'none' ? !t.especialidadId : t.especialidadId === esp);
-  const ts = d.activeTechs.filter((t) => (f.shift === 'all' || plOf[t.id] === f.shift) && (f.tech === 'all' || t.id === f.tech) && espOk(t));
+  const ts = base.filter((t) => (f.shift === 'all' || plOf[t.id] === f.shift) && (f.tech === 'all' || t.id === f.tech) && espOk(t));
   const inPer = (x, yy, mo, ws) => { const p = parsePkey(x.pkey); return p.y === yy && p.m === mo && (!ws || ws.includes(p.w)); };
   const rows = ts.map((t) => {
     const cs = (d.effByTech[t.id] || []).filter((c) => c.period.y === y && c.period.m === m && weeks.includes(c.period.w));
     const last = cs[cs.length - 1]; const cn = last ? last.counts : null; const i = d.techInfo[t.id];
     const ok = cn ? cn.bueno : i.bueno, ch = cn ? cn.cambio : i.cambio, fa = cn ? cn.faltante : i.faltante; const den = ok + ch + fa;
-    const repos = d.movs.filter((x) => x.techId === t.id && x.type === 'reposicion' && inRange(x.at, range)).length;
+    const repos = d.movs.filter((x) => x.techId === t.id && x.type === 'reposicion' && !d.voidedBy[x.id] && inRange(x.at, range)).length;
     const recup = d.transitions.filter((x) => x.techId === t.id && x.from === 'faltante' && x.to !== 'faltante' && inPer(x, y, m, weeks)).length;
-    return { id: t.id, name: t.name, legajo: t.legajo, shiftId: plOf[t.id], shift: shiftName(plOf[t.id]), especialidadId: t.especialidadId || null, especialidad: t.especialidadId ? espName(t.especialidadId) : '', total: i.total, bueno: ok, cambio: ch, faltante: fa, pct: den ? Math.round(ok / den * 100) : null, ctl: cs.length, expected: started.length, repos, recup, fromControl: !!last, ...cleaningStats(cs) };
+    return { id: t.id, name: markArchived(t, t.name), legajo: t.legajo, shiftId: plOf[t.id], shift: shiftName(plOf[t.id]), especialidadId: t.especialidadId || null, especialidad: t.especialidadId ? espName(t.especialidadId) : '', total: i.total, bueno: ok, cambio: ch, faltante: fa, pct: den ? Math.round(ok / den * 100) : null, ctl: cs.length, expected: started.length, repos, recup, fromControl: !!last, ...cleaningStats(cs) };
   });
   const pctOf = (a, b) => (a + b ? Math.round(a / (a + b) * 100) : null);
   const extra = [...new Set(rows.map((r) => r.shiftId))].filter((id) => id && !d.shiftById[id] && d.plantillaById[id]).map((id) => d.plantillaById[id]);
