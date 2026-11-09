@@ -4,7 +4,7 @@
 // siguen funcionando y delegan en las plantillas (application/plantillas.js).
 import * as repo from '../adapters/pg/catalog-repo.js';
 import { loadInventoryContext, applyMovementPlan } from '../adapters/pg/inventory-repo.js';
-import { DomainError } from '../domain/errors.js';
+import { DomainError, ConflictError } from '../domain/errors.js';
 import { cleanTech, cleanName, cleanCode, cleanDay, cleanText, legajoTaken } from '../domain/catalog.js';
 import { planMovement } from '../domain/movements.js';
 import { localDateISO } from '../domain/period.js';
@@ -24,11 +24,17 @@ async function plantillaNameOf(c, id) {
 }
 
 // ---------------------------------------------------------------- técnicos
-// Especialidad (etapa 3): opcional; al cambiarla tiene que estar activa.
+// Especialidad (etapa 3): opcional; al cambiarla tiene que estar activa. Se lee FOR SHARE: si
+// alguien la está archivando (FOR UPDATE) se espera y se ve el resultado; y archivarla espera a
+// esta transacción antes de contar sus técnicos.
+export async function lockActiveEspecialidad(c, id) {
+  const e = (await c.query('SELECT id, name, archived_at FROM especialidades WHERE id = $1 FOR SHARE', [id])).rows[0];
+  return e && !e.archived_at ? { id: e.id, name: e.name } : null;
+}
 async function checkEspecialidad(c, id) {
   if (id == null || id === '') return null;
-  const e = await repo.getRow(c, 'especialidades', id);
-  if (!e || e.archivedAt) throw rule('Elegí una especialidad válida.', 'invalid_especialidad');
+  const e = await lockActiveEspecialidad(c, id);
+  if (!e) throw rule('Elegí una especialidad válida.', 'invalid_especialidad');
   return e.id;
 }
 async function assertLegajoFree(c, legajo, exceptId) {
@@ -201,14 +207,20 @@ export async function createTool(db, actor, input) {
 
 export async function updateTool(db, actor, id, input, version) {
   return withTransaction(db, async (c) => {
-    // Cambio de categoría: el orden de las dos categorías se bloquea antes que la herramienta.
+    // Cambio de categoría: el orden de las dos categorías se bloquea antes que la herramienta
+    // (orden global: alcance -> filas, como reordenar y el alta en una posición). Los alcances
+    // salen de una lectura sin bloqueo; si después de bloquear la fila la categoría ya no es esa,
+    // otra persona la cambió en el medio: 409, sin bloquear nada más ni subir ninguna versión.
     let scopes = [];
+    let from;
     if (input.categoryId !== undefined) {
       const before = (await c.query('SELECT category_id FROM tools WHERE id = $1', [id])).rows[0];
-      if (before && (before.category_id ?? null) !== (input.categoryId || null)) scopes = [toolScope(before.category_id), toolScope(input.categoryId)];
+      from = before ? before.category_id ?? null : undefined;
+      if (before && from !== (input.categoryId || null)) scopes = [...new Set([toolScope(from), toolScope(input.categoryId)])].sort();
       await lockScopes(c, scopes);
     }
     const cur = checkVersion(await repo.getRow(c, 'tools', id, { lock: true }), version, 'No se encontró la herramienta.');
+    if (from !== undefined && (cur.categoryId ?? null) !== from) throw new ConflictError(cur);
     const set = {};
     if (input.name !== undefined) {
       set.name = cleanName(input.name, 'Ingresá el nombre.');
@@ -226,7 +238,8 @@ export async function updateTool(db, actor, id, input, version) {
     const diff = changed(set, cur);
     if (!Object.keys(diff).length) return cur;
     const row = await repo.updateRow(c, 'tools', id, diff);
-    if (diff.categoryId !== undefined) for (const s of new Set([toolScope(cur.categoryId), toolScope(row.categoryId)])) await lockScope(c, s).then(() => bumpScope(c, s));
+    // Los dos alcances ya están bloqueados (scopes): se suben en el mismo orden.
+    if (diff.categoryId !== undefined) for (const sc of scopes) await bumpScope(c, sc);
     const { active, ...rest } = diff;
     if (Object.keys(rest).length) await record(c, actor, { action: 'tool_edit', entity: 'tools', id, version: row.version, detail: `Edición de herramienta ${row.name}` });
     if (active !== undefined) await record(c, actor, { action: 'tool_toggle', entity: 'tools', id, version: row.version, detail: `${active ? 'Activación' : 'Desactivación'} de herramienta ${row.name}` });

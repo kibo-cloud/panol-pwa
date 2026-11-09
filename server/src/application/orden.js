@@ -24,8 +24,11 @@ export async function bumpScope(c, scope) {
 export const categoryIds = async (c) => (await c.query('SELECT id FROM categories ORDER BY sort_order, name, id')).rows.map((r) => r.id);
 export const toolIdsOf = async (c, categoryId) => (await c.query('SELECT id FROM tools WHERE category_id IS NOT DISTINCT FROM $1 ORDER BY sort_order, name, id', [categoryId ?? null])).rows.map((r) => r.id);
 
-// Escribe el orden (1, 2, 3…) de las filas cuya posición cambió.
+// Escribe el orden (1, 2, 3…) de las filas cuya posición cambió. Las filas se bloquean antes por
+// id (el orden global, como entregar kit y los movimientos): escribirlas en el orden de la lista
+// podía cruzarse con otra transacción y terminar en un bloqueo mutuo.
 export async function writeOrder(c, table, ids) {
+  await c.query(`SELECT id FROM ${table} WHERE id = ANY($1) ORDER BY id FOR UPDATE`, [ids]);
   const cur = new Map((await c.query(`SELECT id, sort_order FROM ${table} WHERE id = ANY($1)`, [ids])).rows.map((r) => [r.id, r.sort_order]));
   for (const [i, id] of ids.entries()) if (cur.get(id) !== i + 1) await c.query(`UPDATE ${table} SET sort_order = $2 WHERE id = $1`, [id, i + 1]);
 }

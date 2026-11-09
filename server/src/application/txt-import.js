@@ -11,6 +11,8 @@ import { DomainError } from '../domain/errors.js';
 import { record, audit } from './common.js';
 import { lockAdmins } from './users.js';
 import { lockName } from '../adapters/pg/catalog-repo.js';
+import { CATEGORY_SCOPE, toolScope } from '../domain/orden.js';
+import { lockScopes, bumpScope } from './orden.js';
 
 export const TXT_HEAD = 'PAÑOL · archivo de datos\r\nGuardalo, compartilo o abrilo desde la app Pañol. No lo edites a mano.\r\n';
 
@@ -76,7 +78,15 @@ export async function applyImport(db, actor, text, { mode, token }) {
     const report = reportOf(p, { savedAt: file.savedAt });
     if (p.errors.length) throw withExtra(new DomainError('El archivo no se puede importar así: revisá los errores del informe.', 'import_invalid', 422), { report });
     if (!token || token !== p.token) throw withExtra(new DomainError('Los datos cambiaron desde la revisión. Revisá el informe nuevo antes de confirmar.', 'import_changed', 409), { report });
+    // Orden (etapa 3): los alcances que la importación puede tocar se bloquean antes que las filas;
+    // los que cambian de integrantes suben su versión (una pantalla de orden abierta recibe 409).
+    await lockScopes(c, await orderScopesOf(c, p.changes));
+    const members0 = await orderMembers(c);
     const applied = await applyImportPlan(c, p, { actorId: actor.id });
+    const members1 = await orderMembers(c);
+    for (const scope of [...new Set([...members0.keys(), ...members1.keys()])].sort()) {
+      if (members0.get(scope) !== members1.get(scope)) await lockScopes(c, [scope]).then(() => bumpScope(c, scope));
+    }
     const n = Object.entries(p.counts).filter(([, x]) => x.create + x.update + x.delete).map(([k, x]) => `${k} +${x.create} ~${x.update} -${x.delete}`).join(', ');
     await record(c, actor, {
       action: 'import_txt', entity: 'system', id: 'import', event: 'reload',
@@ -84,6 +94,29 @@ export async function applyImport(db, actor, text, { mode, token }) {
     });
     return { applied: true, report: { ...report, membershipSkipped: applied.membershipSkipped } };
   });
+}
+
+// Alcances de orden que el plan puede cambiar: el de categorías, y el de la categoría actual y la
+// del archivo de cada herramienta que se crea, edita o borra (y el de "sin categoría" cuando se
+// borra una categoría: sus herramientas quedan sin categoría).
+async function orderScopesOf(c, ch) {
+  const scopes = new Set();
+  const cats = ch.categories;
+  if (Object.keys(cats.create).length || Object.keys(cats.update).length || cats.delete.length) scopes.add(CATEGORY_SCOPE);
+  for (const id of cats.delete) scopes.add(toolScope(id)).add(toolScope(null));
+  const tools = ch.tools;
+  const ids = [...Object.keys(tools.create), ...Object.keys(tools.update), ...tools.delete];
+  for (const r of [...Object.values(tools.create), ...Object.values(tools.update)]) scopes.add(toolScope(r.categoryId || null));
+  if (ids.length) for (const r of (await c.query('SELECT category_id FROM tools WHERE id = ANY($1)', [ids])).rows) scopes.add(toolScope(r.category_id));
+  return [...scopes];
+}
+
+// Integrantes de cada alcance de orden (ids ordenados), para ver cuáles cambió la importación.
+async function orderMembers(c) {
+  const m = new Map([[CATEGORY_SCOPE, (await c.query('SELECT id FROM categories ORDER BY id')).rows.map((r) => r.id).join(',')]]);
+  const rows = (await c.query("SELECT coalesce(category_id, '') AS cat, string_agg(id, ',' ORDER BY id) AS ids FROM tools GROUP BY 1")).rows;
+  for (const r of rows) m.set(toolScope(r.cat || null), r.ids);
+  return m;
 }
 
 function withExtra(err, extra) {

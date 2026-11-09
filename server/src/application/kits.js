@@ -8,6 +8,7 @@
 import * as repo from '../adapters/pg/catalog-repo.js';
 import { loadInventoryContext, applyMovementPlan } from '../adapters/pg/inventory-repo.js';
 import { loadKits } from '../adapters/pg/kits-repo.js';
+import { lockActiveEspecialidad } from './catalog.js';
 
 export { loadKits };
 import { DomainError, notFoundError } from '../domain/errors.js';
@@ -56,7 +57,8 @@ export async function updateEspecialidad(db, actor, id, input, version) {
   });
 }
 
-// Baja lógica, solo si ningún técnico activo la tiene y no tiene kit (el historial queda).
+// Baja lógica, solo si ningún técnico activo la tiene y no tiene kit (el historial queda). Se
+// bloquea FOR UPDATE antes de contar: espera a quien la está asignando (FOR SHARE).
 export async function archiveEspecialidad(db, actor, id, version) {
   return withTransaction(db, async (c) => {
     const cur = checkVersion(await repo.getRow(c, 'especialidades', id, { lock: true }), version, 'No se encontró la especialidad.');
@@ -78,8 +80,9 @@ const kitOr404 = (k) => {
 
 export async function createKit(db, actor, input) {
   return withTransaction(db, async (c) => {
-    const esp = await repo.getRow(c, 'especialidades', input.especialidadId);
-    if (!esp || esp.archivedAt) throw rule('Elegí una especialidad activa.', 'invalid_especialidad');
+    // FOR SHARE: no se crea un kit para una especialidad que se está archivando.
+    const esp = await lockActiveEspecialidad(c, input.especialidadId);
+    if (!esp) throw rule('Elegí una especialidad activa.', 'invalid_especialidad');
     if ((await c.query('SELECT 1 FROM kits WHERE especialidad_id = $1', [esp.id])).rows[0]) throw rule(`Ya hay un kit para ${esp.name}.`, 'duplicate', 409);
     const name = input.name !== undefined ? cleanKitName(input.name) : `Kit ${esp.name}`;
     const row = await repo.insertRow(c, 'kits', newId('kit'), { name, especialidadId: esp.id, by: actor.id }).catch(onUnique(`Ya hay un kit para ${esp.name}.`));
