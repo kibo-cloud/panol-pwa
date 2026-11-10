@@ -66,6 +66,7 @@ VIEWS.plantilla = (id) => {
   const mv = can('shift_change') && !archived; const edit = can('plantillas_edit') && !archived;
   const acts = [
     can('controls_do') && i.techs ? `<a class="btn pri" href="#control" data-act="ctlShift" data-v="${esc(id)}">Controlar esta plantilla</a>` : '',
+    can('novedades_create') && !archived ? `<button class="btn" data-act="novNew" data-pl="${esc(id)}">${icon('note', 16)}Nueva novedad</button>` : '',
     canRotate(p) && !archived ? `<button class="btn" data-act="plRotate" data-p="${esc(id)}">${icon('clock', 16)}Cambiar turno de la plantilla</button>` : '',
     edit ? `<button class="btn" data-act="plSupervisor" data-p="${esc(id)}">Cambiar supervisor</button><button class="btn" data-act="plRename" data-p="${esc(id)}">${icon('pencil', 16)}Renombrar</button>` : '',
   ].join('');

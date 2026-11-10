@@ -133,6 +133,21 @@ describe('reemplazar (migración inicial)', () => {
     assert.match(rep.errors[0].message, /administrador activo/);
   });
 
+  test('con novedades en el servidor, reemplazar se rechaza (no se pierden ni rompen referencias)', async () => {
+    await q("INSERT INTO novedades (id, author_id, comment, created_by) VALUES ('nv-txt', 'u-con', 'Novedad antes de migrar', 'u-con')");
+    try {
+      const rep = await dryRun(toTxt(buildV21()), 'replace');
+      assert.equal(rep.canApply, false);
+      assert.match(rep.errors.map((e) => e.message).join(' '), /migración inicial.*novedades/);
+      const r = await importTxt(toTxt(buildV21()), { mode: 'replace', token: rep.token || 'a'.repeat(64) });
+      assert.equal(r.statusCode, 409, r.body);
+      assert.equal(r.json().error, 'replace_has_novedades');
+      assert.equal(await count('users', "id = 'u-con'"), 1);
+    } finally {
+      await q("DELETE FROM novedades WHERE id = 'nv-txt'");
+    }
+  });
+
   test('aplica en una transacción: ids de 2.1, libro con fecha original, fechas vacías nulas', async () => {
     const { res } = await apply(toTxt(buildV21()), 'replace');
     assert.equal(res.applied, true);

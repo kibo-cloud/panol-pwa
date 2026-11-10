@@ -1,7 +1,7 @@
 // Rutas por hash, como en 2.1 (#inicio, #tecnico-<id>, #control-<id>, #controlver-<id>…). Puro.
 // Etapa 2: Plantillas reemplaza a Turnos (#turnos y #turno-<id> siguen funcionando como
 // alias), Líneas y cajas (#lineas, #caja-<id>) y el control de una caja (#control-caja:<id>).
-export const NAV = [['inicio', 'Panel', 'home'], ['plantillas', 'Plantillas', 'users'], ['tecnicos', 'Técnicos', 'users'], ['control', 'Control de herramientas', 'check'], ['entregas', 'Entregas y reposiciones', 'swap'], ['inventario', 'Inventario general', 'box'], ['lineas', 'Líneas y cajas', 'box'], ['controles', 'Historial de controles', 'hist'], ['reportes', 'Reportes', 'chart'], ['alertas', 'Alertas', 'bell'], ['config', 'Configuración de herramientas', 'wrench'], ['admin', 'Administración', 'shield']];
+export const NAV = [['inicio', 'Panel', 'home'], ['plantillas', 'Plantillas', 'users'], ['tecnicos', 'Técnicos', 'users'], ['control', 'Control de herramientas', 'check'], ['entregas', 'Entregas y reposiciones', 'swap'], ['inventario', 'Inventario general', 'box'], ['lineas', 'Líneas y cajas', 'box'], ['controles', 'Historial de controles', 'hist'], ['reportes', 'Reportes', 'chart'], ['alertas', 'Alertas', 'bell'], ['novedades', 'Novedades', 'note'], ['config', 'Configuración de herramientas', 'wrench'], ['admin', 'Administración', 'shield']];
 export const NAV_PARENT = { plantilla: 'plantillas', tecnico: 'tecnicos', ck: 'control', ver: 'controles', herramienta: 'inventario', caja: 'lineas' };
 const DETAIL = { plantilla: 'plantilla', turno: 'plantilla', tecnico: 'tecnico', controlver: 'ver', herramienta: 'herramienta', caja: 'caja' };
 const ALIAS = { turnos: 'plantillas' };

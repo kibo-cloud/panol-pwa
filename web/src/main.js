@@ -18,6 +18,7 @@ import './features/config/view.js';
 import './features/kits/deliver.js';
 import './features/admin/view.js';
 import './features/records/view.js';
+import './features/novedades/view.js';
 import './features/datos/view.js';
 import { boot } from './ui/app.js';
 

@@ -9,6 +9,7 @@ import { notFoundError } from '../domain/errors.js';
 import { newId } from './ids.js';
 import { withTransaction, notifyChange, onUnique } from './common.js';
 import { idempotent } from './idempotency.js';
+import { lockName } from '../adapters/pg/catalog-repo.js';
 
 const iso = (d) => (d instanceof Date ? d.toISOString() : d ?? null);
 const byId = (rows, map) => Object.fromEntries(rows.map((r) => [r.id, map(r)]));
@@ -67,6 +68,8 @@ export async function checkVoid(db, id) {
 export async function voidMovement(db, actor, id, input, { idempotencyKey, path } = {}) {
   const reason = cleanReason(input.reason);
   return idempotent(db, { userId: actor.id, key: idempotencyKey, method: 'POST', path, body: { id, reason } }, async (c) => {
+    // Etapa 6: el mismo bloqueo por nombre que vincular una novedad a este movimiento.
+    await lockName(c, `movements.void:${id}`);
     const vi = await loadVoidInput(c, id, { lock: true });
     const plan = planVoid(vi, { at: new Date().toISOString(), newId, reason });
     // Una anulación de un movimiento de demostración también es de demostración (se borran juntas).

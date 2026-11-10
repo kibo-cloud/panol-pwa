@@ -52,11 +52,13 @@ export function deriveUsername(name, taken) {
 }
 
 /**
- * server: { doc, creds: { [userId]: { hasPassword, legacyPinHash } }, ledger: { movements, controls },
+ * server: { doc, creds: { [userId]: { hasPassword, legacyPinHash } }, ledger: { movements, controls, novedades },
  *           archived?, hidden?, tombstones?: { 'colección/id': fecha } }
  * file:   { data, deleted, savedAt }
  * Devuelve { mode, errors, conflicts, assumptions, changes, counts, token, final }.
  */
+export const REPLACE_NOVEDADES = 'Reemplazar es solo para la migración inicial: el servidor ya tiene novedades. Usá Combinar.';
+
 export function planImport(server, file, { mode, actorId, now = new Date() }) {
   const errors = [];
   const conflicts = [];
@@ -79,6 +81,8 @@ export function planImport(server, file, { mode, actorId, now = new Date() }) {
     if (server.ledger.movements > 0 || server.ledger.controls > 0) {
       err(null, null, null, 'Reemplazar es solo para la migración inicial: el servidor ya tiene movimientos o controles. Usá Combinar.');
     }
+    // Etapa 6: las novedades no están en el .txt v2; reemplazar borraría lo que nombran.
+    if (server.ledger.novedades > 0) err(null, null, null, REPLACE_NOVEDADES);
     const fileAdmins = Object.entries(file.data.users).filter(([id, u]) => id !== actorId && u.role === 'admin' && u.active !== false);
     if (!fileAdmins.length) err('users', null, null, 'El archivo no tiene un administrador activo. Reemplazar dejaría el sistema sin administrador.');
     for (const c of DATA_COLS) {

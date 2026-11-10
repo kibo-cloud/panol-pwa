@@ -93,3 +93,24 @@ body.auth .netwrap{max-width:400px}
 .voided .t{text-decoration:line-through;text-decoration-color:var(--ink2)}
 .tag.void{background:var(--bad-soft);color:var(--bad-ink)}
 .mvacts{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+
+/* Etapa 6: novedades (lista, filtros, hoja y tarjeta de la ficha del técnico). */
+.novfil{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 10px;margin:0 0 10px}
+.novf{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:13px;font-weight:600;color:var(--label)}
+.novf input,.novf select{min-height:44px;width:100%;max-width:100%;min-width:0}
+.novchips{margin-bottom:12px;align-items:center}
+.novrow{align-items:flex-start;flex-wrap:wrap;gap:10px}
+.novrow .grow{min-width:0;flex:1 1 220px}
+.novic{width:36px;height:36px}
+.novtxt{white-space:pre-wrap;overflow-wrap:anywhere;margin:2px 0 4px;font-weight:500}
+.novsubs{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}
+.novsub{white-space:normal;max-width:100%;overflow-wrap:anywhere;text-decoration:none}
+.novmv{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px}
+.novacts{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.novarch .novtxt{color:var(--ink2)}
+.novmore{margin-top:12px}
+.novcard{margin-bottom:12px}
+.novcard .srow{flex-wrap:wrap;align-items:center}
+.novdet{margin:4px 0 8px}
+.novsubjects{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0 10px}
+.novsubjects select{width:100%;max-width:100%;min-height:44px}

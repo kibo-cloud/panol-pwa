@@ -94,6 +94,12 @@ export const api = {
   voidCheck: (id) => http.get(`/api/movements/${enc(id)}/void-check`),
   voidMovement: (id, body, o) => http.post(`/api/movements/${enc(id)}/void`, body, idem(o)),
 
+  // etapa 6: novedades (solo con conexión; el alta con Idempotency-Key).
+  novedades: (qs = '') => http.get(`/api/novedades${qs ? '?' + qs : ''}`),
+  novedad: (id) => http.get(`/api/novedades/${enc(id)}`),
+  createNovedad: (body, o) => http.post('/api/novedades', body, idem(o)),
+  updateNovedad: (id, body, version) => http.patch(`/api/novedades/${enc(id)}`, body, { version }),
+
   // archivo .txt
   importTxt: (text, mode, token) => http.request('POST', `/api/import/txt?mode=${enc(mode)}${token ? '&token=' + enc(token) : '&dryRun=1'}`, { rawText: text }),
   exportTxt: () => http.get('/api/export/txt', { text: true }),

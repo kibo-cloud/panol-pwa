@@ -10,6 +10,7 @@
 import * as repo from '../adapters/pg/catalog-repo.js';
 import { publicUser, deleteUserSessions, countActiveAdmins } from '../adapters/pg/auth-repo.js';
 import { loadKits } from '../adapters/pg/kits-repo.js';
+import { getNovedad } from '../adapters/pg/novedades-repo.js';
 import { RECORD_TYPES, cleanReason, checkConfirmName, planResolutions, isHistoryAction } from '../domain/records.js';
 import { DomainError, ConflictError, notFoundError } from '../domain/errors.js';
 import { CATEGORY_SCOPE, toolScope } from '../domain/orden.js';
@@ -24,7 +25,7 @@ const exists = async (c, sql, params) => !!(await c.query(sql, params)).rows[0];
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 // Tipo -> tabla (lista cerrada: nunca se arma SQL con nombres que vengan de afuera).
-const TABLE = { techs: 'techs', cajas: 'cajas', tools: 'tools', categories: 'categories', plantillas: 'plantillas', lineas: 'lineas', especialidades: 'especialidades', kits: 'kits', users: 'users' };
+const TABLE = { techs: 'techs', cajas: 'cajas', tools: 'tools', categories: 'categories', plantillas: 'plantillas', lineas: 'lineas', especialidades: 'especialidades', kits: 'kits', users: 'users', novedades: 'novedades' };
 
 export function typeInfo(type) {
   const t = RECORD_TYPES[type];
@@ -43,6 +44,7 @@ async function view(c, T, id) {
     return r ? publicUser(r) : null;
   }
   if (T.type === 'kits') return (await loadKits(c, { id }))[0] || null;
+  if (T.type === 'novedades') return getNovedad(c, id);
   return repo.getRow(c, T.table, id);
 }
 
@@ -60,6 +62,7 @@ const HISTORY = {
     ['SELECT 1 FROM cajas WHERE referente_tech_id = $1 LIMIT 1', 'Es o fue referente de una caja.'],
     ['SELECT 1 FROM alert_resolutions WHERE tech_id = $1 LIMIT 1', 'Tiene alertas resueltas.'],
     ['SELECT 1 FROM tech_plantilla_history WHERE tech_id = $1 ORDER BY id OFFSET 1 LIMIT 1', 'Tiene cambios de plantilla.'],
+    ['SELECT 1 FROM novedades WHERE tech_id = $1 LIMIT 1', 'Tiene novedades.'],
   ],
   cajas: [
     ['SELECT 1 FROM movements WHERE caja_id = $1 LIMIT 1', 'Tiene movimientos.'],
@@ -83,21 +86,26 @@ const HISTORY = {
     // Cualquier fila (también la del alta con supervisor): el historial es de solo agregar.
     ['SELECT 1 FROM plantilla_supervisor_history WHERE plantilla_id = $1 LIMIT 1', 'Tiene historial de supervisores.'],
     ['SELECT 1 FROM controls WHERE plantilla_id_snapshot = $1 OR shift_id = $1 LIMIT 1', 'Tiene controles.'],
+    ['SELECT 1 FROM novedades WHERE plantilla_id = $1 LIMIT 1', 'Tiene novedades.'],
   ],
   lineas: [
     ['SELECT 1 FROM cajas WHERE linea_id = $1 LIMIT 1', 'Tiene o tuvo cajas.'],
     ['SELECT 1 FROM control_items WHERE linea_id = $1 LIMIT 1', 'Aparece en controles.'],
+    ['SELECT 1 FROM novedades WHERE linea_id = $1 LIMIT 1', 'Tiene novedades.'],
   ],
   especialidades: [
     ['SELECT 1 FROM techs WHERE especialidad_id = $1 LIMIT 1', 'Tiene o tuvo técnicos.'],
     ['SELECT 1 FROM kits WHERE especialidad_id = $1 LIMIT 1', 'Tiene o tuvo un kit.'],
   ],
   kits: [],
+  // Una novedad no tiene historial operativo: se puede eliminar definitivamente.
+  novedades: [],
   users: [
     ['SELECT 1 FROM audit_log WHERE actor_id = $1 LIMIT 1', 'Hizo acciones en el sistema.'],
     ['SELECT 1 FROM users WHERE id = $1 AND last_login_at IS NOT NULL', 'Ya ingresó al sistema.'],
     ['SELECT 1 FROM plantillas WHERE supervisor_user_id = $1 LIMIT 1', 'Es supervisor de una plantilla.'],
     ['SELECT 1 FROM plantilla_supervisor_history WHERE supervisor_user_id = $1 OR from_user_id = $1 LIMIT 1', 'Fue supervisor de una plantilla.'],
+    ['SELECT 1 FROM novedades WHERE author_id = $1 LIMIT 1', 'Escribió novedades.'],
   ],
 };
 
@@ -353,13 +361,13 @@ export async function listArchived(db, { type = null, q = '' } = {}) {
   await withTransaction(db, async (c) => {
     for (const t of types) {
       const T = typeInfo(t);
-      const extra = t === 'users' ? ', username' : t === 'techs' ? ', legajo' : t === 'lineas' ? ', kind' : '';
+      const extra = t === 'users' ? ', username' : t === 'techs' ? ', legajo' : t === 'lineas' ? ', kind' : t === 'novedades' ? ', comment' : '';
       const { rows } = await c.query(`SELECT id, name, version, archived_at, archived_by, archive_reason${extra} FROM ${T.table} WHERE archived_at IS NOT NULL ORDER BY archived_at DESC, id LIMIT 500`);
       for (const r of rows) {
-        const hay = [r.name, r.legajo, r.username, r.archive_reason].filter(Boolean).join(' ').toLowerCase();
+        const hay = [r.name, r.legajo, r.username, r.comment, r.archive_reason].filter(Boolean).join(' ').toLowerCase();
         if (needle && !hay.includes(needle)) continue;
         out.push({
-          type: t, id: r.id, name: r.name, legajo: r.legajo ?? null, username: r.username ?? null, kind: r.kind ?? null, version: r.version,
+          type: t, id: r.id, name: r.name, legajo: r.legajo ?? null, username: r.username ?? null, kind: r.kind ?? null, comment: r.comment ?? null, version: r.version,
           archivedAt: r.archived_at.toISOString(), archivedBy: r.archived_by, reason: r.archive_reason || '', hasHistory: (await historyOf(c, T, r.id)).length > 0,
         });
       }

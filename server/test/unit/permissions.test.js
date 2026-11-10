@@ -5,11 +5,11 @@ import { PERM_KEYS, ROLE_KEYS } from '../../src/domain/constants.js';
 
 test('roles y claves de permiso de 2.1 más gerencia y supervisor', () => {
   assert.deepEqual(ROLE_KEYS, ['admin', 'gerencia', 'supervisor', 'responsable', 'consulta']);
-  assert.deepEqual(PERM_KEYS, ['controls_do', 'movements_do', 'techs_edit', 'shift_change', 'tools_edit', 'inventory_edit', 'alerts_resolve', 'shifts_edit', 'reports_export', 'demo_manage', 'plantillas_edit', 'plantilla_rotate', 'lineas_edit', 'kits_edit', 'records_delete', 'movements_void']);
+  assert.deepEqual(PERM_KEYS, ['controls_do', 'movements_do', 'techs_edit', 'shift_change', 'tools_edit', 'inventory_edit', 'alerts_resolve', 'shifts_edit', 'reports_export', 'demo_manage', 'plantillas_edit', 'plantilla_rotate', 'lineas_edit', 'kits_edit', 'records_delete', 'movements_void', 'novedades_view', 'novedades_create', 'novedades_edit']);
 });
 
 test('etapa 2: plantillas, rotación y líneas son solo de admin por defecto', () => {
-  for (const p of ['plantillas_edit', 'plantilla_rotate', 'lineas_edit', 'kits_edit', 'records_delete', 'movements_void']) {
+  for (const p of ['plantillas_edit', 'plantilla_rotate', 'lineas_edit', 'kits_edit', 'records_delete', 'movements_void', 'novedades_edit']) {
     for (const r of ['gerencia', 'supervisor', 'responsable', 'consulta']) assert.equal(can(r, p), false, r + ' ' + p);
     assert.equal(can('admin', p), true);
   }
@@ -29,10 +29,17 @@ test('valores por defecto como en 2.1', () => {
   assert.equal(can('consulta', 'controls_do'), false);
 });
 
-test('supervisor = responsable + shift_change; gerencia = solo reports_export', () => {
+test('etapa 6: ver novedades todos; cargarlas quien opera el pañol; editar cualquiera, admin', () => {
+  for (const r of ['admin', 'supervisor', 'responsable', 'gerencia', 'consulta']) assert.equal(can(r, 'novedades_view'), true, r);
+  for (const r of ['admin', 'supervisor', 'responsable']) assert.equal(can(r, 'novedades_create'), true, r);
+  for (const r of ['gerencia', 'consulta']) assert.equal(can(r, 'novedades_create'), false, r);
+  for (const r of ['supervisor', 'responsable', 'gerencia', 'consulta']) assert.equal(can(r, 'novedades_edit'), false, r);
+});
+
+test('supervisor = responsable + shift_change; gerencia = reports_export y ver novedades', () => {
   for (const p of PERM_KEYS) {
     assert.equal(can('supervisor', p), can('responsable', p) || p === 'shift_change', p);
-    assert.equal(can('gerencia', p), p === 'reports_export', p);
+    assert.equal(can('gerencia', p), p === 'reports_export' || p === 'novedades_view', p);
   }
   assert.equal(DEFAULT_PERMS.supervisor.shift_change, true);
 });
