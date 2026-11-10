@@ -1301,8 +1301,10 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   values. Delete = the stage 5 generic records model (new type `novedades`: archive with motivo,
   restore, definitive delete — a novedad has no operational history, so definitive delete is
   allowed with the typed confirmation of its short label).
-- Permissions: `novedades_view` and `novedades_create` (default on for every role that operates
-  the pañol), `novedades_edit` (admin by default); `records_delete` governs archive/restore/purge.
+- Permissions: `novedades_view` (default on for every role, gerencia and consulta included —
+  parent decision at the stage 6 review), `novedades_create` (default on for every role that
+  operates the pañol), `novedades_edit` (admin by default); `records_delete` governs
+  archive/restore/purge.
 - List: server-side filters (date range, técnico, plantilla, línea, author, text search, linked
   or not, include archived for `records_delete`), newest first, paginated; live updates through
   the existing SSE channel. The period query is the one stage 10 (impresión) will reuse.
@@ -1350,6 +1352,21 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       eliminados, definitive delete with the typed label, consulta without access, responsable
       403 on archive, offline message keeping the text; screen, sheet and tech sheet at 1280 and
       390 without overflow. Written with the code (passed on its first run).
+- [x] E6.V1 Review findings. Commit `cca9b59`. Route: delegated writer (2+ non-trivial files).
+      (1) PATCH: archived without `records_delete` and someone else's without `novedades_edit`
+      answer 404 before the version check — RED: 409 `archived` / 403, GREEN 404 without archived
+      fields. (2) `novedadesOfPeriod(db, actor, filters)` in one `withSnapshot`, `queryNovedades`
+      `{ withTotal: false }`, archived gated by `records_delete` — RED: old signature returned
+      every novedad / no 403, GREEN. (3) `.txt` replace refused with novedades (report error +
+      409 `replace_has_novedades`) — RED: `canApply` true, GREEN. (4) Stage 7 notes added.
+      (5) New tests (archived tech purge refused in app `has_history` and SQL 23001; cursor
+      tie-break on equal `occurred_at` with limit=1; DB UPDATE of author/movement/occurred_at
+      23001; PATCH with `authorId`/`movementId` 400) — passed on first run (behavior already
+      correct, no RED). (6) `novedades_view` default on for gerencia and consulta — RED in
+      `unit/permissions` and `integration/novedades-api`, GREEN; `auth.test` defaults and E2E
+      `t13` (consulta sees, cannot create; other's PATCH 404) updated. No web mirror of the
+      defaults exists (the web reads them from the server). (7) `novedades` added to E2E
+      `ROUTES`.
 
 ## Stage 6 implementation notes
 - Label for the generic model: `seq` (identity) and a generated `name` = "Novedad N"; it is what
@@ -1363,28 +1380,49 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 - Lock order: named lock `movements.void:<id>` (also taken by `voidMovement`) -> plantilla ->
   tech -> línea (FOR SHARE) -> the novedad. The app role cannot lock `movements` rows (no UPDATE
   grant), hence the named lock.
-- Permissions: `novedades_view`/`novedades_create` default on for responsable and supervisor
-  (and admin); gerencia and consulta off (configurable) — literal reading of "roles that operate
-  the pañol". Open question for the user: should gerencia/consulta see novedades by default?
+- Permissions: `novedades_view` default on for every role; `novedades_create` on for responsable
+  and supervisor (and admin), off for gerencia and consulta (configurable). Decided by the parent
+  at the stage 6 review (E6.V1); first shipped with view off for gerencia/consulta.
 - List cursor is built in SQL with microseconds (JS dates would truncate them). Archived only with
   `records_delete` (`archived=include|only`, otherwise 403; GET of an archived one is 404).
+  PATCH answers the same 404 (before the version check, so a stale If-Match does not return the
+  row) for an archived novedad without `records_delete` and for someone else's novedad without
+  `novedades_edit` (E6.V1).
 - Live updates: writes `NOTIFY` entity `novedades`; the web's SSE refresh runs the
   `afterState` hook, which reloads the open list or tech card.
 - Demo data: clearing it is refused (409 `demo_in_use`) while a novedad names a demo tech or
   movement.
 - Deviation: `.txt` v2 has no novedades (not exported or imported); the Excel NOVEDADES import is
-  stage 9. A `.txt` *replace* that deletes a tech named by a novedad would fail on the foreign key
-  (replace is for the initial migration only).
+  stage 9. `.txt` *replace* is refused while any novedad exists (E6.V1): the
+  report shows "Reemplazar es solo para la migración inicial: el servidor ya tiene novedades.
+  Usá Combinar." and the apply answers 409 `replace_has_novedades` (before, the report allowed it; by
+  code reading, a novedad naming a record the replace deletes then hit the foreign key, mapped
+  to the generic 409 `import_conflict`, not a 500).
+- `novedadesOfPeriod(db, actor, filters)` contract (for stage 10): `filters` are the ones of
+  `GET /api/novedades` (from, to, techId, plantillaId, lineaId, authorId, movementId, q, linked,
+  archived); it returns every matching novedad (API shape, newest first) paging 200 at a time
+  with `queryNovedades(..., { withTotal: false })` inside one REPEATABLE READ read-only
+  transaction (`withSnapshot`), so a concurrent write is neither repeated nor skipped.
+  `archived=include|only` requires `records_delete` (else 403); the caller checks its own
+  permission (e.g. printing) — the function does not require `novedades_view`.
+
+## Stage 7 notes (from stage 6)
+- The list `linked` filter (`linked=yes|no`, now `movement_id IS [NOT] NULL`) must also consider
+  the purchase-request link once that column exists (linked = movement or purchase request).
+- `novedadesOfPeriod` contract: see the stage 6 implementation notes (actor-gated archived
+  inclusion, snapshot, no total); keep it when adding the purchase-request link.
 
 ## Stage 6 verification (local, sequential, delegated writer)
 - `npm test` 198/198; `npm run test:db` 211/211 (446 s; server code of `f13301a`, unchanged
   after); `npm run build` ok; `PANOL_E2E_BUILD=1 npm run test:e2e` 63 passed, 0 failed, 0
   skipped (479 s).
 - Commits: `f13301a` (server), `e22a740` (web), `5ae3522` (E2E), then this doc commit.
+- E6.V1 (`cca9b59`): `npm test` 198/198; `npm run test:db` 214/214 (435 s); `npm run build` ok;
+  `PANOL_E2E_BUILD=1 npm run test:e2e` 63 passed, 0 failed, 0 skipped (483 s).
 
 ## Next step
-- Stage 6: independent review, CI and PR #6 → `v3/etapa-5-eliminar`. Open question for the
-  user: default novedades_view for gerencia/consulta (now off, configurable).
+- Stage 6: independent review, CI and PR #6 → `v3/etapa-5-eliminar`. Default `novedades_view` for
+  gerencia/consulta decided (on) in E6.V1.
 - PRs #1–#4 await user review (stacked: #1 → `v3-servidor`, #2 → stage 1, #3 → stage 2). Engram mirror of this document: pending (multiple active
   sessions). PR #1 awaits user review; after it is merged, rebase stage 2 onto `v3-servidor`.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
