@@ -66,8 +66,10 @@ export async function updateNovedad(q, id, set) {
 
 const likePattern = (s) => '%' + s.replace(/[\\%_]/g, (c) => '\\' + c) + '%';
 
-// f: filtros de parseNovedadFilters. Devuelve { rows, next, total }.
-export async function queryNovedades(q, f) {
+// f: filtros de parseNovedadFilters. Devuelve { rows, next, cursor, total }: next es el cursor
+// como texto (para la API), cursor el mismo ya leído ({ at, id }). withTotal: false no cuenta
+// (total = null), para quien recorre todas las páginas.
+export async function queryNovedades(q, f, { withTotal = true } = {}) {
   const where = [];
   const params = [];
   const p = (v) => { params.push(v); return `$${params.length}`; };
@@ -85,7 +87,7 @@ export async function queryNovedades(q, f) {
   if (f.archived === 'only') where.push('n.archived_at IS NOT NULL');
   if (f.q) where.push(`concat_ws(' ', n.comment, n.name, u.name, t.name, p.name, l.name) ILIKE ${p(likePattern(f.q))}`);
   const base = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const total = (await q.query(`SELECT count(*)::int AS n FROM (${SELECT} ${base}) x`, params)).rows[0].n;
+  const total = !withTotal ? null : (await q.query(`SELECT count(*)::int AS n FROM (${SELECT} ${base}) x`, params)).rows[0].n;
   const page = [...where];
   if (f.before) page.push(`(n.occurred_at, n.id) < (${p(f.before.at)}::timestamptz, ${p(f.before.id)})`);
   const limit = f.limit ?? 50;
@@ -93,5 +95,6 @@ export async function queryNovedades(q, f) {
   const more = rows.length > limit;
   const list = rows.slice(0, limit);
   const last = list[list.length - 1];
-  return { rows: list.map(toApi), next: more && last ? `${last.cursor_at}|${last.id}` : null, total };
+  const cursor = more && last ? { at: last.cursor_at, id: last.id } : null;
+  return { rows: list.map(toApi), next: cursor ? `${cursor.at}|${cursor.id}` : null, cursor, total };
 }

@@ -3,6 +3,7 @@
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { setupApi, ifMatch } from './api.js';
+import { novedadesOfPeriod } from '../../src/application/novedades.js';
 
 let api, linea;
 before(async () => {
@@ -20,18 +21,17 @@ const R = { reason: 'Cargada por error' };
 const ver = async (table, id) => (await api.q(`SELECT version FROM ${table} WHERE id = $1`, [id]))[0].version;
 
 describe('permisos', () => {
-  test('ver y cargar: quien opera el pañol; gerencia y consulta no (configurable)', async () => {
+  test('ver: todos los perfiles; cargar: quien opera el pañol (configurable)', async () => {
     for (const u of ['gerencia', 'consulta']) {
-      assert.equal((await list(u)).statusCode, 403, u);
+      assert.equal((await list(u)).statusCode, 200, u);
       assert.equal((await post(u, { comment: 'Hola' })).statusCode, 403, u);
     }
     for (const u of ['admin', 'supervisor', 'responsable']) assert.equal((await list(u)).statusCode, 200, u);
     const perms = (await api.call('admin', 'GET', '/api/permissions')).json();
-    await api.call('admin', 'PUT', '/api/permissions', { overrides: { ...perms.overrides, consulta: { ...(perms.overrides.consulta || {}), novedades_view: true } } });
-    assert.equal((await list('consulta')).statusCode, 200);
-    assert.equal((await post('consulta', { comment: 'Hola' })).statusCode, 403);
-    await api.call('admin', 'PUT', '/api/permissions', { overrides: perms.overrides });
+    await api.call('admin', 'PUT', '/api/permissions', { overrides: { ...perms.overrides, consulta: { ...(perms.overrides.consulta || {}), novedades_view: false } } });
     assert.equal((await list('consulta')).statusCode, 403);
+    await api.call('admin', 'PUT', '/api/permissions', { overrides: perms.overrides });
+    assert.equal((await list('consulta')).statusCode, 200);
   });
 });
 
@@ -163,6 +163,32 @@ describe('lista y filtros', () => {
     } while (next);
     assert.deepEqual(seen, all);
   });
+
+  test('cursor: dos novedades con la misma fecha (microsegundos) salen las dos, sin repetir', async () => {
+    const at = '2001-02-03T04:05:06.123456Z';
+    await api.q("INSERT INTO novedades (id, author_id, comment, created_by, occurred_at) VALUES ('nv-tie-a', 'u-admin', 'Empate A', 'u-admin', $1), ('nv-tie-b', 'u-admin', 'Empate B', 'u-admin', $1)", [at]);
+    try {
+      const seen = [];
+      let next = null;
+      do {
+        const r = (await list('responsable', `from=2001-02-03&to=2001-02-03&limit=1${next ? '&before=' + encodeURIComponent(next) : ''}`)).json();
+        assert.ok(r.novedades.length <= 1);
+        seen.push(...r.novedades.map((n) => n.id));
+        next = r.next;
+      } while (next);
+      assert.deepEqual(seen, ['nv-tie-b', 'nv-tie-a']);
+      // Consulta por período (etapa 10): todas, en una instantánea; las eliminadas solo con records_delete.
+      const resp = { id: 'u-responsable', role: 'responsable' };
+      const period = { from: '2001-02-03', to: '2001-02-03' };
+      assert.deepEqual((await novedadesOfPeriod(api.appPool, resp, period)).map((n) => n.id), ['nv-tie-b', 'nv-tie-a']);
+      await assert.rejects(novedadesOfPeriod(api.appPool, resp, { ...period, archived: 'include' }), (e) => e.status === 403);
+      await api.q("UPDATE novedades SET archived_at = now(), archived_by = 'u-admin', archive_reason = 'x' WHERE id = 'nv-tie-a'");
+      assert.deepEqual((await novedadesOfPeriod(api.appPool, resp, period)).map((n) => n.id), ['nv-tie-b']);
+      assert.deepEqual((await novedadesOfPeriod(api.appPool, { id: 'u-admin', role: 'admin' }, { ...period, archived: 'include' })).map((n) => n.id), ['nv-tie-b', 'nv-tie-a']);
+    } finally {
+      await api.q("DELETE FROM novedades WHERE id IN ('nv-tie-a', 'nv-tie-b')");
+    }
+  });
 });
 
 describe('edición', () => {
@@ -170,7 +196,13 @@ describe('edición', () => {
     const path = `/api/novedades/${plain.id}`;
     assert.equal((await api.call('responsable', 'PATCH', path, { comment: 'Nuevo' })).statusCode, 428);
     assert.equal((await api.call('responsable', 'PATCH', path, { comment: 'Nuevo' }, ifMatch(99))).statusCode, 409);
-    assert.equal((await api.call('responsable2', 'PATCH', path, { comment: 'Ajeno' }, ifMatch(plain.version))).statusCode, 403);
+    // Ajena sin novedades_edit: 404 (no confirma el id), también con una versión vieja.
+    assert.equal((await api.call('responsable2', 'PATCH', path, { comment: 'Ajeno' }, ifMatch(plain.version))).statusCode, 404);
+    assert.equal((await api.call('responsable2', 'PATCH', path, { comment: 'Ajeno' }, ifMatch(99))).statusCode, 404);
+    // El autor y el vínculo no se mandan.
+    for (const body of [{ authorId: 'u-responsable2' }, { movementId: 'm-x' }, { comment: 'x', authorId: 'u-admin' }]) {
+      assert.equal((await api.call('responsable', 'PATCH', path, body, ifMatch(plain.version))).statusCode, 400, JSON.stringify(body));
+    }
     assert.equal((await api.call('consulta', 'PATCH', path, { comment: 'Ajeno' }, ifMatch(plain.version))).statusCode, 403);
     const r = await api.call('responsable', 'PATCH', path, { comment: 'Se cortó la luz dos horas', techId: 't-carla' }, ifMatch(plain.version));
     assert.equal(r.statusCode, 200, r.body);
@@ -201,6 +233,26 @@ describe('edición', () => {
     // El técnico nombrado en una novedad tiene historial.
     const chk = (await api.call('admin', 'GET', `/api/techs/${t.id}/delete-check`)).json();
     assert.deepEqual([chk.canPurge, chk.history], [false, ['Tiene novedades.']]);
+    // ... ni se elimina definitivamente: en la app y en SQL (purge_tech_ranges).
+    const d = await api.call('admin', 'DELETE', `/api/techs/${t.id}`, { reason: 'x', confirmName: t.name }, ifMatch(await ver('techs', t.id)));
+    assert.equal(d.json().error, 'has_history', d.body);
+    assert.match(d.json().message, /Tiene novedades\./);
+    const c = await api.appPool.connect();
+    try {
+      await c.query('BEGIN');
+      await assert.rejects(c.query('SELECT purge_tech_ranges($1)', [t.id]), (e) => e.code === '23001');
+    } finally {
+      await c.query('ROLLBACK').catch(() => {});
+      c.release();
+    }
+    assert.equal((await api.q('SELECT count(*)::int AS n FROM techs WHERE id = $1', [t.id]))[0].n, 1);
+  });
+
+  test('en la base: la fecha, el autor y el vínculo no se modifican (restrict_violation)', async () => {
+    const [n] = await api.q("SELECT id FROM novedades WHERE author_id = 'u-responsable' LIMIT 1");
+    for (const set of ["author_id = 'u-admin'", 'movement_id = (SELECT id FROM movements LIMIT 1)', "occurred_at = now() - interval '1 day'"]) {
+      await assert.rejects(api.q(`UPDATE novedades SET ${set} WHERE id = $1`, [n.id]), (e) => e.code === '23001', set);
+    }
   });
 });
 
@@ -222,7 +274,13 @@ describe('eliminar, restaurar y eliminación definitiva', () => {
     assert.ok(ids(await list('admin', 'archived=include')).includes(n.id));
     const del = (await api.call('admin', 'GET', '/api/archived?type=novedades')).json().records;
     assert.deepEqual(del.map((x) => [x.id, x.name, x.comment, x.hasHistory]), [[n.id, n.name, 'Para eliminar', false]]);
-    assert.equal((await api.call('responsable', 'PATCH', path, { comment: 'x' }, ifMatch(arch.version))).json().error, 'archived');
+    // Eliminada: para el autor sin records_delete no existe (también con una versión vieja).
+    for (const v of [arch.version, arch.version - 1]) {
+      const e = await api.call('responsable', 'PATCH', path, { comment: 'x' }, ifMatch(v));
+      assert.equal(e.statusCode, 404, e.body);
+      assert.doesNotMatch(e.body, /archive|Duplicada/i);
+    }
+    assert.equal((await api.call('admin', 'PATCH', path, { comment: 'x' }, ifMatch(arch.version))).json().error, 'archived');
     const rs = await api.call('admin', 'POST', `${path}/restore`, { reason: 'Era válida' }, ifMatch(arch.version));
     assert.equal(rs.statusCode, 200);
     assert.ok(ids(await list('responsable')).includes(n.id));

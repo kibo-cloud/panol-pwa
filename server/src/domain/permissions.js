@@ -6,11 +6,12 @@ const responsable = { controls_do: true, movements_do: true, alerts_resolve: tru
 
 export const DEFAULT_PERMS = Object.freeze({
   responsable: Object.freeze({ ...responsable }),
-  consulta: Object.freeze({ reports_export: true }),
+  // Etapa 6: todos los perfiles ven las novedades; cargarlas, quien opera el pañol.
+  consulta: Object.freeze({ reports_export: true, novedades_view: true }),
   // Supuesto a confirmar en el PR de la etapa 1: supervisor = responsable + cambiar de turno.
   supervisor: Object.freeze({ ...responsable, shift_change: true }),
   // Gerencia ve en modo consulta; el permiso de compras llega en la etapa 7.
-  gerencia: Object.freeze({ reports_export: true }),
+  gerencia: Object.freeze({ reports_export: true, novedades_view: true }),
 });
 
 // overrides: { rol: { permiso: boolean } }

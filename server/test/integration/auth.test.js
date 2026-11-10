@@ -297,7 +297,7 @@ describe('permisos', () => {
     assert.equal((await send('POST', '/api/test/control', res)).statusCode, 200);
     assert.equal((await send('POST', '/api/test/control', ger)).statusCode, 403);
     assert.equal((await send('POST', '/api/test/control', con)).statusCode, 403);
-    assert.deepEqual(ger.res.json().permissions, { controls_do: false, movements_do: false, techs_edit: false, shift_change: false, tools_edit: false, inventory_edit: false, alerts_resolve: false, shifts_edit: false, reports_export: true, demo_manage: false, plantillas_edit: false, plantilla_rotate: false, lineas_edit: false, kits_edit: false, records_delete: false, movements_void: false, novedades_view: false, novedades_create: false, novedades_edit: false });
+    assert.deepEqual(ger.res.json().permissions, { controls_do: false, movements_do: false, techs_edit: false, shift_change: false, tools_edit: false, inventory_edit: false, alerts_resolve: false, shifts_edit: false, reports_export: true, demo_manage: false, plantillas_edit: false, plantilla_rotate: false, lineas_edit: false, kits_edit: false, records_delete: false, movements_void: false, novedades_view: true, novedades_create: false, novedades_edit: false });
   });
 
   test('supervisor puede cambiar de turno; un override lo cambia para responsable', async () => {

@@ -7,6 +7,7 @@
 import * as repo from '../adapters/pg/novedades-repo.js';
 import { lockName } from '../adapters/pg/catalog-repo.js';
 import { loadOverrides } from '../adapters/pg/auth-repo.js';
+import { withSnapshot } from '../adapters/pg/state-repo.js';
 import { can } from '../domain/permissions.js';
 import { cleanNovedad, checkLinkable, canEditNovedad, editChanges, parseNovedadFilters } from '../domain/novedades.js';
 import { DomainError, ConflictError, notFoundError } from '../domain/errors.js';
@@ -16,6 +17,7 @@ import { idempotent } from './idempotency.js';
 
 const forbidden = () => new DomainError('Tu perfil no tiene permiso para esta acción.', 'forbidden', 403);
 const rule = (msg, code, status = 422) => new DomainError(msg, code, status);
+const notFound = () => notFoundError('No se encontró la novedad.');
 
 // Bloqueo compartido con voidMovement (voids.js).
 export const movementLinkLock = (c, movementId) => lockName(c, `movements.void:${movementId}`);
@@ -87,9 +89,11 @@ export async function updateNovedad(db, actor, id, input, version) {
     // Los temas nuevos se bloquean antes que la novedad (orden global); se revisan después.
     const subjects = await lockSubjects(c, next, []);
     const cur = await repo.lockNovedad(c, id);
-    if (!cur) throw notFoundError('No se encontró la novedad.');
+    // Eliminada sin records_delete, o ajena sin novedades_edit: 404 como en la lectura (antes de
+    // revisar la versión, así un 409 no devuelve la fila ni confirma el id).
+    if (!cur || (cur.archived_at && !perms.deleted)) throw notFound();
     const curApi = { authorId: cur.author_id, comment: cur.comment, techId: cur.tech_id, plantillaId: cur.plantilla_id, lineaId: cur.linea_id };
-    if (!canEditNovedad(actor, curApi, perms)) throw forbidden();
+    if (!canEditNovedad(actor, curApi, perms)) throw notFound();
     if (cur.version !== version) throw new ConflictError(await repo.getNovedad(c, id));
     if (cur.archived_at) throw rule('La novedad está eliminada: restaurala antes de editarla.', 'archived', 409);
     const changes = editChanges(curApi, next);
@@ -111,8 +115,7 @@ export async function updateNovedad(db, actor, id, input, version) {
 // ---------------------------------------------------------------- lecturas
 export async function getNovedad(db, actor, id) {
   const row = await repo.getNovedad(db, id);
-  if (!row) throw notFoundError('No se encontró la novedad.');
-  if (row.archived && !(await permsOf(db, actor)).deleted) throw notFoundError('No se encontró la novedad.');
+  if (!row || (row.archived && !(await permsOf(db, actor)).deleted)) throw notFound();
   return row;
 }
 
@@ -125,14 +128,22 @@ export async function listNovedades(db, actor, query) {
 }
 
 // Consulta por período para otros casos de uso (impresión de auditoría, etapa 10).
-// filters: los de GET /api/novedades (from, to, techId…); devuelve todas, de a páginas.
-export async function novedadesOfPeriod(db, filters = {}) {
-  const out = [];
-  let before = null;
-  do {
-    const r = await repo.queryNovedades(db, parseNovedadFilters({ ...filters, limit: 200, before }));
-    out.push(...r.rows);
-    before = r.next;
-  } while (before);
-  return out;
+// filters: los de GET /api/novedades (from, to, techId…, archived). Devuelve todas, de a páginas
+// sin contar el total, dentro de una sola instantánea (REPEATABLE READ, solo lectura): una
+// novedad que se carga o elimina en el medio no se repite ni se saltea. Las eliminadas
+// (archived=include|only) solo para quien tiene records_delete; el permiso propio del caso de
+// uso que llama (p. ej. imprimir) lo revisa ese caso de uso.
+export async function novedadesOfPeriod(db, actor, filters = {}) {
+  const f = parseNovedadFilters({ ...filters, before: null });
+  if (f.archived !== 'exclude' && !(await permsOf(db, actor)).deleted) throw forbidden();
+  return withSnapshot(db, async (c) => {
+    const out = [];
+    let before = null;
+    do {
+      const r = await repo.queryNovedades(c, { ...f, limit: 200, before }, { withTotal: false });
+      out.push(...r.rows);
+      before = r.cursor;
+    } while (before);
+    return out;
+  });
 }

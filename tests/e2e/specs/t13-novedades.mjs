@@ -105,11 +105,11 @@ export const tests = [
       assert((await page.text('#mbody')).includes('La fecha, el autor y el vínculo no cambian'), 'fixed fields explained');
       await saveSheet(page, 'Entregada con el estuche roto (cambiado)', {}, 'Guardar cambios');
       await page.waitFor(rowsWith('estuche roto (cambiado)') + '===1', 10000, 'edited row');
-      // Someone else's novedad: no Editar for the responsable, 403 from the server; admin edits it.
+      // Someone else's novedad: no Editar for the responsable, 404 from the server (E6.V1); admin edits it.
       const other = ok(await api(adm, 'POST', '/api/novedades', { comment: 'Novedad del administrador' }, { idem: idem() }), 201, 'admin novedad').novedad;
       await page.waitFor(rowsWith('Novedad del administrador') + '===1', 10000, 'admin novedad arrives live');
       eq(await page.count(`[data-act="novEdit"][data-id="${other.id}"]`), 0, 'no Editar on another user novedad');
-      eq((await api(page, 'PATCH', `/api/novedades/${other.id}`, { comment: 'x' }, { version: other.version })).status, 403, 'server refuses');
+      eq((await api(page, 'PATCH', `/api/novedades/${other.id}`, { comment: 'x' }, { version: other.version })).status, 404, 'server refuses');
       await adm.waitFor(rowsWith('estuche roto (cambiado)') + '===1', 10000, 'admin sees the edit');
       await adm.click(`[data-act="novEdit"][data-id="${mine.id}"]`);
       await sheetOpen(adm, 'admin edit sheet');
@@ -169,11 +169,13 @@ export const tests = [
       await modalClosed(page, 'purged');
       eq((await api(page, 'GET', `/api/novedades/${n.id}`)).status, 404, 'gone');
 
-      // Permissions: consulta cannot see; responsable gets 403 on archive.
+      // Permissions: consulta sees but cannot create; responsable gets 403 on archive.
       const cons = await secondPage(ctx, 'consulta');
       await cons.hash('#novedades');
-      assert((await cons.text('#view')).includes('Tu perfil no puede ver las novedades'), 'consulta: no permission message');
-      eq((await api(cons, 'GET', '/api/novedades')).status, 403, 'consulta: 403');
+      await cons.waitFor("!document.getElementById('view').textContent.includes('Tu perfil no puede ver') && document.getElementById('view').textContent.includes('Novedades')", 10000, 'consulta: screen');
+      eq(await cons.count('[data-act="novNew"]'), 0, 'consulta: no Nueva novedad');
+      eq((await api(cons, 'GET', '/api/novedades')).status, 200, 'consulta: can view');
+      eq((await api(cons, 'POST', '/api/novedades', { comment: 'x' }, { idem: idem() })).status, 403, 'consulta: cannot create');
       const resp = await secondPage(ctx, 'responsable');
       const m = ok(await api(resp, 'POST', '/api/novedades', { comment: 'Del responsable' }, { idem: idem() }), 201, 'resp novedad').novedad;
       eq((await api(resp, 'POST', `/api/novedades/${m.id}/archive`, { reason: 'x' }, { version: m.version })).status, 403, 'responsable cannot archive');
