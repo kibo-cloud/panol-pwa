@@ -58,13 +58,13 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 `v3-servidor`). Forecast far above ~400 authored lines per stage; each stage is one PR.
 
 ## Stages (PEDIDO §5)
-1. Servidor, usuarios y migración desde el `.txt` — in progress (`v3/etapa-1-servidor`)
-2. Plantillas, movimiento de técnicos y líneas
-3. Especialidad, kit base y orden
-4. Conteo por cantidad y limpieza
-5. Eliminar y anular
-6. Novedades
-7. Gerencia
+1. Servidor, usuarios y migración desde el `.txt` — done (PR #1)
+2. Plantillas, movimiento de técnicos y líneas — done (PR #2)
+3. Especialidad, kit base y orden — done (PR #3)
+4. Conteo por cantidad y limpieza — done (PR #4)
+5. Eliminar y anular — done (PR #5)
+6. Novedades — done (PR #6)
+7. Gerencia — in progress (`v3/etapa-7-gerencia`)
 8. Existencia por técnico y alertas
 9. Importador del Excel
 10. Impresión de auditoría
@@ -1420,10 +1420,72 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 - E6.V1 (`cca9b59`): `npm test` 198/198; `npm run test:db` 214/214 (435 s); `npm run build` ok;
   `PANOL_E2E_BUILD=1 npm run test:e2e` 63 passed, 0 failed, 0 skipped (483 s).
 
+- Stage 6 closed 2026-11-10: CI run 42920051070 green, PR #6 → `v3/etapa-5-eliminar`.
+
+## Stage 7 decisions (parent, within PEDIDO §2.7 and the user's decisions of 2026-11-07)
+- Purchase request (`purchase_requests`): number (shown as "Compra N"), tool, unit (when the
+  tool is unit-tracked), assignment when it comes from a holder, holder (técnico or caja) and its
+  plantilla as a snapshot at creation, reason `cambio` (dañada) or `faltante` (extraviada), the
+  control observation (snapshot), qty (> 0), optional estimated cost (ARS, numeric(12,2)) and
+  supplier, origin (`control`, `tool`, `alert`), created_by/created_at, status, version.
+- States: `pendiente` → `aprobada` | `rechazada`; `aprobada` → `comprada` (optional step) →
+  `recibida` (also `aprobada` → `recibida` directly). Decide = any user with
+  `purchases_decide`; one approval is enough; reject requires a comment; who/when is stored for
+  every transition. Rejected and received requests are closed and stay in history.
+- Automatic creation: when a control is finalized (or corrected), every item with a faltante or
+  cambio quantity creates a request unless an OPEN request (pendiente/aprobada/comprada) exists
+  for the same assignment (or unit) and reason; then the control is linked to it (link table
+  request ↔ control) and, while pendiente, its qty follows the latest effective control. Dedupe
+  is by assignment/unit + reason, NEVER by alert key (stage 4 note). The creator of an automatic
+  request is the user who finalized the control.
+- A correction that removes the loss: a pendiente request whose only source is the superseded
+  control is archived automatically with motivo "Corregido en el control"; approved or later
+  requests are never touched automatically.
+- After a rejection, no new automatic request opens for the same assignment/unit + reason until
+  a control shows that loss resolved; the alert stays visible as "compra rechazada" with the
+  reason (user decision). Manual creation is always possible.
+- Manual creation from the tool sheet and from a faltante/cambio alert (prefilled), with
+  `purchases_create` (responsable, supervisor, admin by default).
+- Reception (`purchases_receive`: responsable, admin): marks `recibida` and, in the same
+  transaction, creates the inventory ingreso movement (existing ingreso/alta type, or a new
+  `ingreso_compra` if none fits) linked to the request; a later reposición to the holder can be
+  linked to that ingreso (the reposición form offers received requests of that holder). Locks:
+  request FOR UPDATE, then the existing movement lock order.
+- Cancel = the stage 5 records model, type `compras`, archive/restore only while `pendiente`; no
+  definitive delete (requests are history).
+- Gerencia section (`purchases_view`: gerencia, admin): inbox of pendientes with quick approve
+  from the phone (one tap + confirm) and reject with comment; filters (status, month, plantilla,
+  técnico/caja, tool, reason); monthly totals of approved (count and sum of known estimated
+  costs; unknown costs counted apart); nav badge with the pending count and an alert
+  "compras pendientes" for users with `purchases_decide`. Responsables see the status of a
+  request on the tool sheet / alert and a "Compras a recibir" list for `purchases_receive`.
+- Novedades: nullable `purchase_request_id` link; `linked` filter = movement OR purchase
+  request; the novedad sheet can link a request; keep the `novedadesOfPeriod` contract.
+- Stage 10 query: `purchasesOfPeriod(db, actor, filters)` (approved and rejected in the period,
+  one REPEATABLE READ snapshot), like `novedadesOfPeriod`.
+- `.txt` v2 has no purchases: not exported/imported (documented deviation); `.txt` replace is
+  refused once requests exist (like novedades).
+- Audit, SSE refresh, idempotency keys on create/decide/receive, If-Match versions on every
+  transition, as in earlier stages.
+
+## Stage 7 tasks (branch `v3/etapa-7-gerencia`, stacked on stage 6)
+- [ ] E7.T1 Backend: migration `015_compras.sql` (requests, request↔control links, ingreso link,
+      novedad link column, perms, records type), domain (state machine, dedupe, qty rules),
+      application (auto creation in finalize/correct, manual create, decide, purchase, receive
+      with ingreso, cancel, lists/filters/totals, period query), routes, SSE, audit; unit +
+      integration tests (test-first where a RED is meaningful).
+- [ ] E7.T2 Frontend: Gerencia section (inbox, quick approve, reject sheet, filters, monthly
+      totals, badge, alert), request detail with timeline, manual create from tool sheet/alert,
+      "Compras a recibir" + receive sheet, reposición link to a received request, status on tool
+      sheet/alert ("compra rechazada"), novedad link; design guide, classes in `v3.css`.
+- [ ] E7.T3 E2E: control with faltante → automatic request (and no duplicate on a second control
+      or a correction), approve on 390 px, reject with comment → "compra rechazada" alert,
+      receive → ingreso, reposición linked, gerencia vs. responsable permissions, totals.
+
 ## Next step
-- Stage 6: independent review, CI and PR #6 → `v3/etapa-5-eliminar`. Default `novedades_view` for
-  gerencia/consulta decided (on) in E6.V1.
-- PRs #1–#4 await user review (stacked: #1 → `v3-servidor`, #2 → stage 1, #3 → stage 2). Engram mirror of this document: pending (multiple active
+- Stage 7: E7.T1–E7.T3 (one delegated writer), then independent review, CI and PR #7 →
+  `v3/etapa-6-novedades`.
+- PRs #1–#6 await user review (stacked: #1 → `v3-servidor`, each next PR → the previous stage). Engram mirror of this document: pending (multiple active
   sessions). PR #1 awaits user review; after it is merged, rebase stage 2 onto `v3-servidor`.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);
