@@ -6,6 +6,7 @@ import { ST, MSHORT } from '../state/constants.js';
 import { CLEAN, qtyText } from '../state/conteo.js';
 import { S, derive, can, who, toolName, holderName } from '../state/store.js';
 import { holderKey } from '../state/plantillas.js';
+import { linkableMv } from '../state/novedades.js';
 import { fdt, mlabel, pkeyOf, wrange, pnumOf, plabel } from '../state/period.js';
 
 export const nf = (n) => Number(n || 0).toLocaleString('es-AR');
@@ -71,7 +72,9 @@ export function mvRow(m, { plain = false } = {}) {
   const voidOf = m.type === 'anulacion' ? `<div class="s">${orig ? `Anula: ${esc((MV_TAG[orig.type] || [orig.type])[0])} del ${fdt(orig.at)}` : 'Anula un movimiento'}</div>` : '';
   const mark = voidedBy ? `<span class="chip bad">${icon('x', 12)}Anulado</span>` : '';
   const voidBtn = !plain && m.id && m.type !== 'anulacion' && !voidedBy && can('movements_void') ? `<button class="btn sm" data-act="mvVoid" data-m="${esc(m.id)}">Anular</button>` : '';
-  return `<div class="row mvrow ${voidedBy ? 'voided' : ''}" data-mv="${esc(m.id || '')}"><span class="tag ${tg[1]}">${esc(tg[0])}</span><div class="grow"><div class="t">${esc(title)}</div><div class="s">${esc(meta)}</div>${voidOf}${m.reason || m.notes ? `<div class="s">${m.type === 'anulacion' ? 'Motivo: ' : ''}${esc([m.reason, m.notes].filter(Boolean).join('. '))}</div>` : ''}</div>${mark || voidBtn || demoChip(m) ? `<span class="mvacts">${mark}${demoChip(m)}${voidBtn}</span>` : ''}</div>`;
+  // Etapa 6: una entrega o reposición (no anulada) abre Nueva novedad con el vínculo y el técnico.
+  const novBtn = !plain && m.id && linkableMv(m, voidedBy) && can('novedades_create') ? `<button class="btn sm" data-act="novNew" data-mv="${esc(m.id)}" data-tech="${esc(m.techId || '')}">Agregar novedad</button>` : '';
+  return `<div class="row mvrow ${voidedBy ? 'voided' : ''}" data-mv="${esc(m.id || '')}"><span class="tag ${tg[1]}">${esc(tg[0])}</span><div class="grow"><div class="t">${esc(title)}</div><div class="s">${esc(meta)}</div>${voidOf}${m.reason || m.notes ? `<div class="s">${m.type === 'anulacion' ? 'Motivo: ' : ''}${esc([m.reason, m.notes].filter(Boolean).join('. '))}</div>` : ''}</div>${mark || voidBtn || novBtn || demoChip(m) ? `<span class="mvacts">${mark}${demoChip(m)}${novBtn}${voidBtn}</span>` : ''}</div>`;
 }
 export const mvList = (l) => (l.length ? `<div class="list">${l.map(mvRow).join('')}</div>` : `<div class="list">${emptyBox('Sin movimientos registrados', 'Las entregas, devoluciones y reposiciones aparecen acá.')}</div>`);
 const AL_IC = { faltante: 'x', cambio: 'wrench', consecutiva: 'alert', devolucion: 'swap', pendiente: 'clock', limpieza: 'clean' };

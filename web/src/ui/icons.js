@@ -29,6 +29,8 @@ sliders:'<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M
 info:'<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
 eye:'<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
 eyeoff:'<path d="m2 2 20 20M6.7 6.7C3.8 8.6 2 12 2 12s3 7 10 7c2 0 3.7-.6 5.2-1.5M10.6 5.1C11 5 11.5 5 12 5c7 0 10 7 10 7s-.7 1.7-2.2 3.5"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>'};
+// Etapa 6: novedades (globo de texto).
+IC.note='<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8M8 13h5"/>';
 IC.up='<path d="m18 15-6-6-6 6"/>';IC.grip='<circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/>';IC.shift=IC.clock;IC.more=IC.menu;IC.tool=IC.wrench;
 // Etapa 4: limpieza (sparkles de Lucide).
 IC.clean='<path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.14-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0L14.06 8.5a2 2 0 0 0 1.44 1.44l6.14 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0z"/><path d="M20 3v4M22 5h-4"/>';

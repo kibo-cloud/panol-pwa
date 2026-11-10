@@ -27,7 +27,10 @@ export const REC = {
   especialidades: { label: 'Especialidad', the: 'la especialidad' },
   kits: { label: 'Kit', the: 'el kit' },
   users: { label: 'Usuario', the: 'el usuario' },
+  // Etapa 6: el nombre de una novedad es su etiqueta corta (Novedad N).
+  novedades: { label: 'Novedad', the: 'la novedad', back: '#novedades', fem: true },
 };
+const done = (T, w) => `${T.label} ${w}${T.fem ? 'a' : 'o'}`;
 const QUICK = ['Cargado por error', 'Duplicado', 'Ya no se usa'];
 const QUICK_TECH = ['Dejó la empresa', 'Cargado por error', 'Duplicado'];
 const RES_OPTS = [['', 'Elegí qué hacer'], ['disponible', 'Devolver a disponibles'], ['reparacion', 'Devolver a reparación'], ['baja', 'Devolver y dar de baja'], ['retiro', 'Retirar']];
@@ -73,7 +76,7 @@ ACT.recDelete = async (ds) => {
       if (missing) throw new UErr(`Elegí qué hacer con ${missing} ${missing === 1 ? 'herramienta' : 'herramientas'}.`);
       const resolutions = asg.map((a) => { const v = st[resKey(a.id)]; return v === 'retiro' ? { assignmentId: a.id, action: 'retiro' } : { assignmentId: a.id, action: 'devolucion', cond: v }; });
       await api.archiveRecord(type, id, { reason, ...(resolutions.length ? { resolutions } : {}) }, chk.version);
-      await refresh(); toast(`${T.label} eliminado`); afterChange(ds.back);
+      await refresh(); toast(done(T, 'eliminad')); afterChange(ds.back);
     } }],
   });
 };
@@ -99,7 +102,7 @@ ACT.recPurgeOpen = async (ds) => {
       if (String(st.confirm || '').trim() !== String(chk.name).trim()) throw new UErr('El nombre no coincide. Escribilo exactamente como aparece.');
       const reason = cleanReasonUI(st);
       await api.purgeRecord(type, id, { reason, confirmName: String(st.confirm).trim() }, chk.version);
-      await refresh(); toast(`${T.label} eliminado definitivamente`); afterChange(ds.back || T.back || '');
+      await refresh(); toast(`${done(T, 'eliminad')} definitivamente`); afterChange(ds.back || T.back || '');
     } }],
   });
 };
@@ -114,7 +117,7 @@ ACT.recRestore = (ds) => {
     actions: [{ label: 'Cancelar', close: true }, { label: 'Restaurar', kind: 'pri', run: async (st) => {
       const reason = cleanReasonUI(st);
       await api.restoreRecord(r.type, r.id, { reason }, r.version);
-      await refresh(); toast(`${T.label} restaurado`); await loadDeleted(true);
+      await refresh(); toast(done(T, 'restaurad')); await loadDeleted(true);
     } }],
   });
 };
@@ -153,9 +156,9 @@ export function deletedTab() {
   if (!DEL.list) return '<div class="loading"><div class="spin"></div>Cargando…</div>';
   const q = String(UI.delQ || '').trim().toLowerCase(); const ty = UI.delType || 'all';
   const types = Object.keys(REC).filter((t) => t !== 'users' || myRole() === 'admin');
-  const list = DEL.list.filter((r) => (ty === 'all' || r.type === ty) && (!q || [r.name, r.legajo, r.username, r.reason].filter(Boolean).join(' ').toLowerCase().includes(q)));
+  const list = DEL.list.filter((r) => (ty === 'all' || r.type === ty) && (!q || [r.name, r.legajo, r.username, r.comment, r.reason].filter(Boolean).join(' ').toLowerCase().includes(q)));
   const filters = `<div class="toolbar"><div class="search">${icon('search', 18)}<input id="delq" type="search" placeholder="Buscar por nombre o motivo" value="${esc(UI.delQ || '')}" data-in="delQ" aria-label="Buscar registros eliminados"></div><select id="deltype" data-ch="delType" aria-label="Tipo de registro">${optList([['all', 'Todos los tipos'], ...types.map((t) => [t, REC[t].label])], ty)}</select></div>`;
-  const rows = list.map((r) => `<div class="row recdel" data-rec="${esc(r.type + ':' + r.id)}"><div class="grow"><div class="t">${esc(r.name)} <span class="chip pend">${esc(REC[r.type].label)}</span></div><div class="s">Eliminado el ${fdt(r.archivedAt)} por ${esc(r.archivedByName || who(r.archivedBy))}</div><div class="s">Motivo: ${esc(r.reason || '—')}</div></div><span class="r"><button class="btn sm" data-act="recRestore" data-type="${esc(r.type)}" data-id="${esc(r.id)}">Restaurar</button>${r.hasHistory ? '' : `<button class="btn sm danger" data-act="recPurgeOpen" data-type="${esc(r.type)}" data-id="${esc(r.id)}">Eliminar definitivamente</button>`}</span></div>`).join('');
+  const rows = list.map((r) => `<div class="row recdel" data-rec="${esc(r.type + ':' + r.id)}"><div class="grow"><div class="t">${esc(r.name)} <span class="chip pend">${esc(REC[r.type].label)}</span></div>${r.comment ? `<div class="s novtxt">${esc(r.comment.length > 140 ? r.comment.slice(0, 137) + '…' : r.comment)}</div>` : ''}<div class="s">Eliminado el ${fdt(r.archivedAt)} por ${esc(r.archivedByName || who(r.archivedBy))}</div><div class="s">Motivo: ${esc(r.reason || '—')}</div></div><span class="r"><button class="btn sm" data-act="recRestore" data-type="${esc(r.type)}" data-id="${esc(r.id)}">Restaurar</button>${r.hasHistory ? '' : `<button class="btn sm danger" data-act="recPurgeOpen" data-type="${esc(r.type)}" data-id="${esc(r.id)}">Eliminar definitivamente</button>`}</span></div>`).join('');
   return `<p class="hint">${icon('info', 16)}<span>Lo eliminado queda archivado: no aparece en listas ni selectores, pero su historial sigue en reportes, auditoría e impresiones. Restaurar lo vuelve a mostrar.</span></p>${filters}${list.length ? `<div class="list">${rows}</div>` : `<div class="list">${emptyBox(DEL.list.length ? 'Ningún registro coincide' : 'No hay registros eliminados', '')}</div>`}`;
 }
 IN.delQ = (v) => { UI.delQ = v; render(); };

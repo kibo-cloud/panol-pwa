@@ -11,6 +11,7 @@ import { kpi, pageHead, emptyBox, avatar, demoChip, ctlBadge, stChip, mvList, fi
 import { openTechMove, techHistory, historyLine } from '../plantillas/move.js';
 import { canDeliverKit } from '../kits/deliver.js';
 import { deleteBtn, archivedBanner } from '../records/view.js';
+import { techNovCard } from '../novedades/view.js';
 import { coverageOf, mineFirst } from '../../state/plantillas.js';
 import { api } from '../../api/index.js';
 import { S, derive, can, who, refresh, shiftName, toolName, catName, espName } from '../../state/store.js';
@@ -43,7 +44,7 @@ VIEWS.tecnico = (id) => {
   const d = derive(); const t = S.techs[id]; if (!t) return pageHead('Técnico no encontrado', '', { back: '#tecnicos' });
   const i = d.techInfo[id]; const list = d.asgByTech[id] || [];
   if (!UI.techMonth) UI.techMonth = { y: d.cur.y, m: d.cur.m };
-  const acts = [can('controls_do') && list.length && t.active !== false ? `<a class="btn pri" href="#control-${esc(id)}">${icon('check', 18)}Controlar</a>` : '', can('movements_do') && t.active !== false ? `<button class="btn" data-act="asgNew" data-h="${esc(id)}">${icon('plus', 16)}Asignar herramienta</button><button class="btn" data-act="goEntrega" data-t="${esc(id)}">Entregar herramienta</button>${canDeliverKit(id) ? `<button class="btn" data-act="kitDeliver" data-h="${esc(id)}">${icon('box', 16)}Entregar kit</button>` : ''}` : '', can('techs_edit') && !t.archived ? `<button class="btn" data-act="techEdit" data-t="${esc(id)}">Editar</button>` : '', t.archived ? '' : deleteBtn('techs', id, { back: '#tecnicos' })].join('');
+  const acts = [can('controls_do') && list.length && t.active !== false ? `<a class="btn pri" href="#control-${esc(id)}">${icon('check', 18)}Controlar</a>` : '', can('movements_do') && t.active !== false ? `<button class="btn" data-act="asgNew" data-h="${esc(id)}">${icon('plus', 16)}Asignar herramienta</button><button class="btn" data-act="goEntrega" data-t="${esc(id)}">Entregar herramienta</button>${canDeliverKit(id) ? `<button class="btn" data-act="kitDeliver" data-h="${esc(id)}">${icon('box', 16)}Entregar kit</button>` : ''}` : '', can('novedades_create') && t.active !== false && !t.archived ? `<button class="btn" data-act="novNew" data-tech="${esc(id)}">${icon('note', 16)}Nueva novedad</button>` : '', can('techs_edit') && !t.archived ? `<button class="btn" data-act="techEdit" data-t="${esc(id)}">Editar</button>` : '', t.archived ? '' : deleteBtn('techs', id, { back: '#tecnicos' })].join('');
   const tab = UI.techTab;
   let body = '';
   if (tab === 'tools') {
@@ -57,7 +58,8 @@ VIEWS.tecnico = (id) => {
     const rp = d.movs.filter((m) => m.techId === id && m.type === 'reposicion').map((m) => ({ at: m.at, cls: 'pri', title: `Herramienta reemplazada: ${toolName(m.toolId)}`, sub: `${fdt(m.at)}. Estado anterior: ${(ST[m.oldState] || {}).label || '—'}. ${m.returned ? 'Devolvió la anterior.' : 'No devolvió la anterior.'}` }));
     const sc = techHistory(id).filter((h) => h.fromName || h.temporary).map((h) => ({ at: h.at, cls: h.temporary ? 'warn' : 'pri', title: h.temporary ? `Cobertura temporal en ${h.name}` : `Cambio de plantilla: ${h.fromName} a ${h.name}`, sub: `${fdt(h.at)}, ${who(h.by)}${h.reason ? '. ' + h.reason : ''}` }));
     const all = [...tr, ...rp, ...sc].sort((a, b) => (b.at || '').localeCompare(a.at || ''));
-    body = all.length ? `<div class="card"><div class="tl">${all.map((x) => `<div class="tl-i"><span class="tl-dot ${x.cls}"></span><div><div data-css="font-weight:620">${esc(x.title)}</div><div class="muted sm">${esc(x.sub)}</div></div></div>`).join('')}</div></div>` : `<div class="list">${emptyBox('Sin novedades', 'Los cambios de estado entre controles, reemplazos y cambios de plantilla aparecen acá.')}</div>`;
+    // Etapa 6: las novedades cargadas a mano (servidor) y, debajo, los cambios detectados.
+    body = techNovCard(id, t.archived || t.active === false) + (all.length ? `<h2 class="si novdet">Cambios detectados</h2><div class="card"><div class="tl">${all.map((x) => `<div class="tl-i"><span class="tl-dot ${x.cls}"></span><div><div data-css="font-weight:620">${esc(x.title)}</div><div class="muted sm">${esc(x.sub)}</div></div></div>`).join('')}</div></div>` : `<p class="muted sm novdet">Sin cambios detectados: los cambios de estado entre controles, reemplazos y cambios de plantilla aparecen acá.</p>`);
   } else if (tab === 'mov') { body = mvList(d.movs.filter((m) => m.techId === id)); } else if (tab === 'shift') {
     const hs = techHistory(id).map(historyLine);
     body = hs.length ? `<div class="list">${hs.map((h) => `<div class="row"><span class="light ${h.current ? 'ok' : h.temporary ? 'warn' : 'pend'}"></span><div class="grow"><div class="t">${esc(h.title)}${h.current ? ' <span class="chip ok">Actual</span>' : ''}${h.temporary ? ' <span class="chip warn">Cobertura</span>' : ''}</div><div class="s">${esc(h.sub)}</div>${h.meta ? `<div class="s">${esc(h.meta)}</div>` : ''}</div></div>`).join('')}</div>` : `<div class="list">${emptyBox('Sin plantilla', 'Todavía no está en ninguna plantilla.')}</div>`;
