@@ -1282,9 +1282,52 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   Commit: the E5.V1 work-unit commit on `v3/etapa-5-eliminar`.
 - Stage 5 PR: #5 → `v3/etapa-4-conteo` after CI.
 
+- Stage 5 closed 2026-11-10: E5.V1 commit `777a13a`, CI run 42905273213 green (unit,
+  PostgreSQL, Compose, E2E Chrome), PR #5 → `v3/etapa-4-conteo`. Native gentle-ai review not
+  run (diffs of this size stop with `lens_context_budget_exceeded`); the independent read-only
+  review that produced E5.V1 is the review of record.
+
+## Stage 6 decisions (parent, within PEDIDO §2.8)
+- A novedad is a dated log entry: `occurred_at` set by the server (not editable), author (the
+  logged user), comment (required, trimmed, 1–2000 chars), and optional subjects: técnico,
+  plantilla, línea (each independent, any combination, all may be empty). Subjects must exist and
+  be active when the novedad is created; later archiving keeps the reference (shown with the
+  "(eliminado)" mark).
+- Links: optional link to one movement of type entrega or reposición (not a void, not a voided
+  movement at creation time). The link to a purchase request is added in stage 7 (nullable FK
+  column created there) — stage 6 must not invent purchase requests.
+- Editing: the author can edit the comment and subjects of their own novedad; `novedades_edit`
+  edits any. `occurred_at`, author and creation stay; every edit goes to audit with the previous
+  values. Delete = the stage 5 generic records model (new type `novedades`: archive with motivo,
+  restore, definitive delete — a novedad has no operational history, so definitive delete is
+  allowed with the typed confirmation of its short label).
+- Permissions: `novedades_view` and `novedades_create` (default on for every role that operates
+  the pañol), `novedades_edit` (admin by default); `records_delete` governs archive/restore/purge.
+- List: server-side filters (date range, técnico, plantilla, línea, author, text search, linked
+  or not, include archived for `records_delete`), newest first, paginated; live updates through
+  the existing SSE channel. The period query is the one stage 10 (impresión) will reuse.
+- Entry points: "Nueva novedad" button in the Novedades screen (new nav item), in the tech and
+  plantilla sheets (prefilled subject), and "Agregar novedad" on an entrega/reposición row
+  (prefilled link and tech). The tech sheet shows its latest novedades.
+- Online only, with the existing idempotency keys on create; offline shows a clear message (no
+  offline queue in this stage).
+- `.txt` v2 has no novedades: they are not exported to nor imported from `.txt` (documented
+  deviation). The Excel NOVEDADES import is stage 9.
+
+## Stage 6 tasks (branch `v3/etapa-6-novedades`, stacked on stage 5)
+- [ ] E6.T1 Backend: migration `014_novedades.sql` (table, indexes for the filters, perms,
+      records type), domain validation, application (create/edit/list/filter, link checks under
+      lock of the linked movement), HTTP routes, SSE events, audit, generic records integration;
+      unit + integration tests (test-first where a RED is meaningful).
+- [ ] E6.T2 Frontend: Novedades screen (list, filters, empty states), Nueva/Editar novedad sheet,
+      entry points in tech/plantilla sheets and entrega/reposición rows, latest novedades in the
+      tech sheet, "(eliminado)" marks, records integration; design guide, classes in `v3.css`.
+- [ ] E6.T3 E2E: create with and without subjects, link to an entrega, filter, edit by author
+      vs. without permission, archive/restore/definitive delete, live update in a second client.
+
 ## Next step
-- Stage 5: CI green on the E5.V1 commit, then PR #5 (stacked on stage 4). Then stage 6
-  (Novedades).
+- Stage 6: E6.T1–E6.T3 (one delegated writer), then independent review, CI and PR #6 →
+  `v3/etapa-5-eliminar`.
 - PRs #1–#4 await user review (stacked: #1 → `v3-servidor`, #2 → stage 1, #3 → stage 2). Engram mirror of this document: pending (multiple active
   sessions). PR #1 awaits user review; after it is merged, rebase stage 2 onto `v3-servidor`.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
