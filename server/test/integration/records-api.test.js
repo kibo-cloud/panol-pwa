@@ -146,11 +146,20 @@ describe('eliminación definitiva', () => {
     assert.equal(r.statusCode, 409);
     assert.equal(r.json().error, 'has_history');
     assert.ok(r.json().history.includes('Tiene movimientos.'));
-    // Una edición también es historial.
+    // E5.V1: una edición no es historial (solo las referencias operativas): renombrado y sin
+    // operaciones, se elimina definitivamente; con un movimiento, no.
     const t = await newTech('Editado', 'ED-1');
     const e = await api.call('admin', 'PATCH', `/api/techs/${t.id}`, { name: 'Editado Dos' }, ifMatch(t.version));
-    assert.equal((await api.call('admin', 'GET', `/api/techs/${t.id}/delete-check`)).json().hasHistory, true);
-    assert.equal((await api.call('admin', 'DELETE', `/api/techs/${t.id}`, { reason: 'x', confirmName: 'Editado Dos' }, ifMatch(e.json().tech.version))).json().error, 'has_history');
+    const chk = (await api.call('admin', 'GET', `/api/techs/${t.id}/delete-check`)).json();
+    assert.deepEqual([chk.hasHistory, chk.canPurge], [false, true], JSON.stringify(chk.history));
+    const del = await api.call('admin', 'DELETE', `/api/techs/${t.id}`, { reason: 'x', confirmName: 'Editado Dos' }, ifMatch(e.json().tech.version));
+    assert.equal(del.statusCode, 200, del.body);
+    // La auditoría no se borra: la edición y la eliminación quedan.
+    assert.equal((await api.q("SELECT count(*)::int AS n FROM audit_log WHERE entity_id = $1 AND action IN ('tech_edit', 'tech_delete')", [t.id]))[0].n, 2);
+    const m = await newTech('Con Movimiento', 'CM-1');
+    assert.equal((await mov({ type: 'entrega_inicial', techId: m.id, toolId: 'tool-pinza', qty: 1 })).statusCode, 201);
+    const chk2 = (await api.call('admin', 'GET', `/api/techs/${m.id}/delete-check`)).json();
+    assert.deepEqual([chk2.hasHistory, chk2.canPurge], [true, false]);
   });
 });
 
@@ -308,5 +317,83 @@ describe('.txt v2', () => {
     assert.equal(rep.totalChanges, 0, JSON.stringify(rep.counts));
     assert.ok(rep.conflicts.some((c) => c.id === archivedTech && /eliminado en el servidor/.test(c.message)));
     assert.ok(rep.conflicts.some((c) => c.id === entrega.id && /anulado/.test(c.message)));
+  });
+});
+
+// E5.V1: correcciones de la revisión independiente.
+describe('E5.V1', () => {
+  test('.txt combinar no revive técnicos, herramientas, categorías ni usuarios eliminados definitivamente', async () => {
+    const tech = await newTech('Revive Técnico', 'RV-1');
+    const cat = (await api.call('admin', 'POST', '/api/categories', { name: 'Revive Categoría' })).json().category;
+    const tool = (await api.call('admin', 'POST', '/api/tools', { name: 'Revive Herramienta' })).json().tool;
+    const user = (await api.call('admin', 'POST', '/api/users', { username: 'revive.usuario', name: 'Revive Usuario', role: 'consulta' })).json().user;
+    const file = JSON.parse((await api.call('admin', 'GET', '/api/export/txt')).body.slice(HEAD.length));
+    for (const [type, r] of [['techs', tech], ['categories', cat], ['tools', tool], ['users', user]]) {
+      const d = await api.call('admin', 'DELETE', `/api/${type}/${r.id}`, { reason: 'Prueba', confirmName: r.name }, ifMatch(await ver(type, r.id)));
+      assert.equal(d.statusCode, 200, `${type}: ${d.body}`);
+    }
+    const rep = (await api.call('admin', 'POST', '/api/import/txt?mode=merge&dryRun=1', toTxt(file), { 'content-type': 'text/plain' })).json();
+    for (const c of ['techs', 'categories', 'tools', 'users']) assert.equal(rep.counts[c].create, 0, `${c}: ${JSON.stringify(rep.counts[c])}`);
+    for (const [c, id] of [['techs', tech.id], ['categories', cat.id], ['tools', tool.id], ['users', user.id]]) {
+      assert.ok(rep.conflicts.some((x) => x.collection === c && x.id === id && /eliminado definitivamente/.test(x.message)), `${c}/${id}`);
+    }
+  });
+
+  test('una plantilla creada con supervisor tiene historial: no se ofrece ni se elimina definitivamente (sin 500)', async () => {
+    const sup = (await api.login('supervisor')).id;
+    const p = await api.call('admin', 'POST', '/api/plantillas', { name: 'Con supervisor E5V1', supervisorUserId: sup });
+    assert.equal(p.statusCode, 201, p.body);
+    const pl = p.json().plantilla;
+    const chk = (await api.call('admin', 'GET', `/api/plantillas/${pl.id}/delete-check`)).json();
+    assert.deepEqual([chk.hasHistory, chk.canPurge], [true, false]);
+    const d = await api.call('admin', 'DELETE', `/api/plantillas/${pl.id}`, { reason: 'x', confirmName: pl.name }, ifMatch(pl.version));
+    assert.equal(d.statusCode, 409, d.body);
+    assert.equal(d.json().error, 'has_history');
+  });
+
+  test('DELETE /api/shifts/:id (ruta de 2.1) archiva solo con records_delete', async () => {
+    const s = (await api.call('admin', 'POST', '/api/shifts', { name: 'Turno E5V1' })).json().shift;
+    const perms = (await api.call('admin', 'GET', '/api/permissions')).json();
+    const put = await api.call('admin', 'PUT', '/api/permissions', { overrides: { ...perms.overrides, supervisor: { ...(perms.overrides.supervisor || {}), plantillas_edit: true, records_delete: false } } });
+    assert.equal(put.statusCode, 200, put.body);
+    try {
+      assert.equal((await api.call('supervisor', 'DELETE', `/api/shifts/${s.id}`, undefined, ifMatch(s.version))).statusCode, 403);
+      assert.equal((await api.q('SELECT archived_at FROM plantillas WHERE id = $1', [s.id]))[0].archived_at, null);
+    } finally {
+      await api.call('admin', 'PUT', '/api/permissions', { overrides: perms.overrides });
+    }
+    const ok = await api.call('admin', 'DELETE', `/api/shifts/${s.id}`, { reason: 'Turno de prueba' }, ifMatch(s.version));
+    assert.equal(ok.statusCode, 200, ok.body);
+    assert.equal((await api.q("SELECT detail FROM audit_log WHERE action = 'plantilla_archive' AND entity_id = $1", [s.id]))[0].detail, 'Eliminación de plantilla Turno E5V1. Motivo: Turno de prueba.');
+  });
+
+  test('una herramienta que está en un kit tiene historial: no se elimina definitivamente', async () => {
+    const tool = (await api.call('admin', 'POST', '/api/tools', { name: 'Herramienta de kit E5V1' })).json().tool;
+    const esp = (await api.call('admin', 'POST', '/api/especialidades', { name: 'Especialidad E5V1' })).json().especialidad;
+    const kit = (await api.call('admin', 'POST', '/api/kits', { especialidadId: esp.id })).json().kit;
+    const put = await api.call('admin', 'PUT', `/api/kits/${kit.id}`, { items: [{ toolId: tool.id, qty: 1 }] }, ifMatch(kit.version));
+    assert.equal(put.statusCode, 200, put.body);
+    const chk = (await api.call('admin', 'GET', `/api/tools/${tool.id}/delete-check`)).json();
+    assert.deepEqual([chk.hasHistory, chk.canPurge], [true, false]);
+    assert.ok(chk.history.includes('Está en un kit.'), JSON.stringify(chk.history));
+    const d = await api.call('admin', 'DELETE', `/api/tools/${tool.id}`, { reason: 'x', confirmName: tool.name }, ifMatch(await ver('tools', tool.id)));
+    assert.equal(d.json().error, 'has_history');
+    assert.equal((await api.q('SELECT count(*)::int AS n FROM kit_items WHERE tool_id = $1', [tool.id]))[0].n, 1);
+  });
+
+  test('el rol de la app no borra rangos de un técnico con historial, aunque active panol.purge', async () => {
+    const c = await api.appPool.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query("SELECT set_config('panol.purge', 'techs:t-ana', true)");
+      await assert.rejects(c.query("DELETE FROM tech_plantilla_history WHERE tech_id = 't-ana'"), (e) => e.code === '23001');
+      await c.query('ROLLBACK');
+      await c.query('BEGIN');
+      await assert.rejects(c.query("SELECT purge_tech_ranges('t-ana')"), (e) => e.code === '23001');
+    } finally {
+      await c.query('ROLLBACK').catch(() => {});
+      c.release();
+    }
+    assert.ok((await api.q("SELECT count(*)::int AS n FROM tech_plantilla_history WHERE tech_id = 't-ana'"))[0].n > 0);
   });
 });

@@ -69,7 +69,7 @@ export const PERMS = [
   ['reports_export', 'Exportar informes'],
   ['demo_manage', 'Cargar o borrar datos de demostración'],
   // Etapa 2: plantillas por supervisor, rotación y líneas/cajas (admin por defecto).
-  ['plantillas_edit', 'Administrar plantillas: crear, renombrar, supervisor y archivar'],
+  ['plantillas_edit', 'Administrar plantillas: crear, renombrar y cambiar el supervisor'],
   ['plantilla_rotate', 'Rotar cualquier plantilla (el supervisor siempre rota la suya)'],
   ['lineas_edit', 'Administrar líneas, sectores y cajas compartidas'],
   // Etapa 3: kits (kit base y por especialidad), solo admin por defecto.

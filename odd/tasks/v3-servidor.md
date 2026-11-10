@@ -1092,10 +1092,19 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 - Restore from Administración › Registros eliminados (filter by type, search, who/when/why),
   restoring with its version; conflicts (e.g. an active name or legajo/code now taken) are
   refused with a clear message.
-- Definitive deletion only when the record has no history (no movements, controls,
-  assignments, history ranges, audit references other than its own create/archive), with
-  double confirmation typing the exact name; the server re-checks "no history" in the same
-  transaction under a row lock. The audit entry keeps the name.
+- Definitive deletion only when the record has no history, with double confirmation typing the
+  exact name; the server re-checks "no history" in the same transaction under a row lock. The
+  audit entry keeps the name. History (relaxed in E5.V1, parent decision) = operational
+  references only: movements/transfers, controls/items, assignments, units with movements,
+  plantilla membership ranges (beyond the creation range), plantilla supervisor (any row,
+  including the one written at creation) and rotation history, kit membership of a tool, current
+  references (caja referente, tech especialidad, tool category, línea of a caja) and non-edit
+  lifecycle audit actions on the record itself (deactivate/reactivate, kit delivery, rotation,
+  toggle, password reset). Plain edits (`*_edit`, `*_update`, `*_rename`, `*_reorder`) and
+  audit-only past relations do not block. Audit rows are never deleted.
+- Kit items (E5.V1, parent decision): a tool that belongs to a kit has history (no definitive
+  delete; the FK cascade never runs). Archiving it removes it from its kits, locking those kits
+  (sorted by id) before the tool.
 - Archiving a tech or caja with tools assigned: the archive request must include a resolution
   for every active assignment in the same step (devolución to a pool condition, or retiro);
   the server applies those movements and the archive in ONE transaction, or refuses listing
@@ -1148,7 +1157,7 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       especialidades) and admin users; the "Archivadas" chips and sections now point to
       Registros eliminados; reports keep archived techs with controls in the period (marked);
       classes in `v3.css`, no inline styles. `web/test/records.test.js` (2) written with the code.
-- [ ] E5.T3 E2E: archive and restore each type, archive a tech with tools resolving them in
+- [x] E5.T3 E2E: archive and restore each type, archive a tech with tools resolving them in
       the same step, definitive delete only without history (typed name), void an entrega and
       a devolución (inventory reverted, original kept, void cannot be voided, refused when a
       later movement depends), permissions (non-admin refused), `.txt` export tombstones; CI
@@ -1169,6 +1178,43 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       and 390 without overflow. Adapted: `t3-merge` (category delete is now archive with motivo,
       same 409/428 intent) and `t11-conteo` (línea archive with motivo).
       Evidence (local, sequential): see Stage 5 verification.
+- [x] E5.V1 Independent review corrections (route: delegated writer; trigger: 2+ non-trivial
+      files across server, migration and web). Test-first, each RED observed before the fix:
+      1. `.txt` merge resurrected definitively deleted records: `planImport` now receives the
+         server tombstones (`txt-import.js` -> `plan.js`); a tombstoned record absent on the
+         server is skipped with conflict "eliminado definitivamente". RED: `unit/txt-plan` (t-borrado
+         created) and `records-api` E5.V1 (techs create 1); GREEN after the fix (tech, tool,
+         category, user).
+      2. Plantilla created with a supervisor -> 500 on purge (23503): any
+         `plantilla_supervisor_history` row is history. RED: canPurge true; GREEN: 409 `has_history`.
+      3. `DELETE /api/shifts/:id` now needs `records_delete` (optional `{reason}`, still delegates
+         to the generic archive); `plantillas_edit` label without "archivar" (server and web); the
+         plantilla sheet offers Eliminar with `records_delete` alone. RED: 200 for
+         plantillas_edit-only; GREEN: 403.
+      4. `controlContext` locks the holder FOR SHARE first (and `saveDraft`/`finalize` lock the
+         holder before the control row) and refuses archived holders (409 `archived`). RED (two
+         connections): 201 after the archive committed; GREEN: waits, then 409; draft save and
+         finalize of an archived tech's draft refused.
+      5. Kit items (parent decision): a tool in a kit has history ("Está en un kit."). RED: purge
+         allowed (cascade); GREEN: 409 `has_history`, kit item kept.
+      6. Archiving a tool locks its kits (sorted by id) before the tool; a kit that adds the tool
+         in between gets a 409 `conflict` (retry) instead of an out-of-order lock. RED
+         (deterministic two connections): `40P01` between archive and `deliverKit`; GREEN: the
+         delivery commits and the archive answers `tool_assigned`.
+      7. Migration `013_purge_tech.sql`: `purge_tech_ranges(id)` SECURITY DEFINER (owner) re-checks
+         history (`tech_has_history`) and is the only path; the guard needs the marker, the
+         function owner as effective user and no history. RED: the app role with `panol.purge`
+         deleted t-ana's ranges; GREEN: 23001 (direct and through the function).
+      8. `alert_resolutions`: `resolveAlert` takes the tech/caja FOR SHARE (RED: did not wait;
+         GREEN: waits for the outside lock). `control_items.tool_id`: no gap — an item only exists
+         for an assignment held FOR SHARE by the control, and an assignment is already history of
+         the tool (it can never be purged); no extra tool lock (it would invert movements' tool ->
+         assignment order).
+      Decision (relaxed history): `isHistoryAction` in `domain/records.js` (edits do not count;
+      lifecycle actions do). RED: `unit/records` (missing export) and `records-api` (renamed tech
+      had "Tiene registros en la auditoría."); GREEN: a renamed tech with no operations is purged
+      (its audit rows stay), one with a movement cannot.
+      Commits: see Stage 5 verification (E5.V1).
 
 ## Stage 5 API notes (for the frontend and later stages)
 - Types: techs, cajas, tools, categories, plantillas, lineas, especialidades, kits, users
@@ -1188,9 +1234,10 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   inactive. Legajo and unit codes stay unique including archived rows (re-hiring = restore).
 - `DELETE /api/<type>/:id` {reason, confirmName} + If-Match: 422 `confirm_name`, 409
   `has_history` {history}. History = movements, controls, assignments, units, plantilla ranges
-  beyond the first, rotations or supervisor changes, references, or any audit entry other than
-  its own create/archive/restore (an edit counts). Audit `<x>_archive|_restore|_delete` with the
-  motivo.
+  beyond the first, rotations or any supervisor history row, kit membership (tools), references,
+  or a non-edit lifecycle audit action on the record (E5.V1: an edit no longer counts). Audit
+  `<x>_archive|_restore|_delete` with the motivo. The legacy `DELETE /api/shifts/:id` (optional
+  `{reason}`) needs `records_delete` (E5.V1), not `plantillas_edit`.
 - `GET /api/archived?type&q` -> {records: [{type, id, name, legajo, username, kind, version,
   archivedAt, archivedBy, archivedByName, reason, hasHistory}]} (users only for an admin).
 - `POST /api/movements/:id/void` {reason} (Idempotency-Key, `movements_void`) -> 201 {movement
@@ -1201,7 +1248,9 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 - `.txt` v2: archived techs/tools/users exported with active=false; archived categories left out
   and tombstoned in `data.deleted`, as are definitive deletes (from the audit); voids and voided
   originals are not exported. Import: a newer file record never un-archives (conflict reported),
-  tombstones of archived rows are no-ops, voided/void ids are not re-created (conflict).
+  tombstones of archived rows are no-ops, voided/void ids are not re-created (conflict), and a
+  record definitively deleted on the server (its own tombstone) is not re-created (conflict
+  "eliminado definitivamente", E5.V1).
 
 ## Stage 5 implementation notes
 - Lock order kept: order scope -> row (tools, categories); holder FOR UPDATE -> tools by id for an
@@ -1211,8 +1260,10 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   it); pools checked per (tool, pool) except externo; units must still be where the movement left
   them; a void of a demo movement is demo. DB: CHECK type = anulacion ⇔ voids id, unique voids id,
   an insert trigger refuses a void of a void; the ledger stays append-only.
-- Tech purge deletes its single creation range through `panol.purge = techs:<id>` (guard of
-  migration 012); outside that transaction the history stays append-only.
+- Tech purge deletes its single creation range only through `purge_tech_ranges(id)` (migration
+  013, SECURITY DEFINER of the owner): it re-checks the operational history and the guard accepts
+  the DELETE only inside it (effective user = its owner, marker set, no history). The app role
+  setting `panol.purge` alone no longer deletes anything (E5.V1).
 - Deviations: `.txt` *replace* (initial migration only) and file tombstones of non-archived rows
   keep the stage 1 hard-delete behaviour; archiving does not free legajos or unit codes.
 
@@ -1222,10 +1273,18 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   `web/dist/index.html` with 0 inline script/style/handlers; `PANOL_E2E_BUILD=1 npm run
   test:e2e` 60 passed, 0 failed, 0 skipped (451 s). While writing `t12`, two spec defects were
   fixed in the spec (the Inactivos filter left on; a partial devolución without `qty`).
-- RDD / independent review, CI and the stage 5 PR: pending (parent).
+- Base implementation commits: f9b23fa (server), 432e915 (web), edb4702 (E2E); CI run
+  42596233444 green (E2E 60/60).
+- E5.V1 (2026-11-10, after the interrupted run, delegated verification worker, sequential):
+  `npm test` 186/186 (1.1 s); `npm run test:db` 198/198 in 51 suites (417 s);
+  `PANOL_E2E_BUILD=1 npm run test:e2e` 60/60 (451 s). Parent spot check: migration 013 read
+  (owner-only purge path, history re-check, fixed search_path, no PUBLIC execute).
+  Commit: the E5.V1 work-unit commit on `v3/etapa-5-eliminar`.
+- Stage 5 PR: #5 → `v3/etapa-4-conteo` after CI.
 
 ## Next step
-- E5.T1–E5.T3 (one delegated writer), then independent review, CI and the stage 5 PR.
+- Stage 5: CI green on the E5.V1 commit, then PR #5 (stacked on stage 4). Then stage 6
+  (Novedades).
 - PRs #1–#4 await user review (stacked: #1 → `v3-servidor`, #2 → stage 1, #3 → stage 2). Engram mirror of this document: pending (multiple active
   sessions). PR #1 awaits user review; after it is merged, rebase stage 2 onto `v3-servidor`.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency

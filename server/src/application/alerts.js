@@ -18,6 +18,12 @@ export async function resolveAlert(db, actor, key, input = {}, { now = new Date(
     const d = deriveState(S, { now });
     const a = deriveAlerts({ now, techs: S.techs, cajas: S.cajas, tools: S.tools, units: S.units, assignments: S.assignments, controls: d.ctls, movements: d.movs, alertRes: S.alertRes }).find((x) => x.key === key);
     if (!a) throw new DomainError('La alerta ya no está abierta.', 'not_found', 404);
+    // E5.V1: alert_resolutions no tiene claves foráneas; el poseedor se toma FOR SHARE para que no
+    // se elimine definitivamente entre la revisión de su historial y esta fila.
+    const holder = a.cajaId
+      ? (await c.query('SELECT 1 FROM cajas WHERE id = $1 FOR SHARE', [a.cajaId])).rows[0]
+      : a.techId ? (await c.query('SELECT 1 FROM techs WHERE id = $1 FOR SHARE', [a.techId])).rows[0] : true;
+    if (!holder) throw new DomainError('La alerta ya no está abierta.', 'not_found', 404);
     const row = await repo.insertRow(c, 'alertRes', key, { type: a.type, title: a.title, text: a.text, techId: a.techId || null, cajaId: a.cajaId || null, note, at: now, by: actor.id });
     await record(c, actor, { action: 'alert_resolve', entity: 'alert_resolutions', id: key, version: row.version, event: 'create', detail: `Alerta resuelta: ${a.title}, ${a.text}` });
     return row;

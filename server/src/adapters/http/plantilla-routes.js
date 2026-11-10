@@ -1,5 +1,5 @@
 // /api/plantillas, mover técnicos de plantilla y la lista de turnos de las plantillas.
-// - Alta, edición, supervisor y archivo: plantillas_edit. Rotar: plantilla_rotate o el
+// - Alta, edición y supervisor: plantillas_edit; eliminar (archivar): records_delete. Rotar: plantilla_rotate o el
 //   supervisor de esa plantilla (lo verifica el caso de uso). Mover: shift_change.
 // - Toda edición de una plantilla exige If-Match. Mover acepta Idempotency-Key; mover un
 //   técnico acepta If-Match (versión del técnico) opcional.

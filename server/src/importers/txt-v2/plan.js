@@ -52,7 +52,8 @@ export function deriveUsername(name, taken) {
 }
 
 /**
- * server: { doc, creds: { [userId]: { hasPassword, legacyPinHash } }, ledger: { movements, controls } }
+ * server: { doc, creds: { [userId]: { hasPassword, legacyPinHash } }, ledger: { movements, controls },
+ *           archived?, hidden?, tombstones?: { 'colección/id': fecha } }
  * file:   { data, deleted, savedAt }
  * Devuelve { mode, errors, conflicts, assumptions, changes, counts, token, final }.
  */
@@ -70,6 +71,9 @@ export function planImport(server, file, { mode, actorId, now = new Date() }) {
   // no están en el .txt v2: el archivo no los vuelve a crear.
   const archived = server.archived || {};
   const hidden = server.hidden || new Set();
+  // E5.V1: lo eliminado definitivamente en el servidor (sus marcas de borrado, por la auditoría)
+  // no se vuelve a crear desde un archivo que todavía lo tiene: se informa.
+  const tombstones = server.tombstones || {};
 
   if (mode === 'replace') {
     if (server.ledger.movements > 0 || server.ledger.controls > 0) {
@@ -111,6 +115,10 @@ export function planImport(server, file, { mode, actorId, now = new Date() }) {
         }
         if (cur && archived[`${c}/${id}`]) {
           if (stamp(r) > stamp(cur) && !sameCols(c, cur, r)) conflict(c, id, 'Está eliminado en el servidor: se conserva eliminado. Si corresponde, restauralo desde Administración › Registros eliminados.');
+          continue;
+        }
+        if (!cur && tombstones[`${c}/${id}`]) {
+          conflict(c, id, 'Está eliminado definitivamente en el servidor: no se vuelve a crear.');
           continue;
         }
         if (!cur) {

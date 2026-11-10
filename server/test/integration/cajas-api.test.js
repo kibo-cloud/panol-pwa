@@ -158,7 +158,8 @@ describe('bajas lógicas', () => {
     assert.ok(ar.json().caja.archivedAt);
     const cur = periodOf(new Date());
     assert.equal((await api.call('admin', 'POST', '/api/assignments', { holder: { cajaId: empty.id }, toolId: 'tool-pinza', qty: 1 })).json().message, 'Elegí una caja activa.');
-    assert.equal((await api.call('responsable', 'POST', '/api/controls', { cajaId: empty.id, period: cur })).statusCode, 422);
+    // E5.V1: una caja eliminada no recibe controles (409 archived, con cómo restaurarla).
+    assert.equal((await api.call('responsable', 'POST', '/api/controls', { cajaId: empty.id, period: cur })).json().error, 'archived');
   });
 
   test('el .txt v2 no lleva lo de las cajas y exportar/importar sigue sin cambios', async () => {

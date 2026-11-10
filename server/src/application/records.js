@@ -10,7 +10,7 @@
 import * as repo from '../adapters/pg/catalog-repo.js';
 import { publicUser, deleteUserSessions, countActiveAdmins } from '../adapters/pg/auth-repo.js';
 import { loadKits } from '../adapters/pg/kits-repo.js';
-import { RECORD_TYPES, cleanReason, checkConfirmName, planResolutions, ownActions } from '../domain/records.js';
+import { RECORD_TYPES, cleanReason, checkConfirmName, planResolutions, isHistoryAction } from '../domain/records.js';
 import { DomainError, ConflictError, notFoundError } from '../domain/errors.js';
 import { CATEGORY_SCOPE, toolScope } from '../domain/orden.js';
 import { localDateISO } from '../domain/period.js';
@@ -47,8 +47,9 @@ async function view(c, T, id) {
 }
 
 // ---------------------------------------------------------------- historial
-// Un registro tiene historial si algo del libro, de los controles, de las asignaciones, de los
-// rangos de pertenencia o de la auditoría lo nombra (además de su propia alta y sus bajas).
+// Un registro tiene historial si una referencia operativa lo nombra: el libro, los controles, las
+// asignaciones, los rangos de pertenencia, el historial de supervisores y turnos, los kits, una
+// referencia vigente o una acción de ciclo de vida en su auditoría (E5.V1: una edición no cuenta).
 const HISTORY = {
   techs: [
     ['SELECT 1 FROM movements WHERE tech_id = $1 LIMIT 1', 'Tiene movimientos.'],
@@ -73,12 +74,14 @@ const HISTORY = {
     ['SELECT 1 FROM assignments WHERE tool_id = $1 LIMIT 1', 'Tuvo asignaciones.'],
     ['SELECT 1 FROM control_items WHERE tool_id = $1 LIMIT 1', 'Aparece en controles.'],
     ['SELECT 1 FROM units WHERE tool_id = $1 LIMIT 1', 'Tiene unidades.'],
+    ['SELECT 1 FROM kit_items WHERE tool_id = $1 LIMIT 1', 'Está en un kit.'],
   ],
   categories: [['SELECT 1 FROM tools WHERE category_id = $1 LIMIT 1', 'Tiene o tuvo herramientas.']],
   plantillas: [
     ['SELECT 1 FROM tech_plantilla_history WHERE plantilla_id = $1 LIMIT 1', 'Tiene o tuvo técnicos.'],
     ['SELECT 1 FROM plantilla_rotations WHERE plantilla_id = $1 LIMIT 1', 'Tiene cambios de turno.'],
-    ['SELECT 1 WHERE (SELECT count(*) FROM plantilla_supervisor_history WHERE plantilla_id = $1) > 1 OR EXISTS (SELECT 1 FROM plantilla_supervisor_history WHERE plantilla_id = $1 AND from_user_id IS NOT NULL)', 'Tiene cambios de supervisor.'],
+    // Cualquier fila (también la del alta con supervisor): el historial es de solo agregar.
+    ['SELECT 1 FROM plantilla_supervisor_history WHERE plantilla_id = $1 LIMIT 1', 'Tiene historial de supervisores.'],
     ['SELECT 1 FROM controls WHERE plantilla_id_snapshot = $1 OR shift_id = $1 LIMIT 1', 'Tiene controles.'],
   ],
   lineas: [
@@ -101,7 +104,8 @@ const HISTORY = {
 export async function historyOf(c, T, id) {
   const out = [];
   for (const [sql, msg] of HISTORY[T.type]) if (await exists(c, sql, [id])) out.push(msg);
-  if (await exists(c, 'SELECT 1 FROM audit_log WHERE entity = $1 AND entity_id = $2 AND action <> ALL($3::text[]) LIMIT 1', [T.table, id, ownActions(T.type)])) out.push('Tiene registros en la auditoría.');
+  const actions = (await c.query('SELECT DISTINCT action FROM audit_log WHERE entity = $1 AND entity_id = $2', [T.table, id])).rows.map((r) => r.action);
+  if (actions.some((a) => isHistoryAction(T.type, a))) out.push('Tiene acciones registradas en la auditoría.');
   if (T.type === 'kits' && (await exists(c, 'SELECT 1 FROM kits WHERE id = $1 AND especialidad_id IS NULL', [id]))) out.push('Es el kit base.');
   return out;
 }
@@ -201,6 +205,12 @@ const bumpAll = async (c, scopes) => {
   for (const s of scopes) await bumpScope(c, s.scope);
 };
 
+async function lockKitsOf(c, toolId) {
+  const ids = (await c.query('SELECT DISTINCT kit_id FROM kit_items WHERE tool_id = $1', [toolId])).rows.map((r) => r.kit_id);
+  if (!ids.length) return [];
+  return (await c.query('SELECT id FROM kits WHERE id = ANY($1) ORDER BY id FOR UPDATE', [ids])).rows.map((r) => r.id);
+}
+
 function checkVersionOf(row, version) {
   if (!row) throw notFoundError();
   if (row.version !== version) throw new ConflictError(row);
@@ -212,6 +222,9 @@ export async function archiveRecord(db, actor, type, id, input, version) {
   return withTransaction(db, async (c) => {
     if (T.type === 'users') await lockAdmins(c);
     const scopes = await lockOrderScope(c, T, id);
+    // Los kits de una herramienta se bloquean antes que ella (filas por id -> herramientas), como
+    // en entregar y editar un kit: si no, archivar y entregar el kit se bloquean mutuamente.
+    const kitIds = T.type === 'tools' ? await lockKitsOf(c, id) : [];
     const row = await lockRow(c, T, id);
     checkVersionOf(row, version);
     checkScope(T, row, scopes);
@@ -237,6 +250,9 @@ export async function archiveRecord(db, actor, type, id, input, version) {
       // Sus unidades (todas fuera de manos de un poseedor) quedan archivadas con ella, y deja los kits.
       await c.query('UPDATE units SET archived_at = now(), archived_by = $2, archive_reason = $3 WHERE tool_id = $1 AND archived_at IS NULL', [id, actor.id, reason]);
       const kits = (await c.query('DELETE FROM kit_items WHERE tool_id = $1 RETURNING kit_id', [id])).rows.map((r) => r.kit_id);
+      // Un kit que la sumó después de leer la lista no está bloqueado: bloquearlo ahora rompería el
+      // orden. Se pide repetir (la transacción se deshace).
+      if (kits.some((k) => !kitIds.includes(k))) throw rule('Un kit cambió mientras se eliminaba la herramienta. Probá de nuevo.', 'conflict');
       for (const k of [...new Set(kits)].sort()) await c.query('UPDATE kits SET updated_at = now() WHERE id = $1', [k]);
       if (kits.length) detail = ` Se quitó de ${plural(kits.length, 'kit', 'kits')}.`;
     }
@@ -319,11 +335,9 @@ export async function purgeRecord(db, actor, type, id, input, version) {
       throw err;
     }
     if (!row.archived_at || T.type === 'users' || T.type === 'kits') throwBlockers(await blockersOf(c, T, row, actor));
-    if (T.type === 'techs') {
-      await c.query("SELECT set_config('panol.purge', $1, true)", [`techs:${id}`]);
-      await c.query('DELETE FROM tech_plantilla_history WHERE tech_id = $1', [id]);
-      await c.query("SELECT set_config('panol.purge', '', true)");
-    }
+    // El rango del alta se borra solo por la función del dueño (migración 013), que vuelve a
+    // revisar que el técnico no tenga historial.
+    if (T.type === 'techs') await c.query('SELECT purge_tech_ranges($1)', [id]);
     await c.query(`DELETE FROM ${T.table} WHERE id = $1`, [id]);
     await bumpAll(c, scopes);
     await record(c, actor, { action: `${T.audit}_delete`, entity: T.table, id, event: 'delete', detail: `Eliminación definitiva de ${T.label} ${row.name}. Motivo: ${reason}` });

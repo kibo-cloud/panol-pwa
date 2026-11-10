@@ -19,11 +19,17 @@ export const RECORD_TYPES = {
 };
 export const RECORD_TYPE_KEYS = Object.keys(RECORD_TYPES);
 
-// Acciones de auditoría que no cuentan como historial: el alta, las bajas y las restauraciones.
+// Acciones de auditoría propias del registro: el alta, las bajas y las restauraciones.
 export const ownActions = (type) => {
   const a = RECORD_TYPES[type].audit;
   return [`${a}_create`, `${a}_archive`, `${a}_restore`];
 };
+
+// E5.V1: solo las referencias operativas impiden la eliminación definitiva. En la auditoría del
+// propio registro, una edición (renombrar, cambiar un campo, reordenar) no cuenta; una acción de
+// ciclo de vida (desactivar, entregar un kit, rotar) sí. La auditoría nunca se borra.
+const EDIT_ACTION = /_(edit|update|rename|reorder)$/;
+export const isHistoryAction = (type, action) => !ownActions(type).includes(action) && !EDIT_ACTION.test(action);
 
 export function cleanReason(v) {
   const r = String(v ?? '').trim();

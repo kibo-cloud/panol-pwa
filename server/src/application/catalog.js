@@ -126,8 +126,8 @@ const asShift = (p) => ({ id: p.id, name: p.name, order: p.order, version: p.ver
 
 export const createShift = async (db, actor, input) => asShift(await plantillas.createPlantilla(db, actor, { name: cleanName(input.name) }));
 export const updateShift = async (db, actor, id, input, version) => asShift(await plantillas.updatePlantilla(db, actor, id, input, version));
-export async function deleteShift(db, actor, id, version) {
-  await plantillas.archivePlantilla(db, actor, id, version, 'Turno eliminado');
+export async function deleteShift(db, actor, id, version, reason = 'Turno eliminado') {
+  await plantillas.archivePlantilla(db, actor, id, version, reason);
   return { ok: true };
 }
 

@@ -29,7 +29,7 @@ function readFile(text) {
 
 async function plan(q, file, mode, actor, now) {
   const s = await loadTxtState(q);
-  const server = { doc: canonical(s.data), creds: s.creds, ledger: s.ledger, archived: s.archived, hidden: s.hidden };
+  const server = { doc: canonical(s.data), creds: s.creds, ledger: s.ledger, archived: s.archived, hidden: s.hidden, tombstones: s.tombstones };
   return planImport(server, file, { mode, actorId: actor.id, now });
 }
 
