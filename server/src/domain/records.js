@@ -16,6 +16,8 @@ export const RECORD_TYPES = {
   especialidades: { key: 'especialidad', audit: 'especialidad', label: 'especialidad', the: 'la especialidad' },
   kits: { key: 'kit', audit: 'kit', label: 'kit', the: 'el kit' },
   users: { key: 'user', audit: 'user', label: 'usuario', the: 'el usuario' },
+  // Etapa 6: una novedad no tiene historial operativo; su nombre es la etiqueta corta (Novedad N).
+  novedades: { key: 'novedad', audit: 'novedad', label: 'novedad', the: 'la novedad' },
 };
 export const RECORD_TYPE_KEYS = Object.keys(RECORD_TYPES);
 

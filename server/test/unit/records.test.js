@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { cleanReason, checkConfirmName, planResolutions, ownActions, isHistoryAction, RECORD_TYPE_KEYS } from '../../src/domain/records.js';
 
 test('tipos que se eliminan con el mismo modelo', () => {
-  assert.deepEqual(RECORD_TYPE_KEYS, ['techs', 'cajas', 'tools', 'categories', 'plantillas', 'lineas', 'especialidades', 'kits', 'users']);
+  assert.deepEqual(RECORD_TYPE_KEYS, ['techs', 'cajas', 'tools', 'categories', 'plantillas', 'lineas', 'especialidades', 'kits', 'users', 'novedades']);
+  assert.deepEqual(ownActions('novedades'), ['novedad_create', 'novedad_archive', 'novedad_restore']);
+  assert.equal(isHistoryAction('novedades', 'novedad_edit'), false);
   assert.deepEqual(ownActions('techs'), ['tech_create', 'tech_archive', 'tech_restore']);
 });
 

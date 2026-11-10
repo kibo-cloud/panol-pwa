@@ -110,10 +110,11 @@ export async function clearDemo(db, actor) {
     const demoTools = "SELECT id FROM tools WHERE demo";
     const realLedger = (await c.query(
       `SELECT (SELECT count(*) FROM movements WHERE NOT demo AND (tech_id IN (${demoTechs}) OR tool_id IN (${demoTools})))
-            + (SELECT count(*) FROM controls WHERE NOT demo AND tech_id IN (${demoTechs})) AS n`,
+            + (SELECT count(*) FROM controls WHERE NOT demo AND tech_id IN (${demoTechs}))
+            + (SELECT count(*) FROM novedades WHERE tech_id IN (${demoTechs}) OR movement_id IN (SELECT id FROM movements WHERE demo)) AS n`,
     )).rows[0].n;
     if (realLedger > 0) {
-      throw new DomainError('Hay movimientos o controles reales hechos sobre datos de demostración: no se pueden borrar sin perder historial.', 'demo_in_use', 409);
+      throw new DomainError('Hay movimientos, controles o novedades reales hechos sobre datos de demostración: no se pueden borrar sin perder historial.', 'demo_in_use', 409);
     }
     const del = async (sql) => (await c.query(sql)).rowCount;
     const n = {};

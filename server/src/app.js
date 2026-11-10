@@ -15,6 +15,7 @@ import { registerPlantillaRoutes } from './adapters/http/plantilla-routes.js';
 import { registerLineasRoutes } from './adapters/http/lineas-routes.js';
 import { registerKitsRoutes } from './adapters/http/kits-routes.js';
 import { registerRecordsRoutes } from './adapters/http/records-routes.js';
+import { registerNovedadesRoutes } from './adapters/http/novedades-routes.js';
 import { registerSecurityHeaders, registerWeb, spaFallback } from './adapters/http/web-routes.js';
 
 // extend(app): permite a las pruebas registrar rutas antes de `ready()`.
@@ -67,6 +68,7 @@ export async function buildApp({ config, pool, logger, extend, events } = {}) {
   registerLineasRoutes(app);
   registerKitsRoutes(app);
   registerRecordsRoutes(app);
+  registerNovedadesRoutes(app);
   registerReadRoutes(app);
   registerOperationRoutes(app);
   registerEventRoutes(app, events);

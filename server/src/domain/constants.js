@@ -77,6 +77,10 @@ export const PERMS = [
   // Etapa 5: eliminar (baja lógica), restaurar y eliminación definitiva; anular movimientos.
   ['records_delete', 'Eliminar y restaurar registros (y eliminarlos definitivamente si no tienen historial)'],
   ['movements_void', 'Anular movimientos cargados por error'],
+  // Etapa 6: novedades (ver y cargar: quien opera el pañol; editar las de otros: admin).
+  ['novedades_view', 'Ver novedades'],
+  ['novedades_create', 'Cargar novedades (y editar las propias)'],
+  ['novedades_edit', 'Editar cualquier novedad'],
 ];
 export const PERM_KEYS = PERMS.map(([k]) => k);
 

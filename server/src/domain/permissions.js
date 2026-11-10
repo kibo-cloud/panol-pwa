@@ -2,7 +2,7 @@
 // (tabla role_permissions) y, si no hay, el valor por defecto.
 import { PERM_KEYS } from './constants.js';
 
-const responsable = { controls_do: true, movements_do: true, alerts_resolve: true, reports_export: true };
+const responsable = { controls_do: true, movements_do: true, alerts_resolve: true, reports_export: true, novedades_view: true, novedades_create: true };
 
 export const DEFAULT_PERMS = Object.freeze({
   responsable: Object.freeze({ ...responsable }),
