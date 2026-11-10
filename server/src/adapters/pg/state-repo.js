@@ -12,7 +12,7 @@ const byId = (list) => Object.fromEntries(list.map(({ id, ...x }) => [id, x]));
 const MOVEMENT = (r) => ({
   id: r.id, type: r.type, techId: r.tech_id, cajaId: r.caja_id, toolId: r.tool_id, qty: r.qty, unitId: r.unit_id, newAssignmentId: r.new_assignment_id,
   oldAssignmentId: r.old_assignment_id, oldUnitId: r.old_unit_id, newUnitId: r.new_unit_id, oldState: r.old_state, returned: r.returned,
-  oldDest: r.old_dest, condition: r.condition, linkedControlId: r.linked_control_id, resolvesMovementId: r.resolves_movement_id,
+  oldDest: r.old_dest, condition: r.condition, linkedControlId: r.linked_control_id, resolvesMovementId: r.resolves_movement_id, voidsMovementId: r.voids_movement_id,
   reason: r.reason || '', notes: r.notes || '', at: iso(r.at), by: r.created_by, demo: r.demo, transfers: [],
 });
 
@@ -62,7 +62,8 @@ export async function readState(q) {
   const controls = await loadControls(q);
   const movements = await loadMovementsFull(q);
   const alertRes = await listRows(q, 'alertRes', 'ORDER BY at');
-  const users = (await q.query('SELECT id, name, role, active FROM users ORDER BY id')).rows;
+  // Los usuarios eliminados quedan para resolver nombres en el historial (con `archived`).
+  const users = (await q.query('SELECT id, name, role, active, archived_at IS NOT NULL AS archived FROM users ORDER BY id')).rows;
   return {
     shifts,
     techs: byId(techs),

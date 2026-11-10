@@ -47,7 +47,6 @@ export const api = {
   // plantillas (etapa 2)
   createPlantilla: (body) => http.post('/api/plantillas', body),
   updatePlantilla: (id, body, version) => http.patch(`/api/plantillas/${enc(id)}`, body, { version }),
-  archivePlantilla: (id, version) => http.post(`/api/plantillas/${enc(id)}/archive`, undefined, { version }),
   rotatePlantilla: (id, body, version) => http.post(`/api/plantillas/${enc(id)}/rotate`, body, { version }),
   setSupervisor: (id, body, version) => http.post(`/api/plantillas/${enc(id)}/supervisor`, body, { version }),
   moveTech: (id, body, version, o) => http.post(`/api/techs/${enc(id)}/move`, body, idem({ ...o, version })),
@@ -58,25 +57,20 @@ export const api = {
   // líneas, sectores y cajas (etapa 2)
   createLinea: (body) => http.post('/api/lineas', body),
   updateLinea: (id, body, version) => http.patch(`/api/lineas/${enc(id)}`, body, { version }),
-  archiveLinea: (id, version) => http.post(`/api/lineas/${enc(id)}/archive`, undefined, { version }),
   createCaja: (body) => http.post('/api/cajas', body),
   updateCaja: (id, body, version) => http.patch(`/api/cajas/${enc(id)}`, body, { version }),
-  archiveCaja: (id, version) => http.post(`/api/cajas/${enc(id)}/archive`, undefined, { version }),
   assign: (body, o) => http.post('/api/assignments', body, idem(o)),
 
   createCategory: (body) => http.post('/api/categories', body),
   updateCategory: (id, body, version) => http.patch(`/api/categories/${enc(id)}`, body, { version }),
-  deleteCategory: (id, version) => http.del(`/api/categories/${enc(id)}`, { version }),
   createTool: (body) => http.post('/api/tools', body),
   // etapa 3: orden, especialidades y kits
   reorderCategories: (ids, version) => http.put('/api/categories/order', { ids }, { version }),
   reorderTools: (categoryId, ids, version) => http.put('/api/tools/order', { categoryId, ids }, { version }),
   createEspecialidad: (body) => http.post('/api/especialidades', body),
   updateEspecialidad: (id, body, version) => http.patch(`/api/especialidades/${enc(id)}`, body, { version }),
-  archiveEspecialidad: (id, version) => http.post(`/api/especialidades/${enc(id)}/archive`, undefined, { version }),
   createKit: (body) => http.post('/api/kits', body),
   saveKit: (id, body, version) => http.put(`/api/kits/${enc(id)}`, body, { version }),
-  deleteKit: (id, version) => http.del(`/api/kits/${enc(id)}`, { version }),
   deliverKit: (id, body, version, o) => http.post(`/api/kits/${enc(id)}/deliver`, body, idem({ ...o, version })),
   updateTool: (id, body, version) => http.patch(`/api/tools/${enc(id)}`, body, { version }),
 
@@ -89,6 +83,16 @@ export const api = {
   resolveAlert: (key, note) => http.post(`/api/alerts/${enc(key)}/resolution`, { note }),
   loadDemo: () => http.post('/api/demo'),
   clearDemo: () => http.del('/api/demo'),
+
+  // etapa 5: eliminar (baja lógica), restaurar, eliminación definitiva y anular movimientos.
+  // type: techs, cajas, tools, categories, plantillas, lineas, especialidades, kits, users.
+  deleteCheck: (type, id) => http.get(`/api/${enc(type)}/${enc(id)}/delete-check`),
+  archiveRecord: (type, id, body, version) => http.post(`/api/${enc(type)}/${enc(id)}/archive`, body, { version }),
+  restoreRecord: (type, id, body, version) => http.post(`/api/${enc(type)}/${enc(id)}/restore`, body, { version }),
+  purgeRecord: (type, id, body, version) => http.request('DELETE', `/api/${enc(type)}/${enc(id)}`, { body, version }),
+  archived: (q = {}) => http.get(`/api/archived?${Object.entries(q).filter(([, v]) => v).map(([k, v]) => `${enc(k)}=${enc(v)}`).join('&')}`),
+  voidCheck: (id) => http.get(`/api/movements/${enc(id)}/void-check`),
+  voidMovement: (id, body, o) => http.post(`/api/movements/${enc(id)}/void`, body, idem(o)),
 
   // archivo .txt
   importTxt: (text, mode, token) => http.request('POST', `/api/import/txt?mode=${enc(mode)}${token ? '&token=' + enc(token) : '&dryRun=1'}`, { rawText: text }),

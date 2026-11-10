@@ -27,9 +27,11 @@ function cleanUsername(u) {
   if (!USERNAME_RE.test(s)) throw new DomainError('El usuario tiene que tener entre 3 y 60 caracteres: letras minúsculas, números, punto, guion o guion bajo.', 'invalid_username', 400);
   return s;
 }
-async function mustFind(q, id) {
+// Un usuario eliminado (etapa 5) no se edita: se restaura desde Registros eliminados.
+async function mustFind(q, id, { allowArchived = false } = {}) {
   const u = await repo.findUserById(q, id);
   if (!u) throw new DomainError('No se encontró el usuario.', 'not_found', 404);
+  if (u.archived_at && !allowArchived) throw new DomainError('El usuario está eliminado. Restauralo desde Administración › Registros eliminados.', 'archived', 409);
   return u;
 }
 // Un solo cambio de perfil, baja o restablecimiento de usuarios a la vez: así el chequeo de

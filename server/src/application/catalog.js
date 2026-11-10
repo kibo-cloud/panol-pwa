@@ -37,10 +37,13 @@ async function checkEspecialidad(c, id) {
   if (!e) throw rule('Elegí una especialidad válida.', 'invalid_especialidad');
   return e.id;
 }
+// El legajo sigue siendo único también entre los técnicos eliminados (etapa 5): volver a dar de
+// alta a la misma persona es restaurarla desde Registros eliminados.
 async function assertLegajoFree(c, legajo, exceptId) {
-  const { rows } = await c.query('SELECT id, name FROM techs WHERE lower(btrim(legajo)) = lower($1) AND id IS DISTINCT FROM $2 LIMIT 1', [legajo, exceptId]);
-  if (rows[0]) throw legajoTaken(legajo, rows[0].name);
+  const { rows } = await c.query('SELECT id, name, archived_at FROM techs WHERE lower(btrim(legajo)) = lower($1) AND id IS DISTINCT FROM $2 LIMIT 1', [legajo, exceptId]);
+  if (rows[0]) throw legajoTaken(legajo, rows[0].archived_at ? `${rows[0].name} (eliminado; restauralo desde Administración › Registros eliminados)` : rows[0].name);
 }
+const ARCHIVED_MSG = (what) => `${what} está eliminado. Restauralo desde Administración › Registros eliminados.`;
 const legajoUnique = (legajo) => (err) => {
   if (err && err.code === '23505') throw legajoTaken(legajo, 'otro técnico');
   throw err;
@@ -70,6 +73,7 @@ export async function createTech(db, actor, input) {
 export async function updateTech(db, actor, id, input, version) {
   return withTransaction(db, async (c) => {
     const cur = checkVersion(await repo.getRow(c, 'techs', id, { lock: true }), version, 'No se encontró el técnico.');
+    if (cur.archivedAt) throw rule(ARCHIVED_MSG('El técnico'), 'archived', 409);
     const set = {};
     if (input.name !== undefined || input.legajo !== undefined) {
       const v = cleanTech({ name: input.name ?? cur.name, legajo: input.legajo ?? cur.legajo });
@@ -110,8 +114,10 @@ export async function changeShift(db, actor, techId, input, version) {
 }
 
 // ---------------------------------------------------------------- turnos (= plantillas)
+// Nombre único entre los registros activos (los eliminados pueden repetirlo; al restaurarlos se
+// controla de nuevo).
 async function assertUniqueName(c, name, table, exceptId, message) {
-  const { rows } = await c.query(`SELECT 1 FROM ${table} WHERE lower(name) = lower($1) AND id IS DISTINCT FROM $2 LIMIT 1`, [name, exceptId]);
+  const { rows } = await c.query(`SELECT 1 FROM ${table} WHERE lower(name) = lower($1) AND archived_at IS NULL AND id IS DISTINCT FROM $2 LIMIT 1`, [name, exceptId]);
   if (rows[0]) throw rule(message, 'duplicate', 409);
 }
 
@@ -120,8 +126,8 @@ const asShift = (p) => ({ id: p.id, name: p.name, order: p.order, version: p.ver
 
 export const createShift = async (db, actor, input) => asShift(await plantillas.createPlantilla(db, actor, { name: cleanName(input.name) }));
 export const updateShift = async (db, actor, id, input, version) => asShift(await plantillas.updatePlantilla(db, actor, id, input, version));
-export async function deleteShift(db, actor, id, version) {
-  await plantillas.archivePlantilla(db, actor, id, version);
+export async function deleteShift(db, actor, id, version, reason = 'Turno eliminado') {
+  await plantillas.archivePlantilla(db, actor, id, version, reason);
   return { ok: true };
 }
 
@@ -144,6 +150,7 @@ export async function updateCategory(db, actor, id, input, version) {
   const name = cleanName(input.name);
   return withTransaction(db, async (c) => {
     const cur = checkVersion(await repo.getRow(c, 'categories', id, { lock: true }), version, 'No se encontró la categoría.');
+    if (cur.archivedAt) throw rule('La categoría está eliminada. Restaurala desde Administración › Registros eliminados.', 'archived', 409);
     if (name === cur.name) return cur;
     await repo.lockName(c, 'categories.name');
     await assertUniqueName(c, name, 'categories', id, 'Ya existe esa categoría.');
@@ -153,22 +160,13 @@ export async function updateCategory(db, actor, id, input, version) {
   });
 }
 
-export async function deleteCategory(db, actor, id, version) {
-  return withTransaction(db, async (c) => {
-    await lockScope(c, CATEGORY_SCOPE);
-    const cur = checkVersion(await repo.getRow(c, 'categories', id, { lock: true }), version, 'No se encontró la categoría.');
-    if ((await c.query('SELECT 1 FROM tools WHERE category_id = $1 LIMIT 1', [id])).rows[0]) throw rule('La categoría tiene herramientas.', 'category_has_tools', 409);
-    await repo.deleteRow(c, 'categories', id);
-    await bumpScope(c, CATEGORY_SCOPE);
-    await record(c, actor, { action: 'category_delete', entity: 'categories', id, event: 'delete', detail: `Baja de categoría ${cur.name}` });
-    return { ok: true };
-  });
-}
+// Eliminar una categoría: records.js (etapa 5: baja lógica, o definitiva sin historial).
 
 // ---------------------------------------------------------------- herramientas
 async function checkCategory(c, categoryId) {
   if (!categoryId) return null;
-  if (!(await repo.getRow(c, 'categories', categoryId))) throw rule('Elegí una categoría válida.', 'invalid_category');
+  const cat = (await c.query('SELECT id, archived_at FROM categories WHERE id = $1 FOR SHARE', [categoryId])).rows[0];
+  if (!cat || cat.archived_at) throw rule('Elegí una categoría válida.', 'invalid_category');
   return categoryId;
 }
 
@@ -220,6 +218,7 @@ export async function updateTool(db, actor, id, input, version) {
       await lockScopes(c, scopes);
     }
     const cur = checkVersion(await repo.getRow(c, 'tools', id, { lock: true }), version, 'No se encontró la herramienta.');
+    if (cur.archivedAt) throw rule('La herramienta está eliminada. Restaurala desde Administración › Registros eliminados.', 'archived', 409);
     if (from !== undefined && (cur.categoryId ?? null) !== from) throw new ConflictError(cur);
     const set = {};
     if (input.name !== undefined) {

@@ -115,15 +115,18 @@ describe('turnos, categorías, herramientas y unidades', () => {
     assert.ok(st.plantillas[s.id].archivedAt);
   });
 
-  test('categorías: única, no se borra con herramientas', async () => {
+  // Etapa 5: eliminar = baja lógica con motivo; definitiva solo sin historial y con el nombre.
+  test('categorías: única, no se elimina con herramientas', async () => {
     const r = await api.call('admin', 'POST', '/api/categories', { name: 'Neumáticas' });
     assert.equal(r.statusCode, 201);
     assert.equal((await api.call('admin', 'POST', '/api/categories', { name: 'neumáticas' })).json().message, 'Ya existe esa categoría.');
     const [c] = await api.q("SELECT version FROM categories WHERE id = 'cat-manuales'");
-    const busy = await api.call('admin', 'DELETE', '/api/categories/cat-manuales', undefined, ifMatch(c.version));
-    assert.equal(busy.json().message, 'La categoría tiene herramientas.');
+    const busy = await api.call('admin', 'POST', '/api/categories/cat-manuales/archive', { reason: 'Prueba' }, ifMatch(c.version));
+    assert.equal(busy.statusCode, 409);
+    assert.equal(busy.json().error, 'category_has_tools');
+    assert.equal((await api.call('admin', 'DELETE', '/api/categories/cat-manuales', { reason: 'x', confirmName: 'Herramientas manuales' }, ifMatch(c.version))).json().error, 'has_history');
     const g = r.json().category;
-    assert.equal((await api.call('admin', 'DELETE', `/api/categories/${g.id}`, undefined, ifMatch(g.version))).statusCode, 200);
+    assert.equal((await api.call('admin', 'DELETE', `/api/categories/${g.id}`, { reason: 'Prueba', confirmName: 'Neumáticas' }, ifMatch(g.version))).statusCode, 200);
   });
 
   test('herramientas: alta con stock o códigos iniciales (ingreso en el libro), seguimiento fijo con movimientos', async () => {

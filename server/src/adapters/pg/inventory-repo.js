@@ -53,7 +53,7 @@ export async function loadMovements(q) {
   const { rows } = await q.query('SELECT * FROM movements ORDER BY at');
   return rows.map((r) => ({
     id: r.id, type: r.type, techId: r.tech_id, cajaId: r.caja_id, toolId: r.tool_id, qty: r.qty, unitId: r.unit_id, oldUnitId: r.old_unit_id,
-    returned: r.returned, resolvesMovementId: r.resolves_movement_id, at: iso(r.at),
+    returned: r.returned, resolvesMovementId: r.resolves_movement_id, voidsMovementId: r.voids_movement_id, at: iso(r.at),
   }));
 }
 
@@ -98,11 +98,11 @@ export async function applyMovementPlan(client, plan, { actorId = null, auditId,
   const m = plan.movement;
   await client.query(
     `INSERT INTO movements (id, type, tech_id, tool_id, qty, unit_id, new_assignment_id, old_assignment_id, old_unit_id, new_unit_id,
-       old_state, returned, old_dest, condition, linked_control_id, resolves_movement_id, reason, notes, at, created_by, demo, caja_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
+       old_state, returned, old_dest, condition, linked_control_id, resolves_movement_id, reason, notes, at, created_by, demo, caja_id, voids_movement_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
     [m.id, m.type, m.techId ?? null, m.toolId ?? null, m.qty ?? null, m.unitId ?? null, m.newAssignmentId ?? null, m.oldAssignmentId ?? null,
       m.oldUnitId ?? null, m.newUnitId ?? null, m.oldState ?? null, m.returned ?? null, m.oldDest ?? null, m.condition ?? null,
-      m.linkedControlId ?? null, m.resolvesMovementId ?? null, m.reason || null, m.notes || null, m.at, actorId, demo, m.cajaId ?? null],
+      m.linkedControlId ?? null, m.resolvesMovementId ?? null, m.reason || null, m.notes || null, m.at, actorId, demo, m.cajaId ?? null, m.voidsMovementId ?? null],
   );
   // Unidades nuevas antes de las transferencias y asignaciones que las nombran.
   for (const u of plan.newUnits) {

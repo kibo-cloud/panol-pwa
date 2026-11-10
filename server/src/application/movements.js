@@ -25,13 +25,23 @@ async function toolOf(c, m) {
   return m.toolId ?? null;
 }
 
+// Poseedor del movimiento FOR SHARE antes que la herramienta (orden global: poseedor -> filas ->
+// herramientas): eliminar un técnico o una caja lo bloquea FOR UPDATE, así una entrega en curso
+// espera y después ve el poseedor dado de baja.
+async function lockHolder(c, m) {
+  if (m.cajaId) await c.query('SELECT 1 FROM cajas WHERE id = $1 FOR SHARE', [m.cajaId]);
+  else if (m.techId) await c.query('SELECT 1 FROM techs WHERE id = $1 FOR SHARE', [m.techId]);
+}
+
 // Aplica un movimiento dentro de la transacción `c`. Devuelve el plan guardado.
-export async function applyMovement(c, actor, input, { demo = false } = {}) {
+// inactiveHolder: devolución o retiro de un poseedor ya desactivado (al eliminarlo).
+export async function applyMovement(c, actor, input, { demo = false, inactiveHolder = false } = {}) {
+  await lockHolder(c, input);
   const toolId = await toolOf(c, input);
   if (toolId) await c.query('SELECT id FROM tools WHERE id = $1 FOR UPDATE', [toolId]);
   if (input.type === 'ingreso') await lockName(c, 'units.code');
   const ctx = await loadInventoryContext(c);
-  const plan = planMovement(ctx, input, { at: new Date().toISOString(), newId });
+  const plan = planMovement(ctx, input, { at: new Date().toISOString(), newId, inactiveHolder });
   await applyMovementPlan(c, plan, { actorId: actor.id, auditId: newId('l'), ip: actor.ip, demo }).catch(onUnique('Ya existe un registro igual. Recargá para ver los cambios.', 'duplicate'));
   await notifyChange(c, { entity: 'movements', id: plan.movement.id, action: 'create' });
   return plan;

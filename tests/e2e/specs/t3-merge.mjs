@@ -25,13 +25,16 @@ export const tests = [
       const b = st.categories[id];
       eq(b.name, 'Dos', 'renamed');
       assert(b.version > a.version && b.updatedAt > a.updatedAt, 'version/updatedAt advanced: ' + JSON.stringify([a, b]));
-      const stale = await api(page, 'DELETE', '/api/categories/' + id, undefined, { version: a.version });
+      // Etapa 5: eliminar = baja lógica con motivo (POST .../archive); mismo control de versión.
+      const stale = await api(page, 'POST', '/api/categories/' + id + '/archive', { reason: 'Prueba' }, { version: a.version });
       eq(stale.status, 409, 'stale delete refused');
       eq(stale.body.current.name, 'Dos', '409 carries the current record');
-      eq((await api(page, 'DELETE', '/api/categories/' + id)).status, 428, 'delete without If-Match refused');
-      await page.click(`[data-act="catDel"][data-c="${id}"]`); await page.modalBtn('Eliminar');
-      await page.waitFor(`!document.querySelector('[data-act="catDel"][data-c="${id}"]')`, 5000, 'deleted');
-      eq((await state(page)).categories[id], undefined, 'deleted with the current version');
+      eq((await api(page, 'POST', '/api/categories/' + id + '/archive', { reason: 'Prueba' })).status, 428, 'delete without If-Match refused');
+      await page.click(`[data-act="recDelete"][data-type="categories"][data-id="${id}"]`);
+      await page.waitFor("!!document.getElementById('rec-reason')", 10000, 'delete sheet');
+      await page.type('#rec-reason', 'Prueba'); await page.modalBtn('Eliminar');
+      await page.waitFor(`!document.querySelector('[data-act="recDelete"][data-id="${id}"]')`, 5000, 'deleted');
+      eq((await state(page)).categories[id].archived, true, 'deleted (archived) with the current version');
     }
   },
   {

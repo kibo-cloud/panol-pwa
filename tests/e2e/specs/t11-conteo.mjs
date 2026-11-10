@@ -242,7 +242,7 @@ export const tests = [
       const lg = await srv.app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'admin', password: PASSWORD } });
       eq(lg.statusCode, 200, 'second session login');
       const ver = (await srv.db.query('SELECT version FROM lineas WHERE id = $1', [s.linea])).rows[0].version;
-      const ar = await srv.app.inject({ method: 'POST', url: `/api/lineas/${s.linea}/archive`, headers: { cookie: [].concat(lg.headers['set-cookie'])[0].split(';')[0], 'x-csrf-token': lg.json().csrfToken, 'if-match': `"${ver}"` } });
+      const ar = await srv.app.inject({ method: 'POST', url: `/api/lineas/${s.linea}/archive`, payload: { reason: 'Línea cerrada' }, headers: { cookie: [].concat(lg.headers['set-cookie'])[0].split(';')[0], 'x-csrf-token': lg.json().csrfToken, 'if-match': `"${ver}"` } });
       eq(ar.statusCode, 200, 'línea archived: ' + ar.body);
       srv.offline = false;
       await page.waitFor("window.__toasts.some((t)=>t.includes('Se envió el borrador guardado sin conexión'))", 25000, 'draft resent');

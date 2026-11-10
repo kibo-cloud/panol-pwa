@@ -21,8 +21,10 @@ export async function bumpScope(c, scope) {
   return (await c.query('UPDATE order_versions SET version = version + 1 WHERE scope = $1 RETURNING version', [scope])).rows[0].version;
 }
 
-export const categoryIds = async (c) => (await c.query('SELECT id FROM categories ORDER BY sort_order, name, id')).rows.map((r) => r.id);
-export const toolIdsOf = async (c, categoryId) => (await c.query('SELECT id FROM tools WHERE category_id IS NOT DISTINCT FROM $1 ORDER BY sort_order, name, id', [categoryId ?? null])).rows.map((r) => r.id);
+// Etapa 5: los registros eliminados (archivados) no forman parte del orden que se edita; al
+// eliminarlos o restaurarlos sube la versión del alcance.
+export const categoryIds = async (c) => (await c.query('SELECT id FROM categories WHERE archived_at IS NULL ORDER BY sort_order, name, id')).rows.map((r) => r.id);
+export const toolIdsOf = async (c, categoryId) => (await c.query('SELECT id FROM tools WHERE category_id IS NOT DISTINCT FROM $1 AND archived_at IS NULL ORDER BY sort_order, name, id', [categoryId ?? null])).rows.map((r) => r.id);
 
 // Escribe el orden (1, 2, 3…) de las filas cuya posición cambió. Las filas se bloquean antes por
 // id (el orden global, como entregar kit y los movimientos): escribirlas en el orden de la lista

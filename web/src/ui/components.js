@@ -58,13 +58,20 @@ export function optList(items, sel, ph) { return (ph ? `<option value="">${esc(p
 // Técnicos activos agrupados por plantilla; con cajas = true agrega las cajas compartidas
 // (valor `caja:<id>`).
 export function techOptions(sel, ph = 'Elegí un técnico', cajas = false) { const d = derive(); return `<option value="">${esc(ph)}</option>` + (cajas && d.activeCajas.length ? `<optgroup label="Cajas compartidas">${d.activeCajas.map((k) => `<option value="caja:${esc(k.id)}" ${'caja:' + k.id === sel ? 'selected' : ''}>${esc(k.name)}</option>`).join('')}</optgroup>` : '') + d.shifts.map((s) => { const ts = d.activeTechs.filter((t) => t.shiftId === s.id); return ts.length ? `<optgroup label="${esc(s.name)}">${ts.map((t) => `<option value="${esc(t.id)}" ${t.id === sel ? 'selected' : ''}>${esc(t.name)} (${esc(t.legajo)})</option>`).join('')}</optgroup>` : ''; }).join(''); }
-const MV_TAG = { entrega_inicial: ['Entrega', ''], adicional: ['Adicional', ''], reposicion: ['Reposición', 'warn'], devolucion: ['Devolución', 'ok'], retiro: ['Retiro', 'pend'], ingreso: ['Ingreso', 'ok'], reparado: ['Reparación', 'ok'], baja: ['Baja', 'bad'], recupero: ['Recupero', 'ok'], recepcion: ['Recepción', 'ok'] };
-export function mvRow(m) {
+const MV_TAG = { entrega_inicial: ['Entrega', ''], adicional: ['Adicional', ''], reposicion: ['Reposición', 'warn'], devolucion: ['Devolución', 'ok'], retiro: ['Retiro', 'pend'], ingreso: ['Ingreso', 'ok'], reparado: ['Reparación', 'ok'], baja: ['Baja', 'bad'], recupero: ['Recupero', 'ok'], recepcion: ['Recepción', 'ok'], anulacion: ['Anulación', 'void'] };
+// Etapa 5: un movimiento anulado se conserva con la marca "Anulado" (y su anulación, "Anulación");
+// "Anular" aparece si el perfil puede anular (el servidor revisa si es posible y explica por qué no).
+export function mvRow(m, { plain = false } = {}) {
   const tn = toolName(m.toolId); const tg = MV_TAG[m.type] || [m.type, ''];
   const uc = (id) => (id && S.units[id] ? S.units[id].code : '');
   const title = m.type === 'reposicion' && (m.oldUnitId || m.newUnitId) ? `${tn} ${uc(m.oldUnitId) || ''} → ${uc(m.newUnitId) || 'nueva'}` : `${tn}${uc(m.unitId) ? ' ' + uc(m.unitId) : ''}${m.qty > 1 ? ` ×${m.qty}` : ''}`;
   const meta = [holderName(m), fdt(m.at), who(m.by)].filter(Boolean).join(' · ');
-  return `<div class="row"><span class="tag ${tg[1]}">${esc(tg[0])}</span><div class="grow"><div class="t">${esc(title)}</div><div class="s">${esc(meta)}</div>${m.reason || m.notes ? `<div class="s">${esc([m.reason, m.notes].filter(Boolean).join('. '))}</div>` : ''}</div>${demoChip(m)}</div>`;
+  const voidedBy = m.id ? derive().voidedBy[m.id] : null;
+  const orig = m.voidsMovementId ? S.movements[m.voidsMovementId] : null;
+  const voidOf = m.type === 'anulacion' ? `<div class="s">${orig ? `Anula: ${esc((MV_TAG[orig.type] || [orig.type])[0])} del ${fdt(orig.at)}` : 'Anula un movimiento'}</div>` : '';
+  const mark = voidedBy ? `<span class="chip bad">${icon('x', 12)}Anulado</span>` : '';
+  const voidBtn = !plain && m.id && m.type !== 'anulacion' && !voidedBy && can('movements_void') ? `<button class="btn sm" data-act="mvVoid" data-m="${esc(m.id)}">Anular</button>` : '';
+  return `<div class="row mvrow ${voidedBy ? 'voided' : ''}" data-mv="${esc(m.id || '')}"><span class="tag ${tg[1]}">${esc(tg[0])}</span><div class="grow"><div class="t">${esc(title)}</div><div class="s">${esc(meta)}</div>${voidOf}${m.reason || m.notes ? `<div class="s">${m.type === 'anulacion' ? 'Motivo: ' : ''}${esc([m.reason, m.notes].filter(Boolean).join('. '))}</div>` : ''}</div>${mark || voidBtn || demoChip(m) ? `<span class="mvacts">${mark}${demoChip(m)}${voidBtn}</span>` : ''}</div>`;
 }
 export const mvList = (l) => (l.length ? `<div class="list">${l.map(mvRow).join('')}</div>` : `<div class="list">${emptyBox('Sin movimientos registrados', 'Las entregas, devoluciones y reposiciones aparecen acá.')}</div>`);
 const AL_IC = { faltante: 'x', cambio: 'wrench', consecutiva: 'alert', devolucion: 'swap', pendiente: 'clock', limpieza: 'clean' };

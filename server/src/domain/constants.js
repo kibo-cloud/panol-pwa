@@ -31,6 +31,10 @@ export const MV = {
   recepcion: 'Devolución pendiente recibida',
 };
 export const MV_TYPES = Object.keys(MV);
+// Etapa 5: la anulación es un contramovimiento; no se registra por POST /api/movements ni
+// existe en el .txt v2 (por eso no está en MV ni en MV_TYPES).
+export const VOID_TYPE = 'anulacion';
+export const VOID_LABEL = 'Anulación';
 
 // Lugares (pools) entre los que se mueve el stock.
 export const POOL_K = ['disponible', 'asignado', 'reparacion', 'retirado', 'pendiente', 'baja', 'externo'];
@@ -65,11 +69,14 @@ export const PERMS = [
   ['reports_export', 'Exportar informes'],
   ['demo_manage', 'Cargar o borrar datos de demostración'],
   // Etapa 2: plantillas por supervisor, rotación y líneas/cajas (admin por defecto).
-  ['plantillas_edit', 'Administrar plantillas: crear, renombrar, supervisor y archivar'],
+  ['plantillas_edit', 'Administrar plantillas: crear, renombrar y cambiar el supervisor'],
   ['plantilla_rotate', 'Rotar cualquier plantilla (el supervisor siempre rota la suya)'],
   ['lineas_edit', 'Administrar líneas, sectores y cajas compartidas'],
   // Etapa 3: kits (kit base y por especialidad), solo admin por defecto.
   ['kits_edit', 'Administrar kits: kit base y kits por especialidad'],
+  // Etapa 5: eliminar (baja lógica), restaurar y eliminación definitiva; anular movimientos.
+  ['records_delete', 'Eliminar y restaurar registros (y eliminarlos definitivamente si no tienen historial)'],
+  ['movements_void', 'Anular movimientos cargados por error'],
 ];
 export const PERM_KEYS = PERMS.map(([k]) => k);
 

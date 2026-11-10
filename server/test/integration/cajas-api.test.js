@@ -143,20 +143,23 @@ describe('poseedor técnico o caja', () => {
 });
 
 describe('bajas lógicas', () => {
-  test('una caja con herramientas no se archiva; una línea con cajas activas tampoco', async () => {
+  // Etapa 5: con herramientas, la caja se elimina resolviendo cada asignación en el mismo paso.
+  test('una caja con herramientas pide resolverlas; una línea con cajas activas no se archiva', async () => {
     const v = (await api.q('SELECT version FROM cajas WHERE id = $1', [caja.id]))[0].version;
-    const busy = await api.call('admin', 'POST', `/api/cajas/${caja.id}/archive`, undefined, ifMatch(v));
+    const busy = await api.call('admin', 'POST', `/api/cajas/${caja.id}/archive`, { reason: 'Prueba' }, ifMatch(v));
     assert.equal(busy.statusCode, 409);
-    assert.equal(busy.json().message, 'La caja tiene herramientas asignadas.');
+    assert.equal(busy.json().error, 'pending_assignments');
+    assert.ok(busy.json().pending.length > 0);
     const lv = (await api.q('SELECT version FROM lineas WHERE id = $1', [linea.id]))[0].version;
-    assert.equal((await api.call('admin', 'POST', `/api/lineas/${linea.id}/archive`, undefined, ifMatch(lv))).json().message, 'La línea tiene cajas activas.');
+    assert.equal((await api.call('admin', 'POST', `/api/lineas/${linea.id}/archive`, { reason: 'Prueba' }, ifMatch(lv))).json().message, 'La línea tiene cajas activas.');
     const empty = (await api.call('admin', 'POST', '/api/cajas', { name: 'Caja vacía', lineaId: linea.id })).json().caja;
-    const ar = await api.call('admin', 'POST', `/api/cajas/${empty.id}/archive`, undefined, ifMatch(empty.version));
+    const ar = await api.call('admin', 'POST', `/api/cajas/${empty.id}/archive`, { reason: 'Prueba' }, ifMatch(empty.version));
     assert.equal(ar.statusCode, 200);
     assert.ok(ar.json().caja.archivedAt);
     const cur = periodOf(new Date());
     assert.equal((await api.call('admin', 'POST', '/api/assignments', { holder: { cajaId: empty.id }, toolId: 'tool-pinza', qty: 1 })).json().message, 'Elegí una caja activa.');
-    assert.equal((await api.call('responsable', 'POST', '/api/controls', { cajaId: empty.id, period: cur })).statusCode, 422);
+    // E5.V1: una caja eliminada no recibe controles (409 archived, con cómo restaurarla).
+    assert.equal((await api.call('responsable', 'POST', '/api/controls', { cajaId: empty.id, period: cur })).json().error, 'archived');
   });
 
   test('el .txt v2 no lleva lo de las cajas y exportar/importar sigue sin cambios', async () => {

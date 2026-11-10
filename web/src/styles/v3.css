@@ -77,3 +77,19 @@ body.auth .netwrap{max-width:400px}
 .ckclean{margin-top:10px}
 .qline{color:var(--label)}
 .ctlclean .srow{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+
+/* Etapa 5: eliminar, restaurar, eliminación definitiva, anular y Registros eliminados. */
+.mt0{margin-top:0}
+.qchips{display:flex;flex-wrap:wrap;gap:6px;margin:-4px 0 14px}
+.recres{margin:0 0 14px}
+.recres .srow{margin-bottom:6px;flex-wrap:wrap;gap:8px}
+.recrow{flex-wrap:wrap;gap:8px}
+.recrow .grow{min-width:140px}
+.recsel{min-height:44px;max-width:100%;flex:1 1 200px}
+.recpurge{margin-top:4px}
+.recpurge .btn{margin-top:8px}
+.recdel .r{display:flex;gap:6px;flex-wrap:wrap}
+.recdel{flex-wrap:wrap}
+.voided .t{text-decoration:line-through;text-decoration-color:var(--ink2)}
+.tag.void{background:var(--bad-soft);color:var(--bad-ink)}
+.mvacts{display:flex;gap:6px;align-items:center;flex-wrap:wrap}

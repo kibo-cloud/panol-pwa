@@ -15,6 +15,11 @@ export const publicUser = (r) => ({
   version: r.version,
   createdAt: iso(r.created_at),
   updatedAt: iso(r.updated_at),
+  // Etapa 5: baja lógica (eliminado = desactivado y oculto).
+  archived: r.archived_at != null,
+  archivedAt: iso(r.archived_at),
+  archivedBy: r.archived_by ?? null,
+  archiveReason: r.archive_reason ?? null,
 });
 
 export async function findUserByUsername(q, username) {
@@ -27,8 +32,9 @@ export async function findUserById(q, id) {
   return rows[0] || null;
 }
 
+// Sin los eliminados (se ven en Administración › Registros eliminados).
 export async function listUsers(q) {
-  const { rows } = await q.query('SELECT * FROM users ORDER BY lower(name), id');
+  const { rows } = await q.query('SELECT * FROM users WHERE archived_at IS NULL ORDER BY lower(name), id');
   return rows;
 }
 

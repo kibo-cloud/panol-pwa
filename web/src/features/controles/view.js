@@ -7,7 +7,7 @@ import { VIEWS, UI, render } from '../../ui/registry.js';
 import { ACT, CH } from '../../ui/actions.js';
 import { espSelect } from '../tecnicos/view.js';
 import { kpi, pageHead, emptyBox, stChip, cleanChip, weekCells, monthNav, periodStatus } from '../../ui/components.js';
-import { S, derive, can, who, shiftName, toolName, holderName } from '../../state/store.js';
+import { S, derive, can, who, shiftName, toolName, holderName, markArchived } from '../../state/store.js';
 import { holderKey, mineFirst } from '../../state/plantillas.js';
 
 const ctlPlantilla = (c) => (c.cajaId ? null : c.plantillaId || c.shiftId || null);
@@ -16,7 +16,7 @@ import { fdt, plabel, prevMonth, nextMonth } from '../../state/period.js';
 
 VIEWS.ver = (id) => {
   const d = derive(); const c = S.controls[id]; if (!c) return pageHead('Control no encontrado', '', { back: '#controles' });
-  const t = (c.cajaId ? S.cajas[c.cajaId] : S.techs[c.techId]) || { name: c.techName || (c.cajaId ? 'Caja' : 'Técnico') }; const sup = d.supersededBy[id];
+  const t0 = (c.cajaId ? S.cajas[c.cajaId] : S.techs[c.techId]) || { name: c.techName || (c.cajaId ? 'Caja' : 'Técnico') }; const t = { ...t0, name: markArchived(t0, t0.name) }; const sup = d.supersededBy[id];
   const hk = holderKey(c); const back = c.cajaId ? `#caja-${c.cajaId}` : `#tecnico-${c.techId}`;
   // Orden personalizado (etapa 3); lo que ya no existe va al final por nombre.
   const rk = (it) => d.toolRank[it.toolId] ?? 1e9;

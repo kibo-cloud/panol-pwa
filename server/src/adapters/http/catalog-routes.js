@@ -1,7 +1,8 @@
 // /api/techs, /api/shifts, /api/categories, /api/tools, /api/units: altas y ediciones con el
 // permiso de 2.1 correspondiente. Toda edición o baja exige If-Match.
 // /api/shifts y /api/techs/:id/shift-change son las rutas de 2.1: delegan en las plantillas
-// (permiso plantillas_edit para los turnos, shift_change para mover).
+// (permiso plantillas_edit para los turnos, shift_change para mover). Eliminar un turno archiva la
+// plantilla con el mismo permiso que el resto de las bajas (records_delete, etapa 5).
 import * as catalog from '../../application/catalog.js';
 import { S, obj, idParams, requireVersion, sendRow, actorOf } from './rest.js';
 import { LIM, SCHEMA_LIM } from '../../domain/constants.js';
@@ -30,16 +31,15 @@ export function registerCatalogRoutes(app) {
     async (req, reply) => sendRow(reply, 'shift', await catalog.createShift(db, actorOf(req), req.body), 201));
   app.patch('/api/shifts/:id', { ...perm('plantillas_edit'), schema: { params: idParams, body: obj({ name: S.name, order: S.int(0, 1000) }, [], { minProperties: 1 }) } },
     async (req, reply) => sendRow(reply, 'shift', await catalog.updateShift(db, actorOf(req), req.params.id, req.body, requireVersion(req))));
-  app.delete('/api/shifts/:id', { ...perm('plantillas_edit'), schema: { params: idParams } },
-    async (req) => catalog.deleteShift(db, actorOf(req), req.params.id, requireVersion(req)));
+  app.delete('/api/shifts/:id', { ...perm('records_delete'), schema: { params: idParams, body: { anyOf: [{ type: 'null' }, obj({ reason: S.str(LIM.text, 1) })] } } },
+    async (req) => catalog.deleteShift(db, actorOf(req), req.params.id, requireVersion(req), req.body?.reason));
 
   // ------------------------------------------------------------ categorías
   app.post('/api/categories', { ...perm('tools_edit'), schema: { body: obj({ name: S.name }, ['name']) } },
     async (req, reply) => sendRow(reply, 'category', await catalog.createCategory(db, actorOf(req), req.body), 201));
   app.patch('/api/categories/:id', { ...perm('tools_edit'), schema: { params: idParams, body: obj({ name: S.name }, ['name']) } },
     async (req, reply) => sendRow(reply, 'category', await catalog.updateCategory(db, actorOf(req), req.params.id, req.body, requireVersion(req))));
-  app.delete('/api/categories/:id', { ...perm('tools_edit'), schema: { params: idParams } },
-    async (req) => catalog.deleteCategory(db, actorOf(req), req.params.id, requireVersion(req)));
+  // Eliminar categorías: records-routes.js (etapa 5: baja lógica o definitiva sin historial).
 
   // ------------------------------------------------------------ herramientas y unidades
   const toolBody = { name: S.name, description: S.text, categoryId: S.idOrNull, serialized: S.bool };

@@ -29,7 +29,7 @@ function readFile(text) {
 
 async function plan(q, file, mode, actor, now) {
   const s = await loadTxtState(q);
-  const server = { doc: canonical(s.data), creds: s.creds, ledger: s.ledger };
+  const server = { doc: canonical(s.data), creds: s.creds, ledger: s.ledger, archived: s.archived, hidden: s.hidden, tombstones: s.tombstones };
   return planImport(server, file, { mode, actorId: actor.id, now });
 }
 
@@ -130,7 +130,13 @@ function withExtra(err, extra) {
 // un administrador las restablece).
 export async function exportTxt(db, actor) {
   const s = await withSnapshot(db, (q) => loadTxtState(q));
-  const payload = { app: 'panol', format: 'panol-txt', version: 2, savedAt: new Date().toISOString(), data: { ...s.data, deleted: {} } };
+  // Etapa 5: los técnicos, herramientas y usuarios eliminados salen con active = false (campo del
+  // v2); las categorías eliminadas no salen y van como marca de borrado en `data.deleted`, igual
+  // que lo eliminado definitivamente, así una combinación en 2.1 no los vuelve a traer.
+  const categories = Object.fromEntries(Object.entries(s.data.categories).filter(([id]) => !s.archived[`categories/${id}`]));
+  const deleted = { ...s.tombstones };
+  for (const [k, at] of Object.entries(s.archived)) if (k.startsWith('categories/')) deleted[k] = at;
+  const payload = { app: 'panol', format: 'panol-txt', version: 2, savedAt: new Date().toISOString(), data: { ...s.data, categories, deleted } };
   const text = TXT_HEAD + JSON.stringify(payload);
   const counts = Object.entries(s.data).filter(([k]) => k !== 'config').map(([k, v]) => `${k} ${Object.keys(v).length}`).join(', ');
   await audit(db, { action: 'export_txt', entity: 'system', entityId: 'export', detail: `Descarga del .txt: ${counts}`, actorId: actor.id, ip: actor.ip });

@@ -109,10 +109,10 @@ describe('plantillas: alta, edición y archivo', () => {
   });
 
   test('archivar: solo sin técnicos; archivada no recibe técnicos ni se edita', async () => {
-    assert.equal((await api.call('admin', 'POST', '/api/plantillas/tarde/archive', undefined, ifMatch(await ver('plantillas', 'tarde')))).statusCode, 409);
+    assert.equal((await api.call('admin', 'POST', '/api/plantillas/tarde/archive', { reason: 'Prueba' }, ifMatch(await ver('plantillas', 'tarde')))).statusCode, 409);
     const p = (await api.call('admin', 'POST', '/api/plantillas', { name: 'Para archivar' })).json().plantilla;
-    assert.equal((await api.call('supervisor', 'POST', `/api/plantillas/${p.id}/archive`, undefined, ifMatch(p.version))).statusCode, 403);
-    const r = await api.call('admin', 'POST', `/api/plantillas/${p.id}/archive`, undefined, ifMatch(p.version));
+    assert.equal((await api.call('supervisor', 'POST', `/api/plantillas/${p.id}/archive`, { reason: 'Prueba' }, ifMatch(p.version))).statusCode, 403);
+    const r = await api.call('admin', 'POST', `/api/plantillas/${p.id}/archive`, { reason: 'Prueba' }, ifMatch(p.version));
     assert.equal(r.statusCode, 200);
     assert.ok(r.json().plantilla.archivedAt);
     const t = await newTech('Archivo Uno', 'ARC-1', 'manana');

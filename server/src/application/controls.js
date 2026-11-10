@@ -17,19 +17,31 @@ import { idempotent } from './idempotency.js';
 
 const rule = (msg, code = 'rule_violation', status = 422, extra) => Object.assign(new DomainError(msg, code, status), extra ? { extra } : {});
 const getOne = async (c, id, lock = false) => (await loadControls(c, { id, lock }))[0] || null;
+// Un borrador se bloquea después de su poseedor (orden global: poseedor -> filas).
+async function lockControl(c, id) {
+  const h = (await c.query('SELECT tech_id, caja_id FROM controls WHERE id = $1', [id])).rows[0];
+  if (h && h.caja_id) await c.query('SELECT 1 FROM cajas WHERE id = $1 FOR SHARE', [h.caja_id]);
+  else if (h) await c.query('SELECT 1 FROM techs WHERE id = $1 FOR SHARE', [h.tech_id]);
+  return getOne(c, id, true);
+}
 const finalizedError = (cur) => rule('El control ya está finalizado: se corrige con un registro nuevo.', 'control_finalized', 409, { current: cur });
 
 // Poseedor (técnico o caja compartida), asignaciones activas (bloqueadas en modo compartido) y
 // catálogos para armar el documento. La plantilla es la del técnico el día del control (o el
 // último día de un período ya pasado); una caja no tiene plantilla.
+// E5.V1: el poseedor se bloquea FOR SHARE primero (orden global: poseedor -> filas -> herramientas,
+// como lockHolder de movements.js): un control espera a la eliminación en curso y después ve al
+// poseedor eliminado, que no recibe controles nuevos ni cambios en sus borradores.
 async function controlContext(c, h, period, now = new Date()) {
   let tech = null;
   let caja = null;
   if (h.cajaId) {
-    const k = (await c.query('SELECT id, name, archived_at FROM cajas WHERE id = $1', [h.cajaId])).rows[0];
+    const k = (await c.query('SELECT id, name, archived_at FROM cajas WHERE id = $1 FOR SHARE', [h.cajaId])).rows[0];
+    if (k && k.archived_at) throw rule('La caja está eliminada. Restaurala desde Administración › Registros eliminados.', 'archived', 409);
     caja = k ? { id: k.id, name: k.name, active: !k.archived_at } : null;
   } else {
-    const t = (await c.query('SELECT id, name, active FROM techs WHERE id = $1', [h.techId])).rows[0];
+    const t = (await c.query('SELECT id, name, active, archived_at FROM techs WHERE id = $1 FOR SHARE', [h.techId])).rows[0];
+    if (t && t.archived_at) throw rule('El técnico está eliminado. Restauralo desde Administración › Registros eliminados.', 'archived', 409);
     const plantillaId = t && period ? await plantillaOn(c, h.techId, controlRefDate(period, localDateISO(now))) : null;
     tech = t ? { id: t.id, name: t.name, plantillaId, active: t.active } : null;
   }
@@ -156,7 +168,7 @@ export async function createControl(db, actor, input, { idempotencyKey, path, no
 // Guardado del borrador: combina los ítems enviados (null quita uno) con los guardados.
 export async function saveDraft(db, actor, id, input, version, { idempotencyKey, path } = {}) {
   return idempotent(db, { userId: actor.id, key: idempotencyKey, method: 'PATCH', path, body: { input, version } }, async (c) => {
-    const cur = await getOne(c, id, true);
+    const cur = await lockControl(c, id);
     if (cur && cur.status === 'finalizado') throw finalizedError(cur);
     checkVersion(cur, version, 'No se encontró el control.');
     const ctx = await controlContext(c, { techId: cur.techId, cajaId: cur.cajaId }, cur.period);
@@ -184,7 +196,7 @@ const why = (v) => {
 export async function finalizeControl(db, actor, id, version, input = {}, { idempotencyKey, path, now = new Date() } = {}) {
   const inp = input || {};
   return idempotent(db, { userId: actor.id, key: idempotencyKey, method: 'POST', path, body: { version, input: inp } }, async (c) => {
-    const cur = await getOne(c, id, true);
+    const cur = await lockControl(c, id);
     if (cur && cur.status === 'finalizado') throw finalizedError(cur);
     checkVersion(cur, version, 'No se encontró el control.');
     const ctx = await controlContext(c, { techId: cur.techId, cajaId: cur.cajaId }, cur.period, now);

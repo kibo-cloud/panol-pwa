@@ -21,8 +21,7 @@ export function registerKitsRoutes(app) {
     async (req, reply) => sendRow(reply, 'especialidad', await kits.createEspecialidad(db, actorOf(req), req.body), 201));
   app.patch('/api/especialidades/:id', { ...perm('techs_edit'), schema: { params: idParams, body: obj({ name: S.name, order: S.int(0, 1000) }, [], { minProperties: 1 }) } },
     async (req, reply) => sendRow(reply, 'especialidad', await kits.updateEspecialidad(db, actorOf(req), req.params.id, req.body, requireVersion(req))));
-  app.post('/api/especialidades/:id/archive', { ...perm('techs_edit'), schema: { params: idParams } },
-    async (req, reply) => sendRow(reply, 'especialidad', await kits.archiveEspecialidad(db, actorOf(req), req.params.id, requireVersion(req))));
+  // Archivar y eliminar especialidades y kits: records-routes.js (etapa 5).
 
   // ------------------------------------------------------------ kits
   const items = { type: 'array', maxItems: KIT_MAX_ITEMS, items: obj({ toolId: S.id, qty: S.int(1, KIT_MAX_QTY) }, ['toolId', 'qty']) };
@@ -31,8 +30,6 @@ export function registerKitsRoutes(app) {
     async (req, reply) => sendRow(reply, 'kit', await kits.createKit(db, actorOf(req), req.body), 201));
   app.put('/api/kits/:id', { ...perm('kits_edit'), schema: { params: idParams, body: obj({ name: S.name, items }, [], { minProperties: 1 }) } },
     async (req, reply) => sendRow(reply, 'kit', await kits.updateKit(db, actorOf(req), req.params.id, req.body, requireVersion(req))));
-  app.delete('/api/kits/:id', { ...perm('kits_edit'), schema: { params: idParams } },
-    async (req) => kits.deleteKit(db, actorOf(req), req.params.id, requireVersion(req)));
 
   // Un poseedor exacto: { techId } o { cajaId }. unitIds: { toolId: [unitId] } (por código).
   const holder = { type: 'object', additionalProperties: false, minProperties: 1, maxProperties: 1, properties: { techId: S.id, cajaId: S.id } };

@@ -4,22 +4,24 @@
 const iso = (d) => (d instanceof Date ? d.toISOString() : d ?? null);
 
 const COMMON = { version: 'version', createdAt: 'created_at', updatedAt: 'updated_at', by: 'created_by' };
+// Etapa 5: baja lógica uniforme (quién, cuándo y por qué). Las respuestas agregan `archived`.
+const ARCH = { archivedAt: 'archived_at', archivedBy: 'archived_by', archiveReason: 'archive_reason' };
 export const TABLES = {
   // La plantilla de un técnico sale del historial (tech_plantilla_history), no de techs.shift_id.
-  techs: { table: 'techs', key: 'id', cols: { name: 'name', legajo: 'legajo', active: 'active', alta: 'alta', especialidadId: 'especialidad_id', demo: 'demo' } },
+  techs: { table: 'techs', key: 'id', cols: { name: 'name', legajo: 'legajo', active: 'active', alta: 'alta', especialidadId: 'especialidad_id', demo: 'demo', ...ARCH } },
   plantillas: {
     table: 'plantillas', key: 'id',
-    cols: { name: 'name', supervisorUserId: 'supervisor_user_id', currentShiftLabel: 'current_shift_label', order: 'sort_order', archivedAt: 'archived_at' },
+    cols: { name: 'name', supervisorUserId: 'supervisor_user_id', currentShiftLabel: 'current_shift_label', order: 'sort_order', ...ARCH },
   },
   shifts: { table: 'shifts', key: 'id', cols: { name: 'name', order: 'sort_order' } },
   // Etapa 3: orden personalizado (`order`), especialidades y kits (los ítems van aparte).
-  categories: { table: 'categories', key: 'id', cols: { name: 'name', order: 'sort_order', demo: 'demo' } },
-  tools: { table: 'tools', key: 'id', cols: { name: 'name', description: 'description', categoryId: 'category_id', serialized: 'serialized', active: 'active', order: 'sort_order', demo: 'demo' } },
-  especialidades: { table: 'especialidades', key: 'id', cols: { name: 'name', order: 'sort_order', archivedAt: 'archived_at' } },
-  kits: { table: 'kits', key: 'id', cols: { name: 'name', especialidadId: 'especialidad_id' } },
-  units: { table: 'units', key: 'id', cols: { toolId: 'tool_id', code: 'code', status: 'status', techId: 'tech_id', cajaId: 'caja_id', demo: 'demo' } },
-  lineas: { table: 'lineas', key: 'id', cols: { name: 'name', kind: 'kind', order: 'sort_order', archivedAt: 'archived_at' } },
-  cajas: { table: 'cajas', key: 'id', cols: { name: 'name', lineaId: 'linea_id', referenteTechId: 'referente_tech_id', archivedAt: 'archived_at' } },
+  categories: { table: 'categories', key: 'id', cols: { name: 'name', order: 'sort_order', demo: 'demo', ...ARCH } },
+  tools: { table: 'tools', key: 'id', cols: { name: 'name', description: 'description', categoryId: 'category_id', serialized: 'serialized', active: 'active', order: 'sort_order', demo: 'demo', ...ARCH } },
+  especialidades: { table: 'especialidades', key: 'id', cols: { name: 'name', order: 'sort_order', ...ARCH } },
+  kits: { table: 'kits', key: 'id', cols: { name: 'name', especialidadId: 'especialidad_id', ...ARCH } },
+  units: { table: 'units', key: 'id', cols: { toolId: 'tool_id', code: 'code', status: 'status', techId: 'tech_id', cajaId: 'caja_id', demo: 'demo', ...ARCH } },
+  lineas: { table: 'lineas', key: 'id', cols: { name: 'name', kind: 'kind', order: 'sort_order', ...ARCH } },
+  cajas: { table: 'cajas', key: 'id', cols: { name: 'name', lineaId: 'linea_id', referenteTechId: 'referente_tech_id', ...ARCH } },
   shiftChanges: {
     table: 'shift_changes', key: 'id',
     cols: { techId: 'tech_id', from: 'from_shift_id', to: 'to_shift_id', fromName: 'from_name', toName: 'to_name', effectiveFrom: 'effective_from', note: 'note', at: 'at', demo: 'demo' },
@@ -46,6 +48,7 @@ export function toApi(name, row) {
   const s = spec(name);
   const out = { id: row[s.key] };
   for (const [k, c] of Object.entries({ ...s.cols, ...COMMON })) if (c in row) out[k] = row[c] instanceof Date ? iso(row[c]) : row[c];
+  if ('archived_at' in row) out.archived = row.archived_at != null;
   return out;
 }
 
