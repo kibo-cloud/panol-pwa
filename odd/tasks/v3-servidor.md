@@ -1530,6 +1530,33 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       badge; detail, inbox, reject sheet and Todas at 1280 and 390 without overflow. `compras`
       added to E2E `ROUTES`. Written with the code; first run found one spec defect (expected 5
       rows, there are 4), fixed in the spec.
+- [x] E7.V1 Review fixes. Route: delegated writer (one bounded writer; server + web + tests).
+      Commit `71c23a6`. Fixes and evidence:
+      1. Cost/supplier after the decision only with `purchases_decide` (PATCH and `purchase` 403;
+         trigger guard with `panol.purchase_decider`). RED: responsable PATCH on aprobada 200≠403
+         (`compras-review`), then GREEN; existing test updated (responsable `purchase` with cost
+         is now 403; Gerencia sets cost by PATCH).
+      2. Costs only with `purchases_view` (detail, lists, `scope=receive`, responses, audit text cut
+         at `COST_MARK`; web hides rows/fields). RED: `estimatedCost` present for responsable;
+         unit `stripCosts/stripCostText` RED (missing exports), then GREEN.
+      3. `/api/state` received set: with assignment and received in the last 90 days. RED: a
+         request received 100 days ago still listed, then GREEN.
+      4. Reposición link: same assignment (and unit); stock requests not linkable nor offered
+         (`receivableFor(summary, asgId)`). RED: reposición on another assignment of the same
+         holder linked (201), then GREEN; web unit test RED (missing export), then GREEN.
+      5. `.txt` merge: deletion of a record named by a purchase request or novedad is a conflict
+         (`ledger.refs`). RED: 409 `import_conflict` (FK) with plan.js stashed, then GREEN.
+      6. Restore of `compras`: 409 `assignment_inactive`; duplicate stays 409 `duplicate` (also on
+         23505); advisory lock before the row lock. RED: restore 200≠409, then GREEN.
+      7. Pendiente marked when the newest control no longer shows the loss (`loss_resolved_at`,
+         audit `purchase_loss_gone`/`purchase_loss_back`); web chip/banner "La pérdida ya no figura
+         en el último control" (`lossGoneNote`). RED: unit plan test and integration
+         `loss_resolved_control_id` null, then GREEN.
+      8. Missing tests: receive replay with the same Idempotency-Key (one ingreso, stock
+         unchanged), `clearDemo` refused with a purchase on demo data, unit-key dedupe after the
+         unit moved to another holder's assignment — all passed on first run (behavior was
+         already correct; no RED).
+      9. Doc: parent decisions recorded in "Stage 7 decisions" and the implementation notes.
 
 ## Stage 7 implementation notes
 - API: `GET /api/compras` (filters `status` (a state or `open`), `month` (local month of the
@@ -1625,6 +1652,8 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   `npm run build` ok; `PANOL_E2E_BUILD=1 npm run test:e2e` 65 passed, 0 failed, 0 skipped
   (519 s). An earlier `test:db` run on the same server code was also 234/234 (491 s).
 - Commits: `40bdc9b` (server), `d2f986e` (web), `62f013b` (E2E), then this doc commit. Not pushed.
+- E7.V1 (`71c23a6`): `npm test` 218/218; `npm run test:db` 244/244 (514 s); `npm run build` ok;
+  `PANOL_E2E_BUILD=1 npm run test:e2e` 65 passed, 0 failed, 0 skipped (514 s). Not pushed.
 
 ## Next step
 - Stage 7: E7.T1–E7.T3 done (delegated writer); next: independent review, CI and PR #7 →
