@@ -2152,6 +2152,26 @@ Rules only; no real names, legajos or comments (the real workbook stays in `priv
       added to E2E `ROUTES`. Written with the code; a first run hit the harness 10 s "dispose
       page" timeout (closing the tab while the xlsx download was in flight; bisected to the
       download step), fixed in the spec by waiting 6 s after the download.
+- [x] E10.V1 Review findings (independent review of E10.T1–T3). Route: delegated writer (one
+      bounded writer, server + web + doc). Strict test-first, RED observed before every fix:
+      1. Planilla block windows with late corrections: RED `entrega [3, null, 1]` vs `[1, 1, 1]`
+         (P1 03-05, P2 03-12, P1 corrected 03-20); GREEN.
+      2. Faltante `since`/`firstDay` from the original control of the chain: RED `sin_resolver`
+         vs `reposicion` (F 03-05, reposición 03-06, correction 03-10); GREEN, firstDay 03-05.
+      3. Historical expected per period (assignment `since`/`until`, archive date): RED expected
+         `[0, 8, 8]` vs `[2, 3, 0]` (archived 03-10, hired 04-09, idle); GREEN; done counted only
+         in expected periods (summary and per month); fixture expectations updated to the new rule
+         (Xenia 5, total 26, per month 16/10). On-screen note rewritten.
+      4. Logo cache: RED `cache-control: no-store` vs `private, max-age=3600` (integration);
+         GREEN; a 404 keeps `no-store`.
+      6. Recambio 0,5 only on the first block of the episode + SALDO per row: RED second block
+         `devolucion 0.5` vs `null`; GREEN with `saldo 0`; web Excel RED (no SALDO column) → GREEN
+         (`[3, '', 2, '', 0.5, 1.5, -1]`), preview column on the last block group.
+      7. Partial devolución: RED `devolucion` vs `parcial`; GREEN `Parcial (1 de 2)`, qty 2 resolves.
+      8. Missing tests (coverage, no behavior change, passed on first run): JPEG accepted and a
+         truncated JPEG (no FF D9) refused; `sections=resumen` without `poseedores` sends holders
+         without rows/notes/planilla.
+      Commit: see "Stage 10 verification".
 
 ## Stage 10 implementation notes
 - API: `GET /api/audit-report?months=AAAA-MM,…` (or `from`/`to`), `plantillas=all|ids`,
@@ -2168,9 +2188,13 @@ Rules only; no real names, legajos or comments (the real workbook stays in `priv
 - Writer decisions (consistent with stages 1–9):
   1. Holders = techs and cajas of the selection that are active with assignments, or that have
      effective controls or holder movements in the months (archived/inactive ones only through
-     history, with "(eliminado)"). Expected = active holders × control periods already started
-     in the months (4 per month, as stage 4/reports); archived holders expect 0; % cumplimiento =
-     Σ min(done, expected) / Σ expected.
+     history, with "(eliminado)"). Expected (E10.V1, parent decision) = per control period
+     already started in the months (4 per month), only for holders with at least one assignment
+     active in that period (`since` ≤ period end, `until` null or ≥ period start; ended
+     assignments included), never for a period that starts after the holder's `archivedAt`.
+     Done = effective controls in an expected period of that holder (so done ≤ expected, summary
+     and per month over the same set); `controls` keeps the count of all printed controls;
+     % cumplimiento = Σ done / Σ expected.
   2. The plantilla filter applies to techs (control snapshots + membership ranges overlapping the
      months, else the current plantilla); cajas are chosen apart (they belong to líneas).
   3. Cells: qty 1 → ✓ / C / F; qty > 1 → `✓2 C1 F1`; an item absent from a control is "—" (sin
@@ -2179,21 +2203,30 @@ Rules only; no real names, legajos or comments (the real workbook stays in `priv
   4. Faltante = episode per assignment (consecutive effective controls with missing > 0) with at
      least one control in the months; resolution = the first later reposición/devolución/retiro of
      that assignment or the next control without the loss ("Apareció en el control siguiente");
-     otherwise the purchase request linked to one of its controls ("Compra N (estado)"); else
-     "Sin resolver". Facts are taken up to the issue date, not only the selected months.
+     a devolución/retiro resolves only when its qty (cumulative) covers the missing qty, otherwise
+     "Parcial (n de m)" (kind `parcial`); otherwise the purchase request linked to one of its
+     controls ("Compra N (estado)"); else "Sin resolver". Facts are taken up to the issue date,
+     not only the selected months, from the time of the ORIGINAL control of the first control's
+     correction chain (also `firstDay`), so a reposición before a later correction counts.
   5. Purchases: decided in the months; with a holder filter only those of the included holders.
      Without `purchases_view` cost and supplier are stripped (`stripCosts`) and totals have no sums.
   6. Planilla: one block per effective control; ENTREGA/DEVOLUCIÓN = units into/out of `asignado`
      for that holder and tool since the previous block (voided movements and voids left out);
-     CONTEO = good + 0,5 × change; 0,5 per recambio unit is also added to DEVOLUCIÓN, as the old
-     Excel did so SALDO stays 0; a trailing "Sin control" block shows later movements.
+     block boundaries use the time of the ORIGINAL control of each correction chain (block `day`;
+     `correctedDay` for the correction), kept monotonic (max) so no window is reversed and no
+     movement counts twice; CONTEO = good + 0,5 × change; 0,5 per unit entering recambio is added
+     to DEVOLUCIÓN only on the first block of the episode (an increase adds the difference), as the
+     old Excel did; each row has SALDO = last CONTEO − (Σ ENTREGA − Σ DEVOLUCIÓN) over the blocks
+     shown (movements only of the selected months, noted on screen and in the Excel); a trailing
+     "Sin control" block shows later movements.
   7. Novedades: only with `novedades_view` (the caller's permission; archived novedades excluded);
      with a holder filter, those naming an included tech or a selected plantilla.
 - Empresa: name in `app_settings` 'empresa.profile' (with the logo hash, so one If-Match version
   covers name and logo); logo bytes in `company_logo` (CHECK PNG/JPEG, 12 B–512 KB). PNG = 8-byte
   signature + IHDR, JPEG = FF D8 FF … FF D9; no SVG. Up to 2× the limit reaches the domain (413
   `too_large`); larger bodies are a 400. Served at `/api/empresa/logo?v=<hash>` (session required)
-  with its type, `inline` disposition, `Cache-Control: private, max-age=3600` and the common
+  with its type, `inline` disposition, `Cache-Control: private, max-age=3600` (the global API
+  `no-store` onSend hook exempts only a 200 from this route; E10.V1) and the common
   `nosniff`/CSP headers. CSP unchanged (`img-src 'self' data: blob:` was already there).
   Permission `plantillas_edit` (as stage 8).
 - Print: the global stage 8 `@page` is now `@page` (A4 portrait default), `@page exi` (landscape,
@@ -2213,7 +2246,11 @@ Rules only; no real names, legajos or comments (the real workbook stays in `priv
   `npm run build` ok, `web/dist/index.html` with 0 inline script/style/handlers;
   `PANOL_E2E_BUILD=1 npm run test:e2e` 72 passed, 0 failed, 0 skipped (570 s).
 - Commits: `9d73c2b` (server), `60b367f` (web), `63623d6` (E2E), then this doc commit. Not pushed.
-- Pending (parent): independent review, CI, PR #10 -> `v3/etapa-9-importador`. Engram mirror: pending.
+- E10.V1 on `3f9fa69` (`fix(audit): close stage 10 review findings`), run sequentially:
+  `npm test` 309/309; `npm run test:db` 274/274 (654 s); `npm run build` ok, `web/dist/index.html`
+  with 0 inline script/style/handlers; `PANOL_E2E_BUILD=1 npm run test:e2e` 72 passed, 0 failed,
+  0 skipped (575 s). Doc commit after it. Not pushed.
+- Pending (parent): independent review (done; findings closed in E10.V1), CI, PR #10 -> `v3/etapa-9-importador`. Engram mirror: pending.
 
 ## Next step
 - Stage 10: E10.T1–E10.T3 done (delegated writer); next: independent review, CI and PR #10 →
