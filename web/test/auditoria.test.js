@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { deriveState } from '../../server/src/domain/derive.js';
 import { buildAuditReport, parseAuditSelection } from '../../server/src/domain/auditoria.js';
 import { fixture, ctxOf, NOW } from '../../server/test/fixtures/auditoria.js';
-import { defaultSel, encodeSel, decodeSel, selQuery, selMonths, auditWorkbook, sheetName, half, chunk, monthOptions } from '../src/state/auditoria.js';
+import { defaultSel, encodeSel, decodeSel, selQuery, selMonths, auditWorkbook, sheetName, half, chunk, monthOptions, RESOLUTION_TONE } from '../src/state/auditoria.js';
 
 const report = (q = {}) => {
   const S = fixture();
@@ -49,9 +49,10 @@ test('Excel: una hoja por sección y una por poseedor en formato planilla', () =
   assert.deepEqual(names.slice(0, 6), ['Resumen', 'Faltantes', 'Movimientos', 'Compras', 'Novedades', 'Plantillas']);
   assert.ok(names.includes('Ana') && names.includes('Xenia (eliminado)') && names.includes('Caja L1'), names.join(','));
   const ana = wb.find((s) => s.name === 'Ana').rows;
-  assert.ok(ana.some((r) => r.includes('ENTREGA') && r.includes('DEVOLUCIÓN') && r.includes('CONTEO')));
+  assert.ok(ana.some((r) => r.includes('ENTREGA') && r.includes('DEVOLUCIÓN') && r.includes('CONTEO') && r[r.length - 1] === 'SALDO'));
   const llave = ana.find((r) => r[1] === 'Llave');
-  assert.deepEqual(llave.slice(2), [3, '', 2, '', 0.5, 1.5]);
+  assert.deepEqual(llave.slice(2), [3, '', 2, '', 0.5, 1.5, -1], 'SALDO = 1,5 − (3 − 0,5): falta una llave');
+  assert.equal(RESOLUTION_TONE.parcial, 'warn');
   const comp = wb.find((s) => s.name === 'Compras').rows;
   assert.ok(comp[0][0].includes("Villa D'agri"));
   assert.ok(comp.some((r) => r.includes('Hay en el pañol')));

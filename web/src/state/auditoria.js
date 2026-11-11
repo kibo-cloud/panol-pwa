@@ -90,7 +90,7 @@ export const dmy = (day) => (day ? `${Number(day.slice(8, 10))}/${Number(day.sli
 export const periodShort = (p) => (p ? `S${p.w} ${MONTHS[p.m - 1].slice(0, 3)} ${p.y}` : '');
 export const CLEANING_TXT = { limpio: 'Limpio', requiere_limpieza: 'Requiere limpieza' };
 export const cleaningText = (c) => (c && c.status ? CLEANING_TXT[c.status] + (c.note ? `: ${c.note}` : '') : 'Sin dato');
-export const RESOLUTION_TONE = { reposicion: 'ok', devolucion: 'ok', retiro: 'ok', recuperada: 'ok', compra: 'warn', sin_resolver: 'bad' };
+export const RESOLUTION_TONE = { reposicion: 'ok', devolucion: 'ok', retiro: 'ok', recuperada: 'ok', compra: 'warn', parcial: 'warn', sin_resolver: 'bad' };
 
 // Nombre de hoja de Excel: sin / \ : * ? [ ], hasta 31 caracteres y sin repetir.
 export function sheetName(name, used) {
@@ -104,12 +104,13 @@ export function sheetName(name, used) {
 const head = (R, title) => [[`${R.header.company}: ${title}`], [`Período: ${R.header.period}. ${R.header.filters}.`], [`Emitido el ${dmy(R.header.issuedDay)} por ${R.header.issuer}.`], []];
 const pctTxt = (v) => (v == null ? '—' : `${v} %`);
 
-// Planilla de un poseedor como el Excel anterior: bloques fechados ENTREGA / DEVOLUCIÓN / CONTEO.
+// Planilla de un poseedor como el Excel anterior: bloques fechados ENTREGA / DEVOLUCIÓN / CONTEO y
+// el SALDO de la fila (último conteo − (entregas − devoluciones) de los bloques mostrados).
 export function planillaRows(h) {
   const bl = h.planilla.blocks;
-  const dates = ['', '', ...bl.flatMap((b) => [b.controlId ? `${dmy(b.day)}${b.correction ? ' (corrección)' : ''}${b.imported ? ' (importado)' : ''}` : 'Sin control', '', ''])];
-  const cols = ['N°', 'Herramienta', ...bl.flatMap(() => ['ENTREGA', 'DEVOLUCIÓN', 'CONTEO'])];
-  const rows = h.planilla.rows.map((r) => [r.n ?? '', r.name, ...r.cells.flatMap((c) => [c.entrega ?? '', c.devolucion ?? '', c.conteo ?? ''])]);
+  const dates = ['', '', ...bl.flatMap((b) => [b.controlId ? `${dmy(b.day)}${b.correction ? ' (corrección)' : ''}${b.imported ? ' (importado)' : ''}` : 'Sin control', '', '']), ''];
+  const cols = ['N°', 'Herramienta', ...bl.flatMap(() => ['ENTREGA', 'DEVOLUCIÓN', 'CONTEO']), 'SALDO'];
+  const rows = h.planilla.rows.map((r) => [r.n ?? '', r.name, ...r.cells.flatMap((c) => [c.entrega ?? '', c.devolucion ?? '', c.conteo ?? '']), r.saldo ?? '']);
   return [dates, cols, ...rows];
 }
 
@@ -162,8 +163,8 @@ export function auditWorkbook(R) {
   if (has('poseedores')) {
     for (const h of R.holders) {
       const info = [h.kind === 'caja' ? `Caja compartida${h.linea ? ' · ' + h.linea : ''}` : `Legajo ${h.legajo || '—'}${h.especialidad ? ' · ' + h.especialidad : ''}${h.plantillas.length ? ' · ' + h.plantillas.join(', ') : ''}`];
-      const rows = [[`${R.header.company}: ${h.name}`], info, [`Período: ${R.header.period}. Controles: ${h.done} de ${h.expected}.`], [], ...planillaRows(h), [], ['Referencias: CONTEO 1 = buen estado, 0,5 = requiere recambio (también suma 0,5 en DEVOLUCIÓN), 0 = falta. Vacío = sin dato.']];
-      add(h.name, rows, [{ wch: 5 }, { wch: 28 }, ...h.planilla.blocks.flatMap(() => [{ wch: 10 }, { wch: 12 }, { wch: 9 }])]);
+      const rows = [[`${R.header.company}: ${h.name}`], info, [`Período: ${R.header.period}. Controles: ${h.done} de ${h.expected}.`], [], ...planillaRows(h), [], ['Referencias: CONTEO 1 = buen estado, 0,5 = requiere recambio (también suma 0,5 en DEVOLUCIÓN en el primer control del recambio), 0 = falta. Vacío = sin dato. SALDO = último conteo − (entregas − devoluciones); ENTREGA y DEVOLUCIÓN cubren solo el período elegido.']];
+      add(h.name, rows, [{ wch: 5 }, { wch: 28 }, ...h.planilla.blocks.flatMap(() => [{ wch: 10 }, { wch: 12 }, { wch: 9 }]), { wch: 8 }]);
     }
   }
   return out;

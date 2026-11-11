@@ -5,7 +5,7 @@
 // "sin dato"; los registros eliminados siguen con la marca "(eliminado)".
 // Fechas y meses con la fecha local de la empresa (Buenos Aires).
 import { MONTHS, MV, VOID_LABEL } from './constants.js';
-import { pad, pnumOf, localParts, localDateISO, zonedDate, daysIn } from './period.js';
+import { pad, pnumOf, pkeyOf, localParts, localDateISO, zonedDate, daysIn, weekRange } from './period.js';
 import { quantitiesOfState } from './controls.js';
 import { holderKey } from './lineas.js';
 import { voidedIds } from './alerts.js';
@@ -160,6 +160,10 @@ export function buildAuditReport(d, ctx, sel) {
   // Períodos de control ya empezados de los meses elegidos (4 por mes).
   const periods = [];
   for (const x of sel.months) for (let w = 1; w <= 4; w++) if (pnumOf({ y: x.y, m: x.m, w }) <= d.curNum) periods.push({ y: x.y, m: x.m, w });
+  const spans = periods.map((p) => {
+    const [a, b] = weekRange(p);
+    return { ...p, key: pkeyOf(p), from: a.toISOString(), to: b.toISOString() };
+  });
 
   // Nombres (con la marca de eliminado).
   const arch = (x) => !!(x && (x.archived || x.archivedAt));
@@ -185,6 +189,31 @@ export function buildAuditReport(d, ctx, sel) {
   for (const c of d.effList) (effByHolder[holderKey(c)] ||= []).push(c);
   const asgByHolder = { ...d.asgByTech };
   for (const [k, v] of Object.entries(d.asgByCaja)) asgByHolder['caja:' + k] = v;
+  // Todas las asignaciones (también las terminadas) por poseedor, para los períodos esperados.
+  const everAsg = {};
+  for (const a of d.asgs || []) if (a.techId || a.cajaId) (everAsg[a.cajaId ? 'caja:' + a.cajaId : a.techId] ||= []).push(a);
+  // Períodos esperados de un poseedor: aquellos en que tuvo al menos una asignación vigente
+  // (since/until), sin los que empiezan después de su baja (eliminado). Antes de su primera
+  // asignación no espera ninguno.
+  const expectedSpans = (key, x) => {
+    const asg = everAsg[key] || [];
+    const gone = x.archivedAt || null;
+    return spans.filter((p) => (!gone || p.from <= gone) && asg.some((a) => (!a.since || a.since <= p.to) && (!a.until || a.until >= p.from)));
+  };
+  const ctlById = Object.fromEntries(d.ctls.map((c) => [c.id, c]));
+  // Momento del control ORIGINAL (el primero finalizado) de una cadena de correcciones: los bloques
+  // de la planilla y el inicio de un faltante se miden desde ahí, no desde la corrección tardía.
+  const originAt = (c) => {
+    let at = c.finishedAt || '';
+    const seen = new Set([c.id]);
+    let o = c;
+    while (o && o.supersedes && !seen.has(o.supersedes)) {
+      seen.add(o.supersedes);
+      o = ctlById[o.supersedes];
+      if (o && o.status === 'finalizado' && o.finishedAt && (!at || o.finishedAt < at)) at = o.finishedAt;
+    }
+    return at || null;
+  };
 
   const firstDay = (x) => `${x.y}-${pad(x.m)}-01`;
   const lastDay = (x) => `${x.y}-${pad(x.m)}-${pad(daysIn(x.y, x.m))}`;
@@ -219,7 +248,6 @@ export function buildAuditReport(d, ctx, sel) {
   const holderSet = new Set(holders.map((h) => h.key));
 
   const supersededBy = d.supersededBy || {};
-  const ctlById = Object.fromEntries(d.ctls.map((c) => [c.id, c]));
   const holderOut = holders.map((h) => {
     const { x, kind } = h;
     // Columnas: un control vigente por período, en orden.
@@ -279,8 +307,10 @@ export function buildAuditReport(d, ctx, sel) {
     };
     let prevAt = null;
     for (const c of h.ctls) {
-      const at = c.finishedAt || null;
-      const mv = moveSums(prevAt, at);
+      // Límite del bloque: el control original; monótono, así ninguna ventana queda al revés.
+      const orig = originAt(c);
+      const at = orig && prevAt && orig < prevAt ? prevAt : orig;
+      const mv = at ? moveSums(prevAt, at) : {};
       const counts = {};
       for (const it of Object.values(c.items || {})) {
         if (!it || !it.state) continue;
@@ -289,31 +319,44 @@ export function buildAuditReport(d, ctx, sel) {
         for (const k of ['good', 'change', 'missing', 'expected']) s[k] += u[k];
         plRow(it.toolId, it.toolName);
       }
-      blocks.push({ controlId: c.id, day: at ? localDateISO(new Date(at)) : null, period: c.period, correction: !!c.correction || !!c.supersedes, imported: !!c.importBatchId, mv, counts });
+      blocks.push({ controlId: c.id, day: orig ? localDateISO(new Date(orig)) : null, correctedDay: c.supersedes && c.finishedAt ? localDateISO(new Date(c.finishedAt)) : null, period: c.period, correction: !!c.correction || !!c.supersedes, imported: !!c.importBatchId, mv, counts });
       if (at) prevAt = at;
     }
     const tail = moveSums(prevAt, null);
     if (Object.keys(tail).length) blocks.push({ controlId: null, day: null, period: null, correction: false, imported: false, mv: tail, counts: {} });
     const plRows = Object.values(pl).sort((a, b) => (a.n ?? 1e9) - (b.n ?? 1e9) || a.name.localeCompare(b.name, 'es'));
     for (const r of plRows) {
+      // Como en el Excel: el 0,5 del recambio también se suma en DEVOLUCIÓN (así no figura como
+      // faltante), una sola vez por episodio: en el bloque en que la unidad pasa a recambio.
+      let inChange = 0;
       r.cells = blocks.map((b) => {
         const m = b.mv[r.toolId] || { entrega: 0, devolucion: 0 };
         const u = b.counts[r.toolId];
-        // Como en el Excel: el 0,5 del recambio también se suma en DEVOLUCIÓN (así no figura como faltante).
-        return { entrega: m.entrega || null, devolucion: (m.devolucion + (u ? 0.5 * u.change : 0)) || null, conteo: b.controlId ? planillaCount(u) : null };
+        let half = 0;
+        if (b.controlId && u) {
+          half = 0.5 * Math.max(0, u.change - inChange);
+          inChange = u.change;
+        }
+        return { entrega: m.entrega || null, devolucion: (m.devolucion + half) || null, conteo: b.controlId ? planillaCount(u) : null };
       });
+      // SALDO (PEDIDO §1): último conteo − (entregas − devoluciones) de los bloques mostrados.
+      const counted = r.cells.filter((c) => c.conteo != null);
+      const sum = (k) => r.cells.reduce((s, c) => s + (c[k] || 0), 0);
+      r.saldo = counted.length ? counted[counted.length - 1].conteo - (sum('entrega') - sum('devolucion')) : null;
     }
-    const planilla = { blocks: blocks.map(({ controlId, day, period, correction, imported }) => ({ controlId, day, period, correction, imported })), rows: plRows };
+    const planilla = { blocks: blocks.map(({ controlId, day, correctedDay, period, correction, imported }) => ({ controlId, day, correctedDay, period, correction, imported })), rows: plRows };
 
     const last = columns[columns.length - 1];
     const lc = last ? last.counts : null;
     const den = lc ? lc.bueno + lc.cambio + lc.faltante : 0;
+    const expKeys = expectedSpans(h.key, x).map((p) => p.key);
     const linea = kind === 'caja' && x.lineaId && lineas[x.lineaId] ? mark(lineas[x.lineaId].name, lineas[x.lineaId]) : '';
     return {
       key: h.key, kind, id: x.id, name: mark(x.name, x), archived: arch(x), inactive: kind === 'tech' && x.active === false && !arch(x),
       legajo: kind === 'tech' ? x.legajo || '' : '', especialidad: kind === 'tech' && x.especialidadId && espById[x.especialidadId] ? espById[x.especialidadId].name : '',
       plantillas: h.pls.map(plName), linea, active: h.active,
-      expected: h.active ? periods.length : 0, done: columns.length,
+      // Realizados: solo los controles de un período esperado (así nunca superan a los esperados).
+      expected: expKeys.length, done: columns.filter((c) => expKeys.includes(c.pkey)).length, controls: columns.length, expectedKeys: expKeys,
       assigned: h.asg.reduce((s, a) => s + (a.qty || 1), 0),
       last: lc ? { ...lc, pct: pct(lc.bueno, den) } : null,
       columns, rows: rowList, notes, planilla,
@@ -350,26 +393,43 @@ export function buildAuditReport(d, ctx, sel) {
     for (const e of episodes) {
       if (!e.controls.some(ctlIn)) continue;
       const first = e.controls[0];
-      const since = first.finishedAt || '';
+      const since = originAt(first) || '';
       const events = [];
       for (const m of d.movs) {
         if (voided.has(m.id) || m.type === 'anulacion' || (m.at || '') < since) continue;
         if (m.type === 'reposicion' && m.oldAssignmentId === e.asgId) events.push({ kind: 'reposicion', label: 'Reposición', at: m.at });
-        if ((m.type === 'devolucion' || m.type === 'retiro') && m.oldAssignmentId === e.asgId) events.push({ kind: m.type, label: MV[m.type], at: m.at });
+        if ((m.type === 'devolucion' || m.type === 'retiro') && m.oldAssignmentId === e.asgId) events.push({ kind: m.type, label: MV[m.type], at: m.at, qty: m.qty || 1 });
       }
       if (e.recoveredBy) events.push({ kind: 'recuperada', label: 'Apareció en el control siguiente', at: e.recoveredBy.finishedAt || null });
       events.sort((a, b) => (a.at || '').localeCompare(b.at || ''));
       const ids = new Set(e.controls.map((c) => c.id));
       const req = links.find((l) => l.reason === 'faltante' && l.assignmentId === e.asgId && ids.has(l.controlId));
       const purchase = req ? { id: req.requestId, name: req.name, status: req.status, statusLabel: PURCHASE_STATUS_LABEL[req.status] || req.status } : null;
-      const ev = events[0] || null;
+      // Una devolución o un retiro resuelven solo cuando cubren lo que falta (sumando los anteriores).
+      let ev = null;
+      let back = 0;
+      let lastBack = null;
+      for (const x of events) {
+        if (x.qty == null) {
+          ev = x;
+          break;
+        }
+        back += x.qty;
+        lastBack = x;
+        if (back >= e.missing) {
+          ev = x;
+          break;
+        }
+      }
+      const dayOf = (iso) => (iso ? localDateISO(new Date(iso)) : null);
       const resolution = ev
-        ? { kind: ev.kind, label: ev.label, at: ev.at, day: ev.at ? localDateISO(new Date(ev.at)) : null }
+        ? { kind: ev.kind, label: ev.label, at: ev.at, day: dayOf(ev.at) }
+        : lastBack ? { kind: 'parcial', label: `Parcial (${back} de ${e.missing})`, at: lastBack.at, day: dayOf(lastBack.at) }
         : purchase ? { kind: 'compra', label: `${purchase.name} (${purchase.statusLabel})`, at: null, day: null } : { kind: 'sin_resolver', label: 'Sin resolver', at: null, day: null };
       faltantes.push({
         holderKey: h.key, holderName: h.name, toolId: e.toolId, n: rank[e.toolId] != null ? rank[e.toolId] + 1 : null, toolName: e.toolName, unitCode: e.unitCode,
         missing: e.missing, expected: e.expected, note: e.note,
-        firstControlId: first.id, firstDay: first.finishedAt ? localDateISO(new Date(first.finishedAt)) : null, period: first.period, controls: e.controls.length,
+        firstControlId: first.id, firstDay: since ? localDateISO(new Date(since)) : null, period: first.period, controls: e.controls.length,
         imported: e.controls.some((c) => !!c.importBatchId), resolution, purchase,
       });
     }
@@ -451,9 +511,9 @@ export function buildAuditReport(d, ctx, sel) {
     .map((x) => ({ day: x.from, plantillaName: plName(x.plantillaId), fromLabel: x.fromLabel || '', label: x.label, byName: userName(x.by) }));
 
   // ---------------------------------------------------------------- resumen
-  const activeH = holderOut.filter((h) => h.active);
-  const expected = activeH.reduce((s, h) => s + h.expected, 0);
-  const doneOnTime = activeH.reduce((s, h) => s + Math.min(h.done, h.expected), 0);
+  // Realizados y esperados sobre los mismos poseedores y períodos.
+  const expected = holderOut.reduce((s, h) => s + h.expected, 0);
+  const done = holderOut.reduce((s, h) => s + h.done, 0);
   const lastCounts = holderOut.map((h) => h.last).filter(Boolean);
   const S3 = (k) => lastCounts.reduce((s, c) => s + c[k], 0);
   const cols = holderOut.flatMap((h) => h.columns);
@@ -461,21 +521,23 @@ export function buildAuditReport(d, ctx, sel) {
   const sucio = cols.filter((c) => c.cleaning.status === 'requiere_limpieza').length;
   const perMonth = sel.months.map((mo) => {
     const ofMonth = holderOut.map((h) => h.columns.filter((c) => c.period.y === mo.y && c.period.m === mo.m));
-    const exp = activeH.length ? periods.filter((p) => p.y === mo.y && p.m === mo.m).length * activeH.length : 0;
+    const inMo = (k) => k.startsWith(`${mo.key}-`);
+    const exp = holderOut.reduce((s, h) => s + h.expectedKeys.filter(inMo).length, 0);
+    const doneMo = holderOut.reduce((s, h) => s + h.columns.filter((c) => inMo(c.pkey) && h.expectedKeys.includes(c.pkey)).length, 0);
     const lasts = ofMonth.map((cs) => cs[cs.length - 1]).filter(Boolean).map((c) => c.counts);
     const g = lasts.reduce((s, c) => s + c.bueno, 0);
     const den = lasts.reduce((s, c) => s + c.bueno + c.cambio + c.faltante, 0);
     const all = ofMonth.flat();
     const l = all.filter((c) => c.cleaning.status === 'limpio').length;
     const su = all.filter((c) => c.cleaning.status === 'requiere_limpieza').length;
-    return { key: mo.key, label: monthLabel(mo.y, mo.m), done: all.length, expected: exp, pctCond: pct(g, den), faltantes: lasts.reduce((s, c) => s + c.faltante, 0), pctLimpio: pct(l, l + su) };
+    return { key: mo.key, label: monthLabel(mo.y, mo.m), done: doneMo, controls: all.length, expected: exp, pctCond: pct(g, den), faltantes: lasts.reduce((s, c) => s + c.faltante, 0), pctLimpio: pct(l, l + su) };
   });
   const summary = {
     techs: holderOut.filter((h) => h.kind === 'tech').length,
     cajas: holderOut.filter((h) => h.kind === 'caja').length,
     tools: new Set(holderOut.flatMap((h) => (asgByHolder[h.key] || []).map((a) => a.toolId))).size,
     units: holderOut.reduce((s, h) => s + h.assigned, 0),
-    done: cols.length, expected, pctDone: pct(doneOnTime, expected),
+    done, controls: cols.length, expected, pctDone: pct(done, expected),
     bueno: S3('bueno'), cambio: S3('cambio'), faltante: S3('faltante'), pctCond: pct(S3('bueno'), S3('bueno') + S3('cambio') + S3('faltante')),
     faltantesEpisodios: faltantes.length, sinResolver: faltantes.filter((f) => f.resolution.kind === 'sin_resolver').length,
     reposiciones: mvTotals.reposicion.count,

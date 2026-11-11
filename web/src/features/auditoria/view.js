@@ -85,7 +85,7 @@ function resumenHTML(R) {
   const pct = (v) => (v == null ? '—' : v + ' %');
   const k = (v, l, t = '') => `<div class="aud-k ${t}"><b>${esc(v)}</b><span>${esc(l)}</span></div>`;
   const body = `<div class="aud-ks">${k(s.techs, 'Técnicos')}${k(s.cajas, 'Cajas compartidas')}${k(s.units, `Herramientas asignadas (${s.tools} tipos)`)}${k(`${s.done} de ${s.expected}`, `Controles realizados (${pct(s.pctDone)})`)}${k(pct(s.pctCond), 'En condiciones (último control)', 'ok')}${k(s.faltante, `Faltantes · ${s.sinResolver} sin resolver`, 'bad')}${k(s.cambio, 'Para recambio', 'warn')}${k(s.reposiciones, 'Reposiciones')}${k(pct(s.pctLimpio), `Limpieza: ${s.limpio} limpios, ${s.sucio} requieren, ${s.sinDatoLimpieza} sin dato`)}</div>
-  <p class="aud-note">Solo controles finalizados vigentes. Esperados: técnicos y cajas activos con herramientas por cada semana de control ya empezada del período (${R.periods}). ${s.corrections} ${s.corrections === 1 ? 'corrección' : 'correcciones'}, ${s.imported} ${s.imported === 1 ? 'control importado' : 'controles importados'} del Excel.</p>
+  <p class="aud-note">Solo controles finalizados vigentes. Esperados: por cada semana de control ya empezada del período (${R.periods}), los técnicos y cajas que en esa semana tenían al menos una herramienta asignada (nunca antes de su primera entrega ni después de su baja); los realizados se cuentan sobre esas mismas semanas. ${s.corrections} ${s.corrections === 1 ? 'corrección' : 'correcciones'}, ${s.imported} ${s.imported === 1 ? 'control importado' : 'controles importados'} del Excel.</p>
   ${tbl('aud-month', '<tr><th>Mes</th><th class="n">Controles</th><th class="n">Esperados</th><th class="n">% en condiciones</th><th class="n">Faltantes</th><th class="n">% limpio</th></tr>', s.perMonth.map((m) => `<tr><td>${esc(m.label)}</td><td class="n">${m.done}</td><td class="n">${m.expected}</td><td class="n">${pct(m.pctCond)}</td><td class="n">${m.faltantes}</td><td class="n">${pct(m.pctLimpio)}</td></tr>`).join(''))}`;
   return page(R, 'resumen', '1. Resumen', body);
 }
@@ -94,12 +94,14 @@ function holderHTML(R, h, planilla) {
   let body = `<p class="aud-hsub">${esc(holderSub(h))} · Controles: ${h.done} de ${h.expected}${h.last && h.last.pct != null ? ` · En condiciones: ${h.last.pct} %` : ''}</p>`;
   if (planilla) {
     if (!h.planilla.blocks.length) body += none('Sin controles ni movimientos en el período.');
-    for (const part of chunk(h.planilla.blocks.map((b, i) => ({ b, i })), 4)) {
-      const top = `<tr><th rowspan="2" class="n">N°</th><th rowspan="2">Herramienta</th>${part.map(({ b }) => `<th colspan="3" class="aud-bd">${b.controlId ? esc(dmy(b.day)) + (b.correction ? ' <span class="aud-tag">Corr.</span>' : '') + (b.imported ? ' <span class="aud-tag">Imp.</span>' : '') : 'Sin control'}</th>`).join('')}</tr>`;
+    const parts = chunk(h.planilla.blocks.map((b, i) => ({ b, i })), 4);
+    parts.forEach((part, pi) => {
+      const end = pi === parts.length - 1;
+      const top = `<tr><th rowspan="2" class="n">N°</th><th rowspan="2">Herramienta</th>${part.map(({ b }) => `<th colspan="3" class="aud-bd">${b.controlId ? esc(dmy(b.day)) + (b.correction ? ' <span class="aud-tag">Corr.</span>' : '') + (b.imported ? ' <span class="aud-tag">Imp.</span>' : '') : 'Sin control'}</th>`).join('')}${end ? '<th rowspan="2" class="n">SALDO</th>' : ''}</tr>`;
       const sub = `<tr>${part.map(() => '<th class="n">ENTREGA</th><th class="n">DEVOL.</th><th class="n aud-cnt">CONTEO</th>').join('')}</tr>`;
-      body += tbl('aud-pl', top + sub, h.planilla.rows.map((r) => `<tr><td class="n">${r.n ?? ''}</td><td>${esc(r.name)}</td>${part.map(({ i }) => { const c = r.cells[i]; return `<td class="n">${half(c.entrega)}</td><td class="n">${half(c.devolucion)}</td><td class="n aud-cnt">${half(c.conteo)}</td>`; }).join('')}</tr>`).join(''));
-    }
-    body += '<p class="aud-note">CONTEO: 1 = buen estado, 0,5 = requiere recambio (también suma 0,5 en DEVOLUCIÓN, como en el Excel), 0 = falta; vacío = sin dato.</p>';
+      body += tbl('aud-pl', top + sub, h.planilla.rows.map((r) => `<tr><td class="n">${r.n ?? ''}</td><td>${esc(r.name)}</td>${part.map(({ i }) => { const c = r.cells[i]; return `<td class="n">${half(c.entrega)}</td><td class="n">${half(c.devolucion)}</td><td class="n aud-cnt">${half(c.conteo)}</td>`; }).join('')}${end ? `<td class="n">${half(r.saldo)}</td>` : ''}</tr>`).join(''));
+    });
+    body += '<p class="aud-note">CONTEO: 1 = buen estado, 0,5 = requiere recambio (también suma 0,5 en DEVOLUCIÓN en el primer control del recambio, como en el Excel), 0 = falta; vacío = sin dato. SALDO = último conteo − (entregas − devoluciones); ENTREGA y DEVOLUCIÓN cubren solo el período elegido.</p>';
   } else if (!h.columns.length) body += none('Sin controles vigentes en el período.');
   else {
     for (const part of chunk(h.columns, 8)) {

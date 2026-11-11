@@ -39,7 +39,9 @@ describe('informe para auditoría', () => {
     assert.deepEqual(bruno.columns, [], 'el borrador de Bruno no es un control vigente');
     assert.ok(ana.rows.length > 0 && ana.rows.every((x) => x.cells[anaCtl]));
     assert.ok(R.movements.some((m) => m.type === 'entrega_inicial' && m.holderKey === 't-ana') || R.movements.length === 0);
-    assert.equal(R.summary.done, R.holders.reduce((s, h) => s + h.columns.length, 0));
+    assert.equal(R.summary.controls, R.holders.reduce((s, h) => s + h.columns.length, 0));
+    assert.equal(R.summary.done, R.holders.reduce((s, h) => s + h.done, 0));
+    assert.ok(R.summary.done <= R.summary.expected && R.holders.every((h) => h.done <= h.expected));
     assert.ok(Array.isArray(R.novedades));
     assert.equal(R.costsShown, true, 'admin ve costos');
   });
@@ -62,6 +64,11 @@ describe('informe para auditoría', () => {
     assert.equal((await report('admin', 'months=2026-13')).statusCode, 400);
     assert.equal((await report('admin', '')).statusCode, 400);
     assert.equal((await report('admin', `months=${months}&sections=nada`)).statusCode, 400);
+    // Resumen without the per-holder pages: the summary is complete, the holder detail is not sent.
+    const res = (await report('admin', `months=${months}&sections=resumen`)).json();
+    assert.deepEqual(res.sections, ['resumen']);
+    assert.ok(res.holders.length > 0 && res.holders.every((h) => h.rows.length === 0 && h.notes.length === 0 && h.planilla.blocks.length === 0 && h.planilla.rows.length === 0));
+    assert.ok(res.summary.expected >= res.summary.done && res.summary.perMonth.length > 0);
     assert.equal((await report('admin', `months=${months}&otro=1`)).statusCode, 400);
   });
 });
@@ -110,6 +117,7 @@ describe('empresa: nombre y logo', () => {
     assert.equal(img.statusCode, 200);
     assert.equal(img.headers['content-type'], 'image/png');
     assert.equal(img.headers['x-content-type-options'], 'nosniff');
+    assert.equal(img.headers['cache-control'], 'private, max-age=3600', 'the URL carries the hash: the browser may keep it an hour');
     assert.ok(img.rawPayload.equals(png), 'los mismos bytes');
     assert.equal((await api.call(null, 'GET', e.logo.url)).statusCode, 401);
     assert.equal((await report('admin', `months=${months}&sections=resumen`)).json().header.logo.url, e.logo.url);
@@ -119,8 +127,19 @@ describe('empresa: nombre y logo', () => {
     const del = await api.call('admin', 'DELETE', '/api/settings/empresa/logo', undefined, ifMatch(v));
     assert.equal(del.statusCode, 200, del.body);
     assert.equal(del.json().logo, null);
-    assert.equal((await api.call('admin', 'GET', '/api/empresa/logo')).statusCode, 404);
+    const gone = await api.call('admin', 'GET', '/api/empresa/logo');
+    assert.equal(gone.statusCode, 404);
+    assert.equal(gone.headers['cache-control'], 'no-store', 'errors are never cached');
+    // JPEG: accepted by its bytes; a truncated one (no FF D9 end marker) is refused.
+    const jpg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(40, 3), Buffer.from([0xff, 0xd9])]);
+    assert.equal((await putLogo('admin', jpg.subarray(0, jpg.length - 2), del.json().version)).statusCode, 422);
+    const okj = await putLogo('admin', jpg, del.json().version);
+    assert.equal(okj.statusCode, 200, okj.body);
+    assert.equal(okj.json().logo.contentType, 'image/jpeg');
+    const imgj = await api.call('consulta', 'GET', okj.json().logo.url);
+    assert.equal(imgj.headers['content-type'], 'image/jpeg');
+    assert.ok(imgj.rawPayload.equals(jpg));
     const au = await api.q("SELECT count(*)::int AS n FROM audit_log WHERE action = 'empresa_logo'");
-    assert.equal(au[0].n, 2);
+    assert.equal(au[0].n, 3);
   });
 });

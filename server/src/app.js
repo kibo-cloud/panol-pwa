@@ -44,8 +44,10 @@ export async function buildApp({ config, pool, logger, extend, events } = {}) {
     reply.code(e.status).send({ error: e.code, message: e.message });
   });
   app.addHook('onSend', async (req, reply, payload) => {
-    // Las respuestas de la API nunca se guardan en cachés intermedias.
-    if (req.url.startsWith('/api/')) reply.header('Cache-Control', 'no-store');
+    // Las respuestas de la API nunca se guardan en cachés intermedias. Excepción: el logo de la
+    // empresa servido bien (su dirección lleva el hash, ?v=…), que queda `private, max-age=3600`.
+    const logo = req.routeOptions && req.routeOptions.url === '/api/empresa/logo' && reply.statusCode === 200;
+    if (req.url.startsWith('/api/') && !logo) reply.header('Cache-Control', 'no-store');
     return payload;
   });
 
