@@ -66,8 +66,8 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 6. Novedades — done (PR #6)
 7. Gerencia — done (PR #7)
 8. Existencia por técnico y alertas — done (PR #8)
-9. Importador del Excel — in progress (`v3/etapa-9-importador`)
-10. Impresión de auditoría
+9. Importador del Excel — done (PR #9)
+10. Impresión de auditoría — in progress (`v3/etapa-10-impresion`)
 
 ## Stage 1 tasks
 - [x] E1.T0 Branch setup and docs: `chore` commit of `.gitignore` + `docs/` on `main`
@@ -2059,10 +2059,69 @@ Rules only; no real names, legajos or comments (the real workbook stays in `priv
   items became "sin dato". Integration tests were written with the fix (RED observed in the unit
   tests, not separately in the DB tests).
 
+- Stage 9 closed 2026-11-12: E9.V1 `acf01df` (blocker: quadratic XML parsing → linear tokenizer
+  + worker with timeout), CI run 43065016719, PR #9 → `v3/etapa-8-existencia`.
+
+## Stage 10 decisions (parent, within PEDIDO §2.11)
+- Entry: "Imprimir para auditoría" button in Reportes and in Más; permission `reports_export`
+  (as reports/existencia). One "Auditoría" screen: selection first, then an A4 print preview.
+- Selection: months as a range or individual months with checkboxes; plantillas, técnicos and
+  cajas (all or some); section checkboxes (the 8 PEDIDO sections, all on by default); option
+  "Formato planilla". The selection is kept in the URL/hash so the same report can be reprinted.
+- Data: ONE server endpoint `GET /api/audit-report` (or POST with the selection) builds the whole
+  report from a single REPEATABLE READ snapshot, reusing `novedadesOfPeriod`,
+  `purchasesOfPeriod`, effective controls, the stage 8 matrix rules and movements; only finalized
+  effective controls; corrections marked; imported controls marked "importado del Excel";
+  archived records shown with "(eliminado)". Purchases section shows estimated costs only when
+  the actor has `purchases_view`. Pure builder in `domain/` (unit-tested), web renders it.
+- Sections: (1) Resumen: técnicos, herramientas, controles realizados vs. esperados (stage 4
+  period model: expected = active holders × control periods in the range), % en condiciones,
+  faltantes, reposiciones, limpieza (% limpio); (2) per técnico/caja on a new page: tools in the
+  custom order (N° + name, unit codes where tracked — tools have no code), one column per
+  effective control of the period with ✓/C/F symbols, then observaciones, limpieza, who/when and
+  marked corrections; (3) faltantes and their resolution (reposición, devolución, compra, sin
+  resolver); (4) entregas, reposiciones, devoluciones y retiros (voids marked); (5) compras
+  aprobadas y rechazadas (with rejection reason); (6) novedades; (7) cambios de plantilla
+  (membership, supervisor, rotations); (8) signature block for the pañol responsable and the
+  auditor.
+- Format: A4 `@media print`, works with "Guardar como PDF"; header on every page with company
+  name and logo, period, issue date and issuer; page numbers; each holder starts a new page;
+  black-and-white legible, symbols + color, legend at the foot. Scope print rules: replace the
+  stage 8 global `@page` with named pages per print root (`page: audit` portrait, existencia
+  landscape), and make Ctrl+P on any screen print only the active print root (or a clean screen
+  view), never the app chrome.
+- "Formato planilla": the same data laid out like the old Excel sheet per legajo (dated 3-column
+  blocks ENTREGA / DEVOLUCIÓN / CONTEO, with the 1 / 0,5 / 0 convention derived from the counts),
+  because the auditor knows it.
+- Excel download of the same report with the existing self-hosted `xlsx` (one sheet per section,
+  one sheet per holder in planilla format), as the reportes export does.
+- Empresa settings (Administración › Empresa): company name (default "Villa D'agri ·
+  Mantenimiento") and logo upload — PNG or JPEG only (no SVG), ≤ 512 KB, magic-byte checked,
+  stored in the database, served from a same-origin route with the right content type and
+  `nosniff`; CSP keeps `img-src 'self'` (add `data:`/`blob:` only if strictly needed and
+  recorded). Permission: the existing settings permission (`plantillas_edit`, as stage 8);
+  If-Match versions; audited.
+- Large reports: render progressively per holder; a server size guard (e.g. max months 24) with
+  a clear message.
+
+## Stage 10 tasks (branch `v3/etapa-10-impresion`, stacked on stage 9)
+- [ ] E10.T1 Backend: audit report builder (pure, unit-tested: expected vs. done, symbols,
+      corrections, imported marks, resolution of faltantes, cost gating), endpoint with one
+      snapshot, Empresa settings (name + logo upload/serve) with migration
+      `017_empresa.sql` if needed; integration tests.
+- [ ] E10.T2 Frontend: Auditoría screen (selection, preview, sections, planilla format), print
+      stylesheet with scoped named pages and Ctrl+P handling, Excel download, Empresa settings
+      with logo preview, entry points in Reportes and Más; design guide.
+- [ ] E10.T3 E2E: selection → preview with all sections, print media emulation (page breaks per
+      holder, header/legend present, no app chrome), planilla format, Excel file produced, logo
+      upload and refusal of a non-image/oversized file, cost hidden without `purchases_view`,
+      390 px without overflow.
+
 ## Next step
-- Stage 9: E9.T1–E9.T3 (one delegated writer), then independent review, CI and PR #9 →
-  `v3/etapa-8-existencia`.
-- PRs #1–#8 await user review (stacked: #1 → `v3-servidor`, each next PR → the previous stage). Engram mirror of this document: pending (multiple active
+- Stage 10: E10.T1–E10.T3 (one delegated writer), then independent review, CI and PR #10 →
+  `v3/etapa-9-importador`. Then the v3 close: integrate `v3-servidor` → `main` only with user
+  approval, `versiones/panol v3.0.0`, LEEME/CLAUDE.md.
+- PRs #1–#9 await user review (stacked: #1 → `v3-servidor`, each next PR → the previous stage). Engram mirror of this document: pending (multiple active
   sessions). PR #1 awaits user review; after it is merged, rebase stage 2 onto `v3-servidor`.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);
