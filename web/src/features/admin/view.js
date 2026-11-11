@@ -19,6 +19,7 @@ import { fdate, fdt } from '../../state/period.js';
 import { parseRoute } from '../../ui/router.js';
 import { deleteBtn, deletedTab } from '../records/view.js';
 import { excelTab } from '../excelimport/view.js';
+import { empresaTab, reloadEmpresa } from '../empresa/view.js';
 
 // Datos que solo ve un administrador: se piden al abrir la pestaña.
 const AD = { users: null, perms: null, pending: {}, audit: null, labels: null, alertCfg: null, loading: {} };
@@ -40,6 +41,7 @@ hooks.afterState.push(() => {
   if (parseRoute(location.hash).name !== 'admin' || !isAdm()) return;
   if (UI.adminTab === 'users') { load('users', true); load('perms', true); }
   if (UI.adminTab === 'config') { load('labels', true); load('alertCfg', true); }
+  if (UI.adminTab === 'empresa') reloadEmpresa();
 });
 const loading = '<div class="loading"><div class="spin"></div>Cargando…</div>';
 
@@ -117,8 +119,8 @@ function auditTab() {
 
 VIEWS.admin = () => {
   const tab = UI.adminTab;
-  const tabs = [['users', 'Usuarios y permisos'], ['config', 'Configuración'], ['data', 'Datos e integridad'], ...(can('records_delete') ? [['deleted', 'Registros eliminados']] : []), ...(can('import_excel') ? [['excel', 'Importar Excel']] : []), ['audit', 'Auditoría']];
-  const body = tab === 'users' ? usersTab() : tab === 'deleted' ? deletedTab() : tab === 'excel' ? excelTab() : tab === 'config' || tab === 'shifts' ? configTab() : tab === 'data' ? dataTab() : auditTab();
+  const tabs = [['users', 'Usuarios y permisos'], ['config', 'Configuración'], ['empresa', 'Empresa'], ['data', 'Datos e integridad'], ...(can('records_delete') ? [['deleted', 'Registros eliminados']] : []), ...(can('import_excel') ? [['excel', 'Importar Excel']] : []), ['audit', 'Auditoría']];
+  const body = tab === 'users' ? usersTab() : tab === 'deleted' ? deletedTab() : tab === 'excel' ? excelTab() : tab === 'empresa' ? empresaTab() : tab === 'config' || tab === 'shifts' ? configTab() : tab === 'data' ? dataTab() : auditTab();
   return pageHead('Administración', 'Usuarios, permisos, configuración y registros del sistema') + `<div class="tabs">${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="adminTab" data-v="${esc(k)}">${l}</button>`).join('')}</div>${body}`;
 };
 ACT.adminTab = (ds) => { UI.adminTab = ds.v; if (location.hash !== '#admin') location.hash = '#admin'; else render(); };

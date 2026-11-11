@@ -55,6 +55,12 @@ export const api = {
   setShiftLabels: (labels, version) => http.put('/api/settings/shift-labels', { labels }, { version }),
   // Etapa 8: umbral de la alerta "Sin control hace N días".
   alertSettings: () => http.get('/api/settings/alerts'),
+  // etapa 10: impresión para auditoría y datos de la empresa (nombre y logo en base64).
+  auditReport: (qs) => http.get('/api/audit-report?' + qs),
+  empresa: () => http.get('/api/settings/empresa'),
+  setEmpresaName: (name, version) => http.put('/api/settings/empresa', { name }, { version }),
+  setLogo: (file, version) => http.put('/api/settings/empresa/logo', { file }, { version }),
+  removeLogo: (version) => http.del('/api/settings/empresa/logo', { version }),
   setAlertSettings: (controlOverdueDays, version) => http.put('/api/settings/alerts', { controlOverdueDays }, { version }),
 
   // líneas, sectores y cajas (etapa 2)

@@ -3,8 +3,9 @@
 // alias), Líneas y cajas (#lineas, #caja-<id>) y el control de una caja (#control-caja:<id>).
 // Etapa 7: Gerencia (#compras) y el detalle de una solicitud (#compra-<id>).
 // Etapa 8: Existencia por técnico (#existencia).
+// Etapa 10: Imprimir para auditoría (#auditoria y #auditoria-<selección>), dentro de Reportes.
 export const NAV = [['inicio', 'Panel', 'home'], ['plantillas', 'Plantillas', 'users'], ['tecnicos', 'Técnicos', 'users'], ['control', 'Control de herramientas', 'check'], ['entregas', 'Entregas y reposiciones', 'swap'], ['inventario', 'Inventario general', 'box'], ['lineas', 'Líneas y cajas', 'box'], ['controles', 'Historial de controles', 'hist'], ['reportes', 'Reportes', 'chart'], ['existencia', 'Existencia', 'grid'], ['alertas', 'Alertas', 'bell'], ['novedades', 'Novedades', 'note'], ['compras', 'Gerencia: compras', 'cart'], ['config', 'Configuración de herramientas', 'wrench'], ['admin', 'Administración', 'shield']];
-export const NAV_PARENT = { plantilla: 'plantillas', tecnico: 'tecnicos', ck: 'control', ver: 'controles', herramienta: 'inventario', caja: 'lineas', compra: 'compras' };
+export const NAV_PARENT = { plantilla: 'plantillas', tecnico: 'tecnicos', ck: 'control', ver: 'controles', herramienta: 'inventario', caja: 'lineas', compra: 'compras', auditoria: 'reportes' };
 const DETAIL = { plantilla: 'plantilla', turno: 'plantilla', tecnico: 'tecnico', controlver: 'ver', herramienta: 'herramienta', caja: 'caja', compra: 'compra' };
 const ALIAS = { turnos: 'plantillas' };
 
@@ -16,6 +17,7 @@ export function parseRoute(hash) {
   if (id && base === 'control') return { name: 'ck', id };
   if (id && DETAIL[base]) return { name: DETAIL[base], id };
   if (h === 'mas') return { name: 'mas', id: '' };
+  if (base === 'auditoria') return { name: 'auditoria', id };
   if (ALIAS[h]) return { name: ALIAS[h], id: '' };
   if (NAV.some((n) => n[0] === h)) return { name: h, id: '' };
   return { name: 'inicio', id: '' };
