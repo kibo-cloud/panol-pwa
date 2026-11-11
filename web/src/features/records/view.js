@@ -29,6 +29,8 @@ export const REC = {
   users: { label: 'Usuario', the: 'el usuario' },
   // Etapa 6: el nombre de una novedad es su etiqueta corta (Novedad N).
   novedades: { label: 'Novedad', the: 'la novedad', back: '#novedades', fem: true },
+  // Etapa 7: cancelar una solicitud de compra pendiente (nunca se elimina definitivamente).
+  compras: { label: 'Solicitud de compra', the: 'la solicitud de compra', back: '#compras', fem: true },
 };
 const done = (T, w) => `${T.label} ${w}${T.fem ? 'a' : 'o'}`;
 const QUICK = ['Cargado por error', 'Duplicado', 'Ya no se usa'];

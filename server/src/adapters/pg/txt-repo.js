@@ -64,7 +64,22 @@ export async function loadTxtState(q) {
     for (const r of perms) (p[r.role] ||= {})[r.perm] = r.allowed;
     data.config.permisos = { ...p, updatedAt: iso(maxIso(perms)) };
   }
-  const ledger = (await q.query('SELECT (SELECT count(*) FROM movements) AS movements, (SELECT count(*) FROM controls) AS controls, (SELECT count(*) FROM novedades) AS novedades')).rows[0];
+  const ledger = (await q.query('SELECT (SELECT count(*) FROM movements) AS movements, (SELECT count(*) FROM controls) AS controls, (SELECT count(*) FROM novedades) AS novedades, (SELECT count(*) FROM purchase_requests) AS purchases')).rows[0];
+  // E7.V1: registros del v2 que nombran las solicitudes de compra y las novedades (no están en el
+  // .txt v2): un borrado del archivo sobre ellos es un conflicto, no un error de clave foránea.
+  ledger.refs = Object.fromEntries((await q.query(
+    `SELECT DISTINCT k FROM (
+       SELECT 'tools/' || tool_id AS k FROM purchase_requests
+       UNION ALL SELECT 'units/' || unit_id FROM purchase_requests WHERE unit_id IS NOT NULL
+       UNION ALL SELECT 'assignments/' || assignment_id FROM purchase_requests WHERE assignment_id IS NOT NULL
+       UNION ALL SELECT 'techs/' || tech_id FROM purchase_requests WHERE tech_id IS NOT NULL
+       UNION ALL SELECT 'users/' || u FROM purchase_requests, unnest(ARRAY[created_by, decided_by, purchased_by, received_by]::text[]) AS u WHERE u IS NOT NULL
+       UNION ALL SELECT 'controls/' || c FROM purchase_requests, unnest(ARRAY[origin_control_id, loss_resolved_control_id]::text[]) AS c WHERE c IS NOT NULL
+       UNION ALL SELECT 'controls/' || control_id FROM purchase_request_controls
+       UNION ALL SELECT 'techs/' || tech_id FROM novedades WHERE tech_id IS NOT NULL
+       UNION ALL SELECT 'users/' || u FROM novedades, unnest(ARRAY[author_id, created_by]::text[]) AS u WHERE u IS NOT NULL
+     ) x`,
+  )).rows.map((r) => [r.k, true]));
   // Etapa 5: registros eliminados (archivados) de las colecciones del v2, y los eliminados
   // definitivamente (por la auditoría), para las marcas de borrado del archivo exportado.
   const archived = {};

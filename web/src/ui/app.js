@@ -12,7 +12,8 @@ import { toast, setAuthHandler, errMsg } from './feedback.js';
 import { api } from '../api/index.js';
 import { net, watchBrowser } from '../api/net.js';
 import { connectEvents } from '../api/events.js';
-import { S, B, ME, derive, refresh, setMe, clearMe, onStore, who, myRole } from '../state/store.js';
+import { S, B, ME, derive, refresh, setMe, clearMe, onStore, who, myRole, can } from '../state/store.js';
+import { pendingCount } from '../state/compras.js';
 import { ROLES, DOW, MSHORT } from '../state/constants.js';
 
 // Ganchos de las funcionalidades: antes de cambiar de ruta, después de cada recarga del
@@ -25,12 +26,15 @@ let lastRouteKey = '';
 
 function renderChrome(r) {
   const d = derive(); const navKey = navKeyOf(r); const nAl = d.alertsOpen.length; const nPend = d.kpi.pendCtl;
+  // Etapa 7: Gerencia solo para quien ve o recibe compras; la insignia, las pendientes para quien decide.
+  const nCmp = can('purchases_decide') ? pendingCount(S.purchases) : 0;
+  const nav = NAV.filter(([k]) => k !== 'compras' || can('purchases_view') || can('purchases_receive'));
   document.body.classList.toggle('ckmode', r.name === 'ck');
   const meName = who(ME.id).replace(/ \(vos\)$/, '');
-  setHTML($('#side'), `<div class="brandrow"><span class="logo">${icon('wrench', 18)}</span><span><b>Pañol</b><span>Control de herramientas</span></span></div><nav aria-label="Secciones">${NAV.map(([k, l]) => { const b = k === 'control' ? nPend : k === 'alertas' ? nAl : 0; return `<a href="#${esc(k)}" class="${navKey === k ? 'on' : ''}" ${navKey === k ? 'aria-current="page"' : ''}><span class="nd"></span>${l}${b ? `<span class="nb">${b}</span>` : ''}</a>`; }).join('')}</nav><div class="ucard">${avatar(meName)}<span class="grow"><span class="t ell" data-css="display:block">${esc(meName)}</span><span class="s" data-css="display:block">${ROLES[myRole()] || ''}</span></span></div>`);
+  setHTML($('#side'), `<div class="brandrow"><span class="logo">${icon('wrench', 18)}</span><span><b>Pañol</b><span>Control de herramientas</span></span></div><nav aria-label="Secciones">${nav.map(([k, l]) => { const b = k === 'control' ? nPend : k === 'alertas' ? nAl : k === 'compras' ? nCmp : 0; return `<a href="#${esc(k)}" class="${navKey === k ? 'on' : ''}" ${navKey === k ? 'aria-current="page"' : ''}><span class="nd"></span>${l}${b ? `<span class="nb">${b}</span>` : ''}</a>`; }).join('')}</nav><div class="ucard">${avatar(meName)}<span class="grow"><span class="t ell" data-css="display:block">${esc(meName)}</span><span class="s" data-css="display:block">${ROLES[myRole()] || ''}</span></span></div>`);
   const now = new Date(); const first = (ME.name || '').trim().split(/\s+/)[0];
   setHTML($('#top'), `<span class="logo">${icon('wrench', 20)}</span><div class="greet"><span class="d">${DOW[now.getDay()]} ${now.getDate()} ${MSHORT[now.getMonth()]} · Semana ${d.cur.w}</span><span class="h">${first ? 'Hola, ' + esc(first) : 'Pañol'}</span></div><a class="bellbtn" href="#alertas" aria-label="Alertas, ${nAl} abiertas">${icon('bell', 20)}${nAl ? '<span class="bdot"></span>' : ''}</a>`);
-  const masOn = ['tecnicos', 'inventario', 'lineas', 'controles', 'reportes', 'alertas', 'novedades', 'config', 'admin', 'mas'].includes(navKey);
+  const masOn = ['tecnicos', 'inventario', 'lineas', 'controles', 'reportes', 'alertas', 'novedades', 'compras', 'config', 'admin', 'mas'].includes(navKey);
   const it = (k, l, ic, on) => `<a href="#${esc(k)}" class="${on ? 'on' : ''}" ${on ? 'aria-current="page"' : ''}>${icon(ic, 22)}${l}</a>`;
   setHTML($('#bottom'), it('inicio', 'Inicio', 'home', navKey === 'inicio') + it('plantillas', 'Plantillas', 'users', navKey === 'plantillas') + `<a href="#control" class="cta" ${navKey === 'control' ? 'aria-current="page"' : ''}><span class="fab">${icon('check', 24)}</span>Controlar</a>` + it('entregas', 'Entregas', 'swap', navKey === 'entregas') + it('mas', 'Más', 'menu', masOn));
 }

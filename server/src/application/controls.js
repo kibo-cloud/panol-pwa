@@ -4,6 +4,8 @@
 // Etapa 4: ítems por cantidad (`state` o `good`/`change`, ver domain/controls.js), línea opcional
 // en faltantes y recambios, y limpieza por control (`cleaning`). Una corrección copia cantidades,
 // líneas y limpieza del control corregido.
+// Etapa 7: al finalizar (o corregir) se crean o vinculan las solicitudes de compra de los faltantes
+// y recambios, en la misma transacción (compras.js).
 import { loadControls, saveControl, rewriteControl } from '../adapters/pg/inventory-repo.js';
 import { buildControlDoc, validateFinalize, itemQuantities, cleaningRequiredFor } from '../domain/controls.js';
 import { DomainError, notFoundError } from '../domain/errors.js';
@@ -14,6 +16,7 @@ import { validId } from '../domain/constants.js';
 import { newId } from './ids.js';
 import { checkVersion, record, notifyChange } from './common.js';
 import { idempotent } from './idempotency.js';
+import { autoPurchasesOnFinalize } from './compras.js';
 
 const rule = (msg, code = 'rule_violation', status = 422, extra) => Object.assign(new DomainError(msg, code, status), extra ? { extra } : {});
 const getOne = async (c, id, lock = false) => (await loadControls(c, { id, lock }))[0] || null;
@@ -210,7 +213,9 @@ export async function finalizeControl(db, actor, id, version, input = {}, { idem
     const v = validateFinalize(ctx.assignments, doc.items, doc.cleaning, { cleaningRequired });
     if (!v.ok) throw rule(why(v), 'control_incomplete', 422, { pending: v.pending, missingNote: v.missingNote, cleaning: v.cleaning });
     await rewriteControl(c, id, doc, { finishedAt: now });
+    const purchases = await autoPurchasesOnFinalize(c, actor, { controlId: id, period: cur.period, doc, ctx, supersedesId: cur.supersedes || null });
     const r = await response(c, id, 200);
+    if (purchases.created.length || purchases.linked.length || purchases.archived.length) r.body.purchases = purchases;
     await record(c, actor, {
       action: cur.correction ? 'control_correct' : 'control_finish', entity: 'controls', id, version: r.body.control.version, event: 'finalize',
       detail: `${cur.correction ? 'Corrección de control' : 'Control finalizado'}: ${ctx.holder.name}, ${plabel(cur.period).toLowerCase()} (${doc.counts.cambio} para cambio, ${doc.counts.faltante} faltantes${doc.cleaning.status === 'requiere_limpieza' ? ', requiere limpieza' : ''})`,

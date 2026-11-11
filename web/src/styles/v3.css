@@ -114,3 +114,34 @@ body.auth .netwrap{max-width:400px}
 .novdet{margin:4px 0 8px}
 .novsubjects{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0 10px}
 .novsubjects select{width:100%;max-width:100%;min-height:44px}
+
+/* Etapa 7: Gerencia (compras): bandeja, filas, totales, detalle, hojas y marcas en alertas. */
+.cmpseg{margin-bottom:12px;max-width:640px}
+.cmprow{align-items:flex-start;flex-wrap:wrap;gap:10px}
+.cmprow .grow{min-width:0;flex:1 1 220px}
+.cmpic{width:36px;height:36px}
+.cmpt{display:block;font-weight:640;color:var(--ink);overflow-wrap:anywhere}
+.cmpobs{white-space:pre-wrap;overflow-wrap:anywhere;margin-top:2px}
+.cmpmeta{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-top:6px}
+.cmpacts{display:flex;gap:8px;flex-wrap:wrap;align-items:center;flex:1 1 100%;justify-content:flex-end}
+.cmpbtn{min-height:44px;flex:1 1 120px}
+.cmpkpis{margin-bottom:12px}
+.cmptot td,.cmptot th{white-space:nowrap}
+.cmpcard{margin-bottom:12px}
+.cmpcard .srow{flex-wrap:wrap;align-items:center}
+.cmpkv{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px 16px;margin-top:8px}
+.cmpkv-i{display:flex;flex-direction:column;gap:2px;min-width:0}
+.cmpkv-i .k{font-size:12px;font-weight:600;color:var(--ink2)}
+.cmpkv-i .v{font-size:14px;overflow-wrap:anywhere}
+.cmpstep{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 0;border-top:1px solid var(--line-soft)}
+.cmpstep:first-of-type{border-top:0}
+.cmpstep .cmpobs{flex:1 1 100%}
+.cmpmvs{margin-top:8px}
+.cmptlt{font-weight:620}
+.cmpsub{color:var(--ink2);overflow-wrap:anywhere}
+.cmptwo{margin-top:0}
+.cmpq{margin:4px 0 12px;font-weight:600}
+.cmpban{margin-bottom:12px}
+.alcmp{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:6px}
+.alcmp .chip{white-space:normal;text-decoration:none;max-width:100%}
+@media (min-width:1024px){.cmpacts{flex:0 0 auto}.cmpbtn{flex:0 0 auto}}

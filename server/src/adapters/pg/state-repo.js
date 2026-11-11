@@ -5,6 +5,7 @@ import { loadControls } from './inventory-repo.js';
 import { loadHistory, groupByTech, currentMembership, loadRotations, loadSupervisorHistory, loadShiftLabels } from './plantilla-repo.js';
 import { shiftChangesFromHistory } from '../../domain/plantillas.js';
 import { loadKits, loadOrderVersions } from './kits-repo.js';
+import { loadPurchaseSummary } from './compras-repo.js';
 
 const iso = (d) => (d instanceof Date ? d.toISOString() : d ?? null);
 const byId = (list) => Object.fromEntries(list.map(({ id, ...x }) => [id, x]));
@@ -86,6 +87,9 @@ export async function readState(q) {
     movements: byId(movements),
     alertRes: byId(alertRes),
     users: byId(users),
+    // Etapa 7: estado de las compras abiertas, rechazadas sin resolver y recibidas sin reposición
+    // (sin costos): fichas, alertas y la reposición vinculada.
+    purchases: await loadPurchaseSummary(q),
   };
 }
 

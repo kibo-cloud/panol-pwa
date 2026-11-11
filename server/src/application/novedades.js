@@ -54,21 +54,29 @@ const short = (s) => (s.length > 120 ? s.slice(0, 117) + '…' : s);
 export async function createNovedad(db, actor, input, { idempotencyKey, path } = {}) {
   const v = cleanNovedad(input);
   const movementId = input.movementId || null;
-  return idempotent(db, { userId: actor.id, key: idempotencyKey, method: 'POST', path, body: { ...v, movementId } }, async (c) => {
+  const purchaseRequestId = input.purchaseRequestId || null;
+  return idempotent(db, { userId: actor.id, key: idempotencyKey, method: 'POST', path, body: { ...v, movementId, ...(purchaseRequestId ? { purchaseRequestId } : {}) } }, async (c) => {
     if (movementId) {
       await movementLinkLock(c, movementId);
       const m = (await c.query('SELECT id, type, voids_movement_id FROM movements WHERE id = $1', [movementId])).rows[0];
       const voidedBy = m ? (await c.query('SELECT id FROM movements WHERE voids_movement_id = $1', [movementId])).rows[0]?.id ?? null : null;
       checkLinkable(m && { id: m.id, type: m.type, voidsMovementId: m.voids_movement_id }, voidedBy);
     }
+    // Etapa 7: la solicitud de compra vinculada existe y no está eliminada (la clave foránea la
+    // conserva; una solicitud nunca se borra).
+    let purchase = null;
+    if (purchaseRequestId) {
+      purchase = (await c.query('SELECT id, name, archived_at FROM purchase_requests WHERE id = $1', [purchaseRequestId])).rows[0];
+      if (!purchase || purchase.archived_at) throw rule('No se encontró la solicitud de compra a vincular.', 'invalid_purchase');
+    }
     const names = await lockSubjects(c, v);
     const id = newId('nv');
-    await repo.insertNovedad(c, { id, authorId: actor.id, ...v, movementId });
+    await repo.insertNovedad(c, { id, authorId: actor.id, ...v, movementId, purchaseRequestId });
     const row = await repo.getNovedad(c, id);
     const about = SUBJECT_ORDER.filter((k) => names[k]).map((k) => `${SUBJECT[k].label} ${names[k]}`);
     await record(c, actor, {
       action: 'novedad_create', entity: 'novedades', id, version: row.version, event: 'create',
-      detail: `Alta de ${row.name}${about.length ? ` (${about.join(', ')})` : ''}${movementId ? ', vinculada a un movimiento' : ''}: ${short(v.comment)}`,
+      detail: `Alta de ${row.name}${about.length ? ` (${about.join(', ')})` : ''}${movementId ? ', vinculada a un movimiento' : ''}${purchase ? `, vinculada a ${purchase.name}` : ''}: ${short(v.comment)}`,
     });
     return { status: 201, body: { novedad: row } };
   });

@@ -14,6 +14,7 @@ import { S, derive, can, refresh, toolName, holderName } from '../../state/store
 import { holderKey, holderBody } from '../../state/plantillas.js';
 import { ST, REASONS } from '../../state/constants.js';
 import { fdate } from '../../state/period.js';
+import { receivableFor } from '../../state/compras.js';
 
 const MV_HELP = { entrega_inicial: 'El técnico recibe una herramienta por primera vez. Se crea la asignación y se descuenta del inventario disponible.', reposicion: 'El técnico recibe una herramienta nueva a cambio de una dañada o faltante. Ambos movimientos quedan vinculados.', adicional: 'El técnico recibe otra unidad de una herramienta que ya tiene.', devolucion: 'El técnico devuelve una herramienta asignada. Vuelve al inventario según su condición.', retiro: 'Se retira una herramienta de la asignación del técnico.' };
 const SUBMIT = { entrega_inicial: 'Registrar entrega', reposicion: 'Registrar reposición', adicional: 'Registrar entrega adicional', devolucion: 'Registrar devolución', retiro: 'Registrar retiro' };
@@ -45,6 +46,9 @@ function mvForm() {
           const u = a.unitId && S.units[a.unitId]; let entra = '';
           if (tool.serialized) { const av = (d.unitsByTool[a.toolId] || []).filter((x) => x.status === 'disponible'); entra = av.length ? field('Código de la unidad nueva', `<select id="mvnew" data-ch="mvNewUnit">${optList(av.map((x) => [x.id, x.code]), m.newUnitId, 'Elegí el código')}</select>`, 'mvnew') : '<p class="hint warn" data-css="margin:0">No hay unidades disponibles para reponer. Dá de alta unidades en Inventario.</p>'; } else { const disp = (d.pools[a.toolId] || {}).disponible || 0; entra = `<div><span class="t" data-css="display:block">${esc(tool.name || '')}${(a.qty || 1) > 1 ? ' ×' + (a.qty || 1) : ''}</span><span class="s">Disponibles en inventario: ${disp}</span></div>${disp < (a.qty || 1) ? '<p class="hint warn" data-css="margin:0">No hay stock suficiente. Registrá un ingreso en Inventario.</p>' : ''}`; }
           h += `<div class="swapc"><div class="part"><span class="cap">Sale</span><div data-css="display:flex;align-items:center;gap:10px"><span class="grow"><span class="t" data-css="display:block">${esc(tool.name || 'Herramienta')}</span><span class="s">${[u ? u.code : '', (a.qty || 1) > 1 ? (a.qty) + ' unidades' : '', s && s.at ? 'marcado en control del ' + fdate(s.at) : 'sin control previo'].filter(Boolean).map(esc).join(' · ')}</span></span>${stChip(s ? s.state : 'pendiente')}</div>${s && s.note ? `<span class="s">${esc(s.note)}</span>` : ''}</div><div class="part"><span class="cap">Entra</span>${entra}</div></div>`;
+          // Etapa 7: la herramienta que entra puede venir de una compra recibida de esta asignación.
+          const rec = receivableFor(S.purchases, m.asgId);
+          if (rec.length) h += field('Compra recibida que se entrega (opcional)', `<select id="mvpr" data-ch="mvPurchase">${optList(rec.map((p) => [p.id, `${p.name}, recibida el ${fdate(p.receivedAt)}`]), m.purchaseRequestId, 'Sin vincular a una compra')}</select>`, 'mvpr');
           h += field('¿Devolvió la herramienta dañada?', `<div class="two-btn">${[['1', 'Sí, la devolvió'], ['0', 'No, queda pendiente']].map(([v, l]) => { const on = (m.returned ? '1' : '0') === v; return `<button type="button" class="opt2 ${on ? 'on' : ''}" aria-pressed="${on}" data-act="mvSet" data-k="returned" data-v="${esc(v)}">${l}</button>`; }).join('')}</div>`);
           if (m.returned) h += field('Destino de la herramienta dañada', optBtns('oldDest', m.oldDest, [['reparacion', 'Enviar a reparación'], ['baja', 'Dar de baja']]));
           else h += `<p class="hint warn">${icon('alert', 16)}<span>Se crea una alerta de devolución pendiente.</span></p>`;
@@ -87,7 +91,8 @@ CH.mvTech = (v) => { UI.mv.techId = v; UI.mv.asgId = ''; mvRerender(); };
 CH.mvTool = (v) => { UI.mv.toolId = v; UI.mv.unitId = ''; UI.mv.qty = 1; mvRerender(); };
 CH.mvUnit = (v) => { UI.mv.unitId = v; };
 CH.mvNewUnit = (v) => { UI.mv.newUnitId = v; };
-CH.mvAsg = (v) => { UI.mv.asgId = v; UI.mv.newUnitId = ''; const a = S.assignments[v]; UI.mv.qty = a ? a.qty : 1; mvRerender(); };
+CH.mvPurchase = (v) => { UI.mv.purchaseRequestId = v; };
+CH.mvAsg = (v) => { UI.mv.asgId = v; UI.mv.newUnitId = ''; UI.mv.purchaseRequestId = ''; const a = S.assignments[v]; UI.mv.qty = a ? a.qty : 1; mvRerender(); };
 IN.mvQty = (v) => { UI.mv.qty = v; }; IN.mvReason = (v) => { UI.mv.reason = v; }; IN.mvNotes = (v) => { UI.mv.notes = v; };
 
 // Arma el pedido para POST /api/movements a partir del formulario (sin campos vacíos).
@@ -105,6 +110,7 @@ export function movementBody(m) {
   }
   const a = S.assignments[m.asgId]; if (!a || !a.active || holderKey(a) !== m.techId) throw new UErr(`Elegí una herramienta asignada ${isCaja ? 'a la caja' : 'al técnico'}.`);
   b.asgId = m.asgId;
+  if (m.type === 'reposicion' && m.purchaseRequestId) b.purchaseRequestId = m.purchaseRequestId;
   if (m.type === 'reposicion') { b.returned = !!m.returned; if (m.returned) b.oldDest = m.oldDest || 'reparacion'; if ((S.tools[a.toolId] || {}).serialized) { if (!m.newUnitId) throw new UErr('Elegí la unidad nueva que recibe.'); b.newUnitId = m.newUnitId; } }
   if (m.type === 'devolucion') { b.cond = m.cond || 'disponible'; if (!a.unitId && (a.qty || 1) > 1) b.qty = qty(); }
   return b;

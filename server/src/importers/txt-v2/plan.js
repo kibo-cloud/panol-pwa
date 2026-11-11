@@ -52,12 +52,14 @@ export function deriveUsername(name, taken) {
 }
 
 /**
- * server: { doc, creds: { [userId]: { hasPassword, legacyPinHash } }, ledger: { movements, controls, novedades },
+ * server: { doc, creds: { [userId]: { hasPassword, legacyPinHash } }, ledger: { movements, controls, novedades, purchases, refs? },
  *           archived?, hidden?, tombstones?: { 'colección/id': fecha } }
  * file:   { data, deleted, savedAt }
  * Devuelve { mode, errors, conflicts, assumptions, changes, counts, token, final }.
  */
 export const REPLACE_NOVEDADES = 'Reemplazar es solo para la migración inicial: el servidor ya tiene novedades. Usá Combinar.';
+// Etapa 7: las solicitudes de compra tampoco están en el .txt v2.
+export const REPLACE_COMPRAS = 'Reemplazar es solo para la migración inicial: el servidor ya tiene solicitudes de compra. Usá Combinar.';
 
 export function planImport(server, file, { mode, actorId, now = new Date() }) {
   const errors = [];
@@ -76,6 +78,8 @@ export function planImport(server, file, { mode, actorId, now = new Date() }) {
   // E5.V1: lo eliminado definitivamente en el servidor (sus marcas de borrado, por la auditoría)
   // no se vuelve a crear desde un archivo que todavía lo tiene: se informa.
   const tombstones = server.tombstones || {};
+  // E7.V1: { 'colección/id': true } de lo que nombran las compras y las novedades del servidor.
+  const refs = server.ledger?.refs || {};
 
   if (mode === 'replace') {
     if (server.ledger.movements > 0 || server.ledger.controls > 0) {
@@ -83,6 +87,7 @@ export function planImport(server, file, { mode, actorId, now = new Date() }) {
     }
     // Etapa 6: las novedades no están en el .txt v2; reemplazar borraría lo que nombran.
     if (server.ledger.novedades > 0) err(null, null, null, REPLACE_NOVEDADES);
+    if (server.ledger.purchases > 0) err(null, null, null, REPLACE_COMPRAS);
     const fileAdmins = Object.entries(file.data.users).filter(([id, u]) => id !== actorId && u.role === 'admin' && u.active !== false);
     if (!fileAdmins.length) err('users', null, null, 'El archivo no tiene un administrador activo. Reemplazar dejaría el sistema sin administrador.');
     for (const c of DATA_COLS) {
@@ -178,6 +183,12 @@ export function planImport(server, file, { mode, actorId, now = new Date() }) {
       }
       if (c === 'users' && id === actorId) {
         conflict(c, id, 'El archivo borra tu usuario: se conserva.');
+        continue;
+      }
+      // E7.V1: las solicitudes de compra y las novedades no están en el .txt v2; lo que nombran
+      // tiene historial en el servidor y no se borra.
+      if (refs[`${c}/${id}`]) {
+        conflict(c, id, 'El archivo lo borra, pero una solicitud de compra o una novedad del servidor lo nombra: se conserva.');
         continue;
       }
       delete final[c][id];

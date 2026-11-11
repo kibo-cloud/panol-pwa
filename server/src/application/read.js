@@ -14,7 +14,7 @@ const DEMO_COLS = ['techs', 'shiftChanges', 'categories', 'tools', 'units', 'ass
 
 function derived(S, now) {
   const d = deriveState(S, { now });
-  const alerts = deriveAlerts({ now, techs: S.techs, cajas: S.cajas, tools: S.tools, units: S.units, assignments: S.assignments, controls: d.ctls, movements: d.movs, alertRes: S.alertRes });
+  const alerts = deriveAlerts({ now, techs: S.techs, cajas: S.cajas, tools: S.tools, units: S.units, assignments: S.assignments, controls: d.ctls, movements: d.movs, alertRes: S.alertRes, purchases: S.purchases });
   return { d, alerts };
 }
 

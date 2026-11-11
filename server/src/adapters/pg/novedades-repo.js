@@ -11,6 +11,7 @@ const SELECT = `
          m.type AS movement_type, m.at AS movement_at, m.qty AS movement_qty, m.tool_id AS movement_tool_id,
          m.tech_id AS movement_tech_id, m.caja_id AS movement_caja_id, tl.name AS movement_tool_name,
          (SELECT v.id FROM movements v WHERE v.voids_movement_id = m.id) AS movement_voided_by,
+         pr.name AS purchase_name, pr.status AS purchase_status, pr.tool_name AS purchase_tool_name, pr.archived_at AS purchase_archived_at,
          to_char(n.occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at
     FROM novedades n
     JOIN users u ON u.id = n.author_id
@@ -18,7 +19,8 @@ const SELECT = `
     LEFT JOIN plantillas p ON p.id = n.plantilla_id
     LEFT JOIN lineas l ON l.id = n.linea_id
     LEFT JOIN movements m ON m.id = n.movement_id
-    LEFT JOIN tools tl ON tl.id = m.tool_id`;
+    LEFT JOIN tools tl ON tl.id = m.tool_id
+    LEFT JOIN purchase_requests pr ON pr.id = n.purchase_request_id`;
 
 // Fila -> novedad de la API. Los nombres de los temas vienen con su marca de eliminado.
 export function toApi(r) {
@@ -35,6 +37,9 @@ export function toApi(r) {
       id: r.movement_id, type: r.movement_type, at: iso(r.movement_at), qty: r.movement_qty, toolId: r.movement_tool_id, toolName: r.movement_tool_name ?? null,
       techId: r.movement_tech_id, cajaId: r.movement_caja_id, voided: r.movement_voided_by != null,
     } : null,
+    // Etapa 7: vínculo a una solicitud de compra.
+    purchaseRequestId: r.purchase_request_id ?? null,
+    purchase: r.purchase_request_id ? { id: r.purchase_request_id, name: r.purchase_name, status: r.purchase_status, toolName: r.purchase_tool_name, archived: r.purchase_archived_at != null } : null,
     archived: r.archived_at != null, archivedAt: iso(r.archived_at), archivedBy: r.archived_by, archiveReason: r.archive_reason,
     version: r.version, createdAt: iso(r.created_at), updatedAt: iso(r.updated_at), by: r.created_by,
   };
@@ -51,9 +56,9 @@ export async function lockNovedad(q, id) {
 
 export async function insertNovedad(q, v) {
   await q.query(
-    `INSERT INTO novedades (id, author_id, comment, tech_id, plantilla_id, linea_id, movement_id, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-    [v.id, v.authorId, v.comment, v.techId, v.plantillaId, v.lineaId, v.movementId, v.authorId],
+    `INSERT INTO novedades (id, author_id, comment, tech_id, plantilla_id, linea_id, movement_id, purchase_request_id, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [v.id, v.authorId, v.comment, v.techId, v.plantillaId, v.lineaId, v.movementId, v.purchaseRequestId || null, v.authorId],
   );
 }
 
@@ -81,11 +86,13 @@ export async function queryNovedades(q, f, { withTotal = true } = {}) {
   if (f.lineaId) where.push(`n.linea_id = ${p(f.lineaId)}`);
   if (f.authorId) where.push(`n.author_id = ${p(f.authorId)}`);
   if (f.movementId) where.push(`n.movement_id = ${p(f.movementId)}`);
-  if (f.linked === true) where.push('n.movement_id IS NOT NULL');
-  if (f.linked === false) where.push('n.movement_id IS NULL');
+  if (f.purchaseRequestId) where.push(`n.purchase_request_id = ${p(f.purchaseRequestId)}`);
+  // Etapa 7: vinculada = a un movimiento o a una solicitud de compra.
+  if (f.linked === true) where.push('(n.movement_id IS NOT NULL OR n.purchase_request_id IS NOT NULL)');
+  if (f.linked === false) where.push('n.movement_id IS NULL AND n.purchase_request_id IS NULL');
   if (f.archived === 'exclude') where.push('n.archived_at IS NULL');
   if (f.archived === 'only') where.push('n.archived_at IS NOT NULL');
-  if (f.q) where.push(`concat_ws(' ', n.comment, n.name, u.name, t.name, p.name, l.name) ILIKE ${p(likePattern(f.q))}`);
+  if (f.q) where.push(`concat_ws(' ', n.comment, n.name, u.name, t.name, p.name, l.name, pr.name) ILIKE ${p(likePattern(f.q))}`);
   const base = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const total = !withTotal ? null : (await q.query(`SELECT count(*)::int AS n FROM (${SELECT} ${base}) x`, params)).rows[0].n;
   const page = [...where];

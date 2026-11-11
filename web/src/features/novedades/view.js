@@ -89,12 +89,13 @@ const SUB_IC = { tech: 'users', plantilla: 'clock', linea: 'box' };
 export function novRow(n) {
   const subs = novSubjects(n).map((s) => `<a class="chip pri novsub" href="${esc(s.href)}">${icon(SUB_IC[s.kind], 12)}${esc(s.label)}</a>`).join('');
   const m = n.movement;
+  const pr = n.purchase ? `<div class="s novmv">${icon('cart', 12)}<a href="#compra-${esc(n.purchase.id)}">${esc(`${n.purchase.name}${n.purchase.toolName ? ': ' + n.purchase.toolName : ''}`)}</a></div>` : '';
   const mv = m ? `<div class="s novmv">${icon('swap', 12)}<span>${esc(`${mvLabel(m.type)}: ${m.toolName || 'Herramienta'}${m.qty > 1 ? ' ×' + m.qty : ''}, ${fdt(m.at)}`)}</span>${m.voided ? `<span class="chip bad">${icon('x', 12)}Anulado</span>` : ''}</div>` : '';
   const acts = [
     canEditNov(n, ME.id, can) ? `<button class="btn sm" data-act="novEdit" data-id="${esc(n.id)}">${icon('pencil', 14)}Editar</button>` : '',
     !n.archived ? deleteBtn('novedades', n.id, { sm: true }) : '',
   ].join('');
-  return `<div class="row novrow${n.archived ? ' novarch' : ''}" data-nov="${esc(n.id)}"><span class="tile novic">${icon('note', 18)}</span><div class="grow"><div class="s">${esc(`${fdt(n.occurredAt)} · ${authorOf(n)}`)}${n.archived ? ` <span class="chip pend">Eliminada</span>` : ''}</div><div class="t novtxt">${esc(n.comment)}</div>${subs ? `<div class="novsubs">${subs}</div>` : ''}${mv}</div>${acts ? `<span class="mvacts novacts">${acts}</span>` : ''}</div>`;
+  return `<div class="row novrow${n.archived ? ' novarch' : ''}" data-nov="${esc(n.id)}"><span class="tile novic">${icon('note', 18)}</span><div class="grow"><div class="s">${esc(`${fdt(n.occurredAt)} · ${authorOf(n)}`)}${n.archived ? ` <span class="chip pend">Eliminada</span>` : ''}</div><div class="t novtxt">${esc(n.comment)}</div>${subs ? `<div class="novsubs">${subs}</div>` : ''}${mv}${pr}</div>${acts ? `<span class="mvacts novacts">${acts}</span>` : ''}</div>`;
 }
 
 // ------------------------------------------------------------------ pantalla
@@ -112,7 +113,7 @@ function filterBar() {
     <label class="novf" for="novf-from"><span>Desde</span><input id="novf-from" type="date" value="${esc(f.from)}" data-ch="novF" data-k="from"></label>
     <label class="novf" for="novf-to"><span>Hasta</span><input id="novf-to" type="date" value="${esc(f.to)}" data-ch="novF" data-k="to"></label>
     ${sel('techId', 'Técnico', techs, 'Todos')}${sel('plantillaId', 'Plantilla', pls, 'Todas')}${sel('lineaId', 'Línea o sector', lns, 'Todas')}${sel('authorId', 'Autor', users, 'Todos')}
-    ${sel('linked', 'Vínculo', [['yes', 'Vinculadas a un movimiento'], ['no', 'Sin vínculo']], 'Todas')}
+    ${sel('linked', 'Vínculo', [['yes', 'Vinculadas (movimiento o compra)'], ['no', 'Sin vínculo']], 'Todas')}
   </div>
   <div class="fchips novchips">${canDelete('novedades') ? `<button class="fchip ${f.archived ? 'on' : ''}" data-act="novArch" aria-pressed="${f.archived}">Incluir eliminadas</button>` : ''}${n ? `<button class="btn sm" data-act="novClear">${icon('x', 14)}Limpiar filtros (${n})</button>` : ''}</div>`;
 }
@@ -171,15 +172,24 @@ function subjectOptions(k, cur) {
   return items;
 }
 
-function novForm(st, cur, mv, movementId) {
+// Etapa 7: solicitudes que se pueden vincular (las del resumen del estado), más la elegida.
+function purchaseOptions(o) {
+  const items = (S.purchases || []).map((p) => [p.id, `${p.name} · ${p.toolName || ''}${p.holderName ? ' · ' + p.holderName : ''}`]);
+  if (o.purchaseRequestId && !items.some(([id]) => id === o.purchaseRequestId)) items.unshift([o.purchaseRequestId, o.purchaseName || o.purchaseRequestId]);
+  return items;
+}
+
+function novForm(st, cur, mv, movementId, o = {}) {
   const head = cur
     ? `<p class="muted mt0">${esc(`Registrada el ${fdt(cur.occurredAt)} por ${authorOf(cur)}. La fecha, el autor y el vínculo no cambian.`)}</p>`
     : `<p class="muted mt0">${esc(`La fecha y la hora se registran al guardar. Autor: ${who(ME.id)}.`)}</p>`;
   const off = net.offline ? `<div class="banner warn" role="status"><div><b>Sin conexión con el servidor.</b><div class="sm">La novedad se guarda cuando vuelva la conexión. El texto queda en esta hoja mientras no la cierres.</div></div></div>` : '';
   const link = mv ? `<div class="field"><label>Vinculada a</label><div class="list">${mvRow({ id: movementId, ...mv }, { plain: true })}</div></div>`
     : cur && cur.movement ? `<div class="field"><label>Vinculada a</label><p class="muted sm mt0">${esc(`${mvLabel(cur.movement.type)}: ${cur.movement.toolName || 'Herramienta'}, ${fdt(cur.movement.at)}`)}${cur.movement.voided ? ' (anulado)' : ''}</p></div>` : '';
+  const prLink = cur ? (cur.purchase ? `<div class="field"><label>Solicitud de compra</label><p class="muted sm mt0">${esc(`${cur.purchase.name}${cur.purchase.toolName ? ': ' + cur.purchase.toolName : ''}`)}</p></div>` : '')
+    : !mv && purchaseOptions(o).length ? field('Solicitud de compra (opcional)', `<select id="nov-pr" data-mi="purchaseRequestId">${optList(purchaseOptions(o), st.purchaseRequestId, 'Sin vincular')}</select>`, 'nov-pr') : '';
   const s = (k, label, ph) => field(label, `<select id="nov-${k}" data-mi="${k}">${optList(subjectOptions(k, cur), st[k], ph)}</select>`, `nov-${k}`);
-  return off + head + link + field('Comentario (obligatorio)', `<textarea id="nov-comment" rows="4" maxlength="${LIM.text}" data-mi="comment" placeholder="Qué pasó, a quién afecta, qué se hizo">${esc(st.comment || '')}</textarea>`, 'nov-comment') +
+  return off + head + link + prLink + field('Comentario (obligatorio)', `<textarea id="nov-comment" rows="4" maxlength="${LIM.text}" data-mi="comment" placeholder="Qué pasó, a quién afecta, qué se hizo">${esc(st.comment || '')}</textarea>`, 'nov-comment') +
     `<p class="muted sm mt0">Técnico, plantilla y línea son opcionales: elegí los que correspondan.</p><div class="novsubjects">${s('techId', 'Técnico', 'Sin técnico')}${s('plantillaId', 'Plantilla', 'Sin plantilla')}${s('lineaId', 'Línea o sector', 'Sin línea ni sector')}</div>`;
 }
 
@@ -194,7 +204,7 @@ export function openNovedad(o = {}) {
     title: cur ? 'Editar novedad' : 'Nueva novedad',
     rec: cur ? { get: () => NOV.byId[o.id], version: cur.version } : undefined,
     reload: stOf,
-    render: (st) => novForm(st, cur, mv, o.movementId),
+    render: (st) => novForm(st, cur, mv, o.movementId, o),
     actions: [{ label: 'Cancelar', close: true }, { label: cur ? 'Guardar cambios' : 'Guardar novedad', kind: 'pri', run: async (st, m) => {
       const comment = String(st.comment || '').trim();
       if (!comment) throw new UErr('Escribí el comentario de la novedad.');
@@ -205,7 +215,7 @@ export function openNovedad(o = {}) {
         const r = await api.updateNovedad(cur.id, body, m.rec.version);
         NOV.byId[cur.id] = r.novedad;
       } else {
-        const full = { ...body, ...(o.movementId ? { movementId: o.movementId } : {}) };
+        const full = { ...body, ...(o.movementId ? { movementId: o.movementId } : {}), ...(!o.movementId && st.purchaseRequestId ? { purchaseRequestId: st.purchaseRequestId } : {}) };
         const sig = JSON.stringify(full); if (sent && sent !== sig) key = newIdempotencyKey(); sent = sig;
         const r = await api.createNovedad(full, { idempotencyKey: key });
         NOV.byId[r.novedad.id] = r.novedad;
@@ -214,7 +224,7 @@ export function openNovedad(o = {}) {
       reloadVisible(); render();
     } }],
   });
-  MOD.st = cur ? stOf(cur) : { comment: '', techId: o.techId || '', plantillaId: o.plantillaId || '', lineaId: o.lineaId || '' };
+  MOD.st = cur ? stOf(cur) : { comment: '', techId: o.techId || '', plantillaId: o.plantillaId || '', lineaId: o.lineaId || '', purchaseRequestId: o.purchaseRequestId || '' };
   modalRerender();
 }
 ACT.novNew = (ds) => openNovedad({ techId: ds.tech || '', plantillaId: ds.pl || '', movementId: ds.mv || '' });

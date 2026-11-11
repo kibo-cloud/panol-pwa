@@ -55,7 +55,7 @@ test('etiqueta corta para la confirmación de la eliminación definitiva', () =>
 
 test('filtros: período local, temas, autor, texto, vínculo, eliminadas, página', () => {
   assert.deepEqual(parseNovedadFilters({}), {
-    from: null, to: null, techId: null, plantillaId: null, lineaId: null, authorId: null, movementId: null, q: '', linked: null, archived: 'exclude', limit: 50, before: null,
+    from: null, to: null, techId: null, plantillaId: null, lineaId: null, authorId: null, movementId: null, purchaseRequestId: null, q: '', linked: null, archived: 'exclude', limit: 50, before: null,
   });
   const f = parseNovedadFilters({ from: '2026-11-01', to: '2026-11-30', techId: 't-ana', q: '  pinza ', linked: 'yes', archived: 'include', limit: '10', before: '2026-11-10T12:00:00.000Z|nv1' });
   assert.equal(f.from, '2026-11-01');
