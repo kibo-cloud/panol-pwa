@@ -11,6 +11,7 @@ import { DomainError } from '../domain/errors.js';
 import { newId } from './ids.js';
 import { notifyChange, onUnique } from './common.js';
 import { idempotent } from './idempotency.js';
+import { checkReposicionLink, linkReposicion } from './compras.js';
 
 const forbidden = () => new DomainError('Tu perfil no tiene permiso para esta acción.', 'forbidden', 403);
 
@@ -49,14 +50,26 @@ export async function applyMovement(c, actor, input, { demo = false, inactiveHol
 
 export async function registerMovement(db, actor, input, { idempotencyKey, path } = {}) {
   if (!can(actor.role, requiredPermission(input.type), await loadOverrides(db))) throw forbidden();
+  const { purchaseRequestId, ...mv } = input;
+  if (purchaseRequestId && mv.type !== 'reposicion') throw new DomainError('Solo una reposición se vincula a una compra recibida.', 'invalid_purchase', 422);
   return idempotent(db, { userId: actor.id, key: idempotencyKey, method: 'POST', path, body: input }, async (c) => {
-    const plan = await applyMovement(c, actor, input);
+    // Etapa 7: reposición vinculada a una compra recibida (se revisa antes y, bloqueada, después).
+    if (purchaseRequestId) {
+      const a = (await c.query('SELECT tool_id, tech_id, caja_id FROM assignments WHERE id = $1', [mv.asgId ?? null])).rows[0];
+      await checkReposicionLink(c, purchaseRequestId, { toolId: a ? a.tool_id : mv.toolId, techId: mv.cajaId ? null : mv.techId, cajaId: mv.cajaId });
+    }
+    const plan = await applyMovement(c, actor, mv);
+    if (purchaseRequestId) {
+      const h = plan.movement.cajaId ? (await c.query('SELECT name FROM cajas WHERE id = $1', [plan.movement.cajaId])).rows[0] : (await c.query('SELECT name FROM techs WHERE id = $1', [plan.movement.techId])).rows[0];
+      await linkReposicion(c, actor, purchaseRequestId, { id: plan.movement.id, toolId: plan.movement.toolId, techId: plan.movement.cajaId ? null : plan.movement.techId, cajaId: plan.movement.cajaId || null, holderName: h && h.name });
+    }
     return {
       status: 201,
       body: {
         movement: { ...plan.movement, transfers: plan.transfers },
         assignments: plan.newAssignments.map((a) => a.id),
         units: plan.newUnits.map((u) => u.id),
+        ...(purchaseRequestId ? { purchaseRequestId } : {}),
       },
     };
   });

@@ -6,7 +6,7 @@
 import { withSnapshot } from '../adapters/pg/state-repo.js';
 import { loadTxtState, applyImportPlan } from '../adapters/pg/txt-repo.js';
 import { parseTxt, checkData, ImportFileError } from '../importers/txt-v2/validate.js';
-import { planImport, reportOf, REPLACE_NOVEDADES } from '../importers/txt-v2/plan.js';
+import { planImport, reportOf, REPLACE_NOVEDADES, REPLACE_COMPRAS } from '../importers/txt-v2/plan.js';
 import { DomainError } from '../domain/errors.js';
 import { record, audit } from './common.js';
 import { lockAdmins } from './users.js';
@@ -76,6 +76,8 @@ export async function applyImport(db, actor, text, { mode, token }) {
     await lockAdmins(c);
     // Etapa 6: con novedades, reemplazar se rechaza con un 409 claro (no borra lo que nombran).
     if (mode === 'replace' && (await c.query('SELECT 1 FROM novedades LIMIT 1')).rows.length) throw new DomainError(REPLACE_NOVEDADES, 'replace_has_novedades', 409);
+    // Etapa 7: lo mismo con solicitudes de compra (no están en el .txt v2).
+    if (mode === 'replace' && (await c.query('SELECT 1 FROM purchase_requests LIMIT 1')).rows.length) throw new DomainError(REPLACE_COMPRAS, 'replace_has_purchases', 409);
     const p = await plan(c, file, mode, actor, new Date());
     const report = reportOf(p, { savedAt: file.savedAt });
     if (p.errors.length) throw withExtra(new DomainError('El archivo no se puede importar así: revisá los errores del informe.', 'import_invalid', 422), { report });

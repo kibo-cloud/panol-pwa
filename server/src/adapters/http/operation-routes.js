@@ -61,6 +61,8 @@ export function registerOperationRoutes(app) {
         techId: S.id, cajaId: S.id, toolId: S.id, unitId: S.id, asgId: S.id, newUnitId: S.id, resolvesMovementId: S.id,
         qty: S.int(1, 1000000), returned: S.bool, oldDest: S.pool, cond: S.pool, from: S.pool,
         codes: S.str(SCHEMA_LIM.text), reason: S.str(LIM.text), notes: S.str(LIM.text),
+        // Etapa 7: una reposición vinculada a una compra recibida.
+        purchaseRequestId: S.id,
       }, ['type']),
     },
   }, async (req, reply) => sendResult(reply, await movements.registerMovement(db, actorOf(req), req.body, ctx(req))));

@@ -1,7 +1,7 @@
 // Novedades (etapa 6): reglas puras. Una novedad es una entrada fechada del diario del pañol:
 // la fecha y hora las pone el servidor, el autor es quien la carga, el comentario es obligatorio
 // y los temas (técnico, plantilla, línea o sector) son opcionales e independientes. Se puede
-// vincular a una entrega o una reposición (la solicitud de compra llega en la etapa 7).
+// vincular a una entrega o una reposición, y (etapa 7) a una solicitud de compra.
 import { DomainError, notFoundError, tooLong } from './errors.js';
 import { LIM } from './constants.js';
 
@@ -89,6 +89,7 @@ export function parseNovedadFilters(q = {}) {
   return {
     from, to,
     techId: q.techId || null, plantillaId: q.plantillaId || null, lineaId: q.lineaId || null, authorId: q.authorId || null, movementId: q.movementId || null,
+    purchaseRequestId: q.purchaseRequestId || null,
     q: String(q.q || '').trim(),
     linked: q.linked === 'yes' ? true : q.linked === 'no' ? false : null,
     archived: ['include', 'only'].includes(q.archived) ? q.archived : 'exclude',

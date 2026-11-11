@@ -6,7 +6,9 @@ import { holderKey } from './lineas.js';
 
 const needsCleaning = (c) => !!c.cleaning && c.cleaning.status === 'requiere_limpieza';
 
-// data: { now, techs, cajas, tools, units, assignments, controls: [], movements: [], alertRes }
+// data: { now, techs, cajas, tools, units, assignments, controls: [], movements: [], alertRes, purchases? }
+// Etapa 7: las de faltante y cambio llevan la solicitud de compra de esa asignación y motivo
+// (`purchase`: la abierta o, si no, la rechazada sin resolver: "compra rechazada" con su motivo).
 // Las cajas compartidas (etapa 2) tienen las mismas alertas que un técnico, con `cajaId`.
 export function deriveAlerts(data) {
   const cur = periodOf(data.now || new Date());
@@ -15,6 +17,12 @@ export function deriveAlerts(data) {
   const { stateOf, hist } = controlHistory(effList);
   const activeAsg = Object.entries(data.assignments || {}).filter(([, a]) => a.active).map(([id, a]) => ({ id, ...a }));
   const alerts = [];
+  const purchases = data.purchases || [];
+  const purchaseOf = (a, reason) => {
+    const list = purchases.filter((p) => p.reason === reason && (p.assignmentId === a.id || (a.unitId && p.unitId === a.unitId)));
+    const p = list.find((x) => ['pendiente', 'aprobada', 'comprada'].includes(x.status)) || list.filter((x) => x.status === 'rechazada').pop();
+    return p ? { purchase: { id: p.id, name: p.name, status: p.status, decisionComment: p.decisionComment || '' } } : {};
+  };
 
   for (const [tid, t] of Object.entries(data.techs || {})) {
     if (t.active === false) continue;
@@ -50,14 +58,14 @@ export function deriveAlerts(data) {
     const many = s.expected > 1;
     const text = (qty) => `${tn}${code}, ${t.name}${qty}${s.note ? '. ' + s.note : ''}`;
     if (hasMissing(s)) {
-      alerts.push({ key: `falt-${a.id}-${s.controlId}`, type: 'faltante', sev: 3, title: 'Herramienta faltante', text: text(many ? `: faltan ${s.missing} de ${s.expected}` : ''), ...who, asgId: a.id, at: s.at, qty: s.missing ?? null });
+      alerts.push({ key: `falt-${a.id}-${s.controlId}`, type: 'faltante', sev: 3, title: 'Herramienta faltante', text: text(many ? `: faltan ${s.missing} de ${s.expected}` : ''), ...who, asgId: a.id, at: s.at, qty: s.missing ?? null, ...purchaseOf(a, 'faltante') });
     }
     if (hasChange(s)) {
       const h = hist[a.id] || [];
       const cons = h.length >= 2 && hasChange(h[h.length - 2]);
       alerts.push({
         key: `${cons ? 'cons' : 'camb'}-${a.id}-${s.controlId}`, type: cons ? 'consecutiva' : 'cambio', sev: cons ? 3 : 2, title: cons ? 'Dañada en controles consecutivos' : 'Para cambio, reposición pendiente',
-        text: text(many ? `: ${s.change} de ${s.expected} para recambio` : ''), ...who, asgId: a.id, at: s.at, qty: s.change ?? null,
+        text: text(many ? `: ${s.change} de ${s.expected} para recambio` : ''), ...who, asgId: a.id, at: s.at, qty: s.change ?? null, ...purchaseOf(a, 'cambio'),
       });
     }
   }

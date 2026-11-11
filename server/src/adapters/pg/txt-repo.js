@@ -64,7 +64,7 @@ export async function loadTxtState(q) {
     for (const r of perms) (p[r.role] ||= {})[r.perm] = r.allowed;
     data.config.permisos = { ...p, updatedAt: iso(maxIso(perms)) };
   }
-  const ledger = (await q.query('SELECT (SELECT count(*) FROM movements) AS movements, (SELECT count(*) FROM controls) AS controls, (SELECT count(*) FROM novedades) AS novedades')).rows[0];
+  const ledger = (await q.query('SELECT (SELECT count(*) FROM movements) AS movements, (SELECT count(*) FROM controls) AS controls, (SELECT count(*) FROM novedades) AS novedades, (SELECT count(*) FROM purchase_requests) AS purchases')).rows[0];
   // Etapa 5: registros eliminados (archivados) de las colecciones del v2, y los eliminados
   // definitivamente (por la auditoría), para las marcas de borrado del archivo exportado.
   const archived = {};

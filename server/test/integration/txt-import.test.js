@@ -148,6 +148,22 @@ describe('reemplazar (migración inicial)', () => {
     }
   });
 
+  test('etapa 7: con solicitudes de compra en el servidor, reemplazar también se rechaza', async () => {
+    await q("INSERT INTO tools (id, name) VALUES ('tool-txt-compra', 'Herramienta de la compra')");
+    await q("INSERT INTO purchase_requests (id, tool_id, reason, qty, origin, created_by) VALUES ('pr-txt', 'tool-txt-compra', 'cambio', 1, 'tool', 'u-con')");
+    try {
+      const rep = await dryRun(toTxt(buildV21()), 'replace');
+      assert.equal(rep.canApply, false);
+      assert.match(rep.errors.map((e) => e.message).join(' '), /migración inicial.*solicitudes de compra/);
+      const r = await importTxt(toTxt(buildV21()), { mode: 'replace', token: rep.token || 'a'.repeat(64) });
+      assert.equal(r.statusCode, 409, r.body);
+      assert.equal(r.json().error, 'replace_has_purchases');
+    } finally {
+      await q("DELETE FROM purchase_requests WHERE id = 'pr-txt'");
+      await q("DELETE FROM tools WHERE id = 'tool-txt-compra'");
+    }
+  });
+
   test('aplica en una transacción: ids de 2.1, libro con fecha original, fechas vacías nulas', async () => {
     const { res } = await apply(toTxt(buildV21()), 'replace');
     assert.equal(res.applied, true);

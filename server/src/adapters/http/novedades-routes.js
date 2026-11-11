@@ -2,7 +2,7 @@
 // - GET /api/novedades?from&to&techId&plantillaId&lineaId&authorId&movementId&q&linked&archived&limit&before
 //   (novedades_view; archived=include|only pide records_delete) -> { novedades, next, total }.
 // - GET /api/novedades/:id (novedades_view) con ETag.
-// - POST /api/novedades {comment, techId?, plantillaId?, lineaId?, movementId?} (novedades_create,
+// - POST /api/novedades {comment, techId?, plantillaId?, lineaId?, movementId?, purchaseRequestId?} (novedades_create,
 //   Idempotency-Key) -> 201 { novedad }.
 // - PATCH /api/novedades/:id {comment?, techId?, plantillaId?, lineaId?} + If-Match: el autor
 //   (con novedades_create) o novedades_edit.
@@ -23,7 +23,7 @@ export function registerNovedadesRoutes(app) {
     ...perm('novedades_view'),
     schema: {
       querystring: obj({
-        from: S.day, to: S.day, techId: S.id, plantillaId: S.id, lineaId: S.id, authorId: S.id, movementId: S.id,
+        from: S.day, to: S.day, techId: S.id, plantillaId: S.id, lineaId: S.id, authorId: S.id, movementId: S.id, purchaseRequestId: S.id,
         q: S.str(LIM.name), linked: { type: 'string', enum: ['yes', 'no'] }, archived: { type: 'string', enum: ['exclude', 'include', 'only'] },
         limit: { type: 'string', pattern: '^[1-9][0-9]{0,2}$' }, before: S.str(300),
       }),
@@ -35,7 +35,7 @@ export function registerNovedadesRoutes(app) {
 
   app.post('/api/novedades', {
     ...perm('novedades_create'),
-    schema: { body: obj({ comment, ...subjects, movementId: S.idOrNull }, ['comment']) },
+    schema: { body: obj({ comment, ...subjects, movementId: S.idOrNull, purchaseRequestId: S.idOrNull }, ['comment']) },
   }, async (req, reply) => {
     const r = await novedades.createNovedad(db, actorOf(req), req.body, { idempotencyKey: idempotencyKey(req), path: req.routeOptions.url });
     if (r.replayed) reply.header('Idempotent-Replayed', 'true');

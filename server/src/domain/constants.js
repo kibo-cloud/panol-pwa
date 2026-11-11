@@ -81,6 +81,11 @@ export const PERMS = [
   ['novedades_view', 'Ver novedades'],
   ['novedades_create', 'Cargar novedades (y editar las propias)'],
   ['novedades_edit', 'Editar cualquier novedad'],
+  // Etapa 7: compras (Gerencia ve y decide; crear, quien opera el pañol; recibir, el responsable).
+  ['purchases_view', 'Ver el apartado de Gerencia: solicitudes de compra, filtros y totales'],
+  ['purchases_decide', 'Aprobar o rechazar solicitudes de compra'],
+  ['purchases_create', 'Crear solicitudes de compra a mano (desde la herramienta o una alerta)'],
+  ['purchases_receive', 'Recibir compras aprobadas (genera el ingreso al inventario)'],
 ];
 export const PERM_KEYS = PERMS.map(([k]) => k);
 

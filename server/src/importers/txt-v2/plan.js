@@ -52,12 +52,14 @@ export function deriveUsername(name, taken) {
 }
 
 /**
- * server: { doc, creds: { [userId]: { hasPassword, legacyPinHash } }, ledger: { movements, controls, novedades },
+ * server: { doc, creds: { [userId]: { hasPassword, legacyPinHash } }, ledger: { movements, controls, novedades, purchases },
  *           archived?, hidden?, tombstones?: { 'colección/id': fecha } }
  * file:   { data, deleted, savedAt }
  * Devuelve { mode, errors, conflicts, assumptions, changes, counts, token, final }.
  */
 export const REPLACE_NOVEDADES = 'Reemplazar es solo para la migración inicial: el servidor ya tiene novedades. Usá Combinar.';
+// Etapa 7: las solicitudes de compra tampoco están en el .txt v2.
+export const REPLACE_COMPRAS = 'Reemplazar es solo para la migración inicial: el servidor ya tiene solicitudes de compra. Usá Combinar.';
 
 export function planImport(server, file, { mode, actorId, now = new Date() }) {
   const errors = [];
@@ -83,6 +85,7 @@ export function planImport(server, file, { mode, actorId, now = new Date() }) {
     }
     // Etapa 6: las novedades no están en el .txt v2; reemplazar borraría lo que nombran.
     if (server.ledger.novedades > 0) err(null, null, null, REPLACE_NOVEDADES);
+    if (server.ledger.purchases > 0) err(null, null, null, REPLACE_COMPRAS);
     const fileAdmins = Object.entries(file.data.users).filter(([id, u]) => id !== actorId && u.role === 'admin' && u.active !== false);
     if (!fileAdmins.length) err('users', null, null, 'El archivo no tiene un administrador activo. Reemplazar dejaría el sistema sin administrador.');
     for (const c of DATA_COLS) {
