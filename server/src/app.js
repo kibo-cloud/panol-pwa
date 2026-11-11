@@ -11,6 +11,7 @@ import { registerReadRoutes } from './adapters/http/read-routes.js';
 import { registerOperationRoutes } from './adapters/http/operation-routes.js';
 import { registerEventRoutes } from './adapters/http/events-routes.js';
 import { registerTxtRoutes } from './adapters/http/txt-routes.js';
+import { registerExcelRoutes } from './adapters/http/excel-routes.js';
 import { registerPlantillaRoutes } from './adapters/http/plantilla-routes.js';
 import { registerLineasRoutes } from './adapters/http/lineas-routes.js';
 import { registerKitsRoutes } from './adapters/http/kits-routes.js';
@@ -77,6 +78,7 @@ export async function buildApp({ config, pool, logger, extend, events } = {}) {
   registerOperationRoutes(app);
   registerEventRoutes(app, events);
   registerTxtRoutes(app);
+  registerExcelRoutes(app);
   web = await registerWeb(app);
   if (extend) await extend(app);
   return app;

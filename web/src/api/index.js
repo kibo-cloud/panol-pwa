@@ -115,4 +115,9 @@ export const api = {
   // archivo .txt
   importTxt: (text, mode, token) => http.request('POST', `/api/import/txt?mode=${enc(mode)}${token ? '&token=' + enc(token) : '&dryRun=1'}`, { rawText: text }),
   exportTxt: () => http.get('/api/export/txt', { text: true }),
+
+  // etapa 9: importar el Excel anterior (el archivo en base64 dentro del JSON).
+  excelPreview: (body) => http.post('/api/import/excel/preview', body),
+  excelConfirm: (body) => http.post('/api/import/excel/confirm', body),
+  excelBatches: () => http.get('/api/import/excel/batches'),
 };

@@ -1,4 +1,5 @@
-// Administración: usuarios y permisos (solo admin, en el servidor), configuración (lista de
+// Administración: usuarios y permisos (solo admin, en el servidor), importar el Excel anterior
+// (etapa 9, features/excelimport), configuración (lista de
 // turnos de las plantillas y, etapa 8, el umbral de la alerta "Sin control hace N días"), datos e
 // integridad, y auditoría paginada.
 import { esc } from '../../ui/dom.js';
@@ -17,6 +18,7 @@ import { validateShiftLabels } from '../../state/plantillas.js';
 import { fdate, fdt } from '../../state/period.js';
 import { parseRoute } from '../../ui/router.js';
 import { deleteBtn, deletedTab } from '../records/view.js';
+import { excelTab } from '../excelimport/view.js';
 
 // Datos que solo ve un administrador: se piden al abrir la pestaña.
 const AD = { users: null, perms: null, pending: {}, audit: null, labels: null, alertCfg: null, loading: {} };
@@ -115,8 +117,8 @@ function auditTab() {
 
 VIEWS.admin = () => {
   const tab = UI.adminTab;
-  const tabs = [['users', 'Usuarios y permisos'], ['config', 'Configuración'], ['data', 'Datos e integridad'], ...(can('records_delete') ? [['deleted', 'Registros eliminados']] : []), ['audit', 'Auditoría']];
-  const body = tab === 'users' ? usersTab() : tab === 'deleted' ? deletedTab() : tab === 'config' || tab === 'shifts' ? configTab() : tab === 'data' ? dataTab() : auditTab();
+  const tabs = [['users', 'Usuarios y permisos'], ['config', 'Configuración'], ['data', 'Datos e integridad'], ...(can('records_delete') ? [['deleted', 'Registros eliminados']] : []), ...(can('import_excel') ? [['excel', 'Importar Excel']] : []), ['audit', 'Auditoría']];
+  const body = tab === 'users' ? usersTab() : tab === 'deleted' ? deletedTab() : tab === 'excel' ? excelTab() : tab === 'config' || tab === 'shifts' ? configTab() : tab === 'data' ? dataTab() : auditTab();
   return pageHead('Administración', 'Usuarios, permisos, configuración y registros del sistema') + `<div class="tabs">${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="adminTab" data-v="${esc(k)}">${l}</button>`).join('')}</div>${body}`;
 };
 ACT.adminTab = (ds) => { UI.adminTab = ds.v; if (location.hash !== '#admin') location.hash = '#admin'; else render(); };

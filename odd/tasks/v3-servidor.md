@@ -65,8 +65,8 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 5. Eliminar y anular — done (PR #5)
 6. Novedades — done (PR #6)
 7. Gerencia — done (PR #7)
-8. Existencia por técnico y alertas — implemented, in review (`v3/etapa-8-existencia`)
-9. Importador del Excel
+8. Existencia por técnico y alertas — done (PR #8)
+9. Importador del Excel — in progress (`v3/etapa-9-importador`)
 10. Impresión de auditoría
 
 ## Stage 1 tasks
@@ -1805,9 +1805,264 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   (562 s; first runs failed only in `t15-existencia`, whose cell text and API cell assertions
   predated the unit `codes` — spec updated). Not pushed.
 
+- Stage 8 closed 2026-11-12: E8.V1 `9a8e1b4`, CI run 43049780022, PR #8 →
+  `v3/etapa-7-gerencia`.
+
+## Stage 9 decisions (parent, within PEDIDO §2.12, §1 and the user's import decision)
+- Source: the real `.xlsm` lives only in `privado/` (git-ignored). It is never committed, copied
+  to fixtures, logged with personal data, or summarised with names/legajos in commits, the
+  feature doc or PRs (counts only). Tests use synthetic workbooks generated in code with the
+  existing `xlsx` dependency, reproducing the real layout (one sheet per legajo, `BLANCO`,
+  `RESUMEN`, `NOVEDADES`, dated 3-column blocks ENTREGA/DEVOLUCIÓN/CONTEO, the 0,5 conventions,
+  missing initial delivery, two blocks in one week). The writer studies the real file and the
+  instructivo PDF read-only to learn the layout, and runs a local dry-run preview on it.
+- Flow: Administración › Importar Excel (new permission `import_excel`, admin only by default).
+  Upload `.xlsm`/`.xlsx` (size limit, macros never executed — parsed as data only) → the server
+  builds a plan WITHOUT writing → the preview lists every assumption case by case (adjustment
+  entregas for positive saldo, faltantes, recambios, duplicate weeks, devoluciones read as
+  devolución/baja, ignored 0,5 pairs, unknown or unmatched tools/legajos, sheets without blocks,
+  date problems) with accept/skip per case where skipping is meaningful → confirm applies the
+  accepted plan in ONE transaction, bound to the file hash and the plan version (a changed server
+  state between preview and confirm refuses with "volvé a previsualizar"). Re-importing the same
+  file hash is refused (already imported).
+- Mapping (PEDIDO §2.12): técnicos/referentes from RESUMEN (legajo, name, especialidad; created
+  without plantilla; legajos without sheet or controls created without tools); tools by quantity
+  in the Excel order (matched by normalized name to existing tools, otherwise created in that
+  order); `BLANCO` becomes the kit base (stage 3); first block = existencia inicial as
+  `entrega_inicial`, plus an adjustment entrega marked importada when the count exceeds the
+  delivered (positive saldo); each dated block = one finalized control on that date marked
+  "importado del Excel" (cleaning NULL = "sin dato", as stage 4 decided for imported controls):
+  count 1 = bueno, 0,5 = recambio (with or without the 0,5 in DEVOLUCIÓN), less than assigned =
+  faltante with note "Conteo 0 en Excel"; DEVOLUCIÓN 0,5 next to a 0,5 count is ignored; a
+  devolución equal to the previous count is a devolución (or baja — record which rule decides);
+  ENTREGA in later blocks = entrega adicional or reposición (reposición when it follows a
+  faltante/recambio of that tool); two blocks in the same week: the last is effective, the
+  earlier stays as history (stage 4 correction semantics); NOVEDADES rows become novedades
+  (date+time from the sheet, tech by legajo, author = the importing user, marked importada).
+- Imported controls never create purchase requests nor reopen alerts retroactively; the
+  stage 7 automatic creation is skipped for imported data (documented). Days-since and the
+  stage 8 alert use them like any effective control.
+- Target safety: a legajo that already has operational history on the server is skipped with a
+  conflict in the preview (no merging of histories); existing techs without history get the
+  imported data. Every imported row carries an import marker (`import_batch_id`) and the batch
+  (file hash, file name, who, when, counts) is audited; dates in Buenos Aires time.
+- No `.txt` change; stage 10 printing shows imported controls with their mark.
+
+## Stage 9 tasks (branch `v3/etapa-9-importador`, stacked on stage 8)
+- [x] E9.T1 Parser + planner (pure, unit-tested on synthetic workbooks): sheet layout detection,
+      block parsing, rules above, the case list with stable ids; a local dry-run script that runs
+      the planner on `privado/*.xlsm` and prints COUNTS only (never committed output).
+      Commit `9dffad4`. Route: delegated writer. Code: `server/src/importers/excel-v1/{zip,workbook,
+      layout,plan,index}.js`, `server/scripts/excel-dry-run.mjs`, synthetic workbook builder
+      `server/test/fixtures/excel.js` (xlsx devDependency, invented names/legajos),
+      `server/test/unit/excel-import.test.js` (25). Test-first: not observed (module written first,
+      tests right after); the first run found 1 wrong expectation in the test (an all-zero dated block
+      is `bloque_vacio` by rule), fixed in the test.
+- [x] E9.T2 Backend: migration `016_importador.sql` (batch table, import markers, permission),
+      preview and confirm endpoints (one transaction, hash + plan version binding, skip/accept
+      per case, conflicts), purchase auto-creation bypass for imported controls, audit;
+      integration tests.
+      Commit `928c59a`. Route: delegated writer. Code: migration `016_importador.sql`,
+      `application/excel-import.js`, `adapters/http/excel-routes.js`, `import_excel` in
+      `domain/constants.js` (+ web mirror), `importBatchId` in `inventory-repo.js`
+      (`applyMovementPlan`/`saveControl`/`loadControls`), `state-repo.js` (movements),
+      `novedades-repo.js`. Test-first: `unit/permissions` RED (2 failures: new key/default) then
+      GREEN; `integration/excel-import.test.js` RED 12/12 (routes missing) then GREEN; its faltante
+      note test was RED once more for a real defect (control items keyed without the tool, so two
+      tools of one control collapsed into one assignment) -> fixed in the slot mapping -> GREEN; the
+      attach and concurrent-confirm tests (2) were added after and passed first run. Contract change:
+      `auth.test` gerencia permissions include `import_excel: false`.
+- [x] E9.T3 Frontend + E2E: Administración › Importar Excel (upload, preview grouped by case
+      type with accept/skip, totals, confirm, result), "importado del Excel" marks in controls
+      and movements; E2E with a synthetic workbook (preview, skip a case, confirm, re-import
+      refused, data visible in Existencia).
+      Commits `da820c9` (web) and `8e80906` (E2E). Route: delegated writer. Code:
+      `web/src/state/excelimport.js` (pure), `web/src/features/excelimport/view.js` (admin tab
+      "Importar Excel": file pick, preview card with KPIs, groups by case type with "Importar / Omitir"
+      44 px segmented buttons and bulk buttons, "Recalcular vista previa" banner, confirm disabled
+      with the exact reason, result card, previous imports), `api/index.js`, admin tab wiring,
+      `impChip` in `ui/components.js` (movement rows), control detail banner and control lists
+      "(importado del Excel)", `.xim*` classes in `v3.css`. Test-first: `web/test/excelimport.test.js`
+      RED (missing module) then GREEN. New E2E `t16-excel` (2): preview without writes, cases by
+      group, skip a new tool + recalculate + confirm, result, re-import refused in the UI, Existencia
+      cell of an imported tech, marks in the tech control list, control detail and Entregas rows;
+      responsable without the tab and 403; 390 px without overflow and 44 px decision buttons. Written
+      with the code (passed on its first run). No new hash route (admin tab), so `ROUTES` unchanged.
+- [x] E9.V1 Review findings (independent review of stage 9). Route: delegated writer (one bounded
+      writer; parse/plan/apply touch 4+ non-trivial files). Commit `acf01df`
+      `fix(import): close stage 9 review findings`. Each fix, test-first:
+      1. BLOCKER quadratic XML regexes -> linear `scanXml` tokenizer (indexOf + quote-aware tag end,
+         hand-written attribute parser; unclosed/mismatched tag or DOCTYPE = 422), XML parts capped
+         at 16 MB inflated, parse+plan in a `worker_threads` worker (`importers/excel-v1/run.js`,
+         `worker.js`; 30 s timeout -> worker terminated, 422 `import_timeout`; 768 MB heap limit ->
+         `too_complex`), one Excel import (preview or confirm) at a time per process (409
+         `import_busy`). RED: 400 KB of unclosed `<row>` took 6.1 s on the old reader and returned
+         no error; `excel-hostile.test.js` RED (missing `scanXml`/`run.js`). GREEN: rejected in ms.
+      2. MAJOR blocks × tools -> `LAYOUT_LIMITS` (2000 blocks and 2000 tool rows per sheet, 1,000,000
+         blocks × tools per book, checked before the rows are built) + `PLAN_LIMITS.work` (2,000,000
+         ops + control items). RED (no error on 2001 blocks/tools) -> GREEN.
+      3. MAJOR same-day ordering -> each block applied whole in plan order (its devoluciones, its
+         entregas/reposiciones/ajustes, its control), in its own window of the day (08:00–20:00
+         split among that day's blocks, step ≤ 1 s, never overlapping); ops are no longer sorted by
+         time (ingresos first, then each sheet in plan order, then novedades). RED: two blocks the same
+         day with 70 tools put the block-1 devolución before the block-0 control -> GREEN (unit + DB).
+      4. Minors: a) `staleDecisions` with a Set (no RED: behaviour unchanged; 20,000 stale ids test);
+         b) no server base kit -> the kit is created from BLANCO ("Se crea el kit base…"; an archived
+         base row is recovered) — RED -> GREEN (unit + DB); c) every timestamp clamped to `now`
+         (today's window ends at now; novedades `min(at, now)`); the token hashes ops without `at`
+         (now moves between preview and confirm) — RED -> GREEN; d) DEVOLUCIÓN = previous x,5 ->
+         1 unit to `baja`, x − 0,5 to `disponible` — RED -> GREEN; e) documented below.
+      5. Parent decision `conteo_vacio_probable` — RED -> GREEN (unit + DB), see notes.
+      6. Hostile files (`excel-hostile.test.js`, ZIP builder `test/fixtures/zip.js`): central
+         directory out of bounds / short count / bad local offset, declared size mismatch, deflate
+         bomb beyond the declared size, part > 16 MB, encrypted part, ZIP64 (EOCD and per entry),
+         unclosed/mismatched tags, DOCTYPE, shared-string index out of range, worker happy path =
+         in-thread plan, worker error, worker timeout. Contract: `PLAN_VERSION` 2; web `CASE_INFO`
+         gains `conteo_vacio_probable` (parity test with `CASE_TYPES`).
+
+## Stage 9 implementation notes
+Rules only; no real names, legajos or comments (the real workbook stays in `privado/`).
+- Reader: `importers/excel-v1/{zip,workbook}.js` is a minimal OOXML reader on `node:zlib` (central
+  directory, stored/deflate, no ZIP64, no encryption; 16 MB per inflated part and 128 MB total,
+  inflate with `maxOutputLength`). XML is read with a linear tokenizer (`scanXml`, E9.V1), never
+  with backtracking regexes; the server runs reader + plan in a worker with a timeout. It reads only `xl/workbook.xml`, its rels, `sharedStrings.xml` and the
+  worksheets (cached values; formulas, styles, `vbaProject.bin` and links are never read). Reason:
+  `xlsx` is a devDependency (stripped from the image) with known advisories on untrusted input, and
+  no new runtime dependency is allowed; `xlsx` is still used to generate the synthetic test
+  workbooks. A local parity check against `xlsx` on the real file gave 0 differing cells.
+- Layout (`layout.js`) is found by labels, not fixed cells: legajo/BLANCO sheets by the row with
+  C=ENTREGA, D=DEVOLUCIÓN, E=CONTEO; blocks = every ENTREGA/DEVOLUCIÓN/CONTEO triple from column H;
+  the block date is the first non-empty cell above it (merged cells). RESUMEN by the ÚLTIMO
+  CONTROL row (legajo above it, especialidad and name above that). NOVEDADES by the FECHA / HORA /
+  LEGAJO / COMENTARIO header. Legajo sheets = numeric sheet names or names that are RESUMEN legajos;
+  other sheets (besides RESUMEN, BLANCO, NOVEDADES, CRONOGRAMA) are a `hoja_ignorada` case.
+- Values: numbers or text with comma/point decimals; blank count = 0 (as the Excel SALDO formula
+  did); a count must be a multiple of 0,5, an ENTREGA a whole number; anything else is a
+  `valor_invalido` case and is read as blank. Dates: Excel serials (1900/1904) or dd/mm/aaaa;
+  before 2000 or after today = `fecha_invalida` (block not imported). Times in Buenos Aires
+  (E9.V1): 08:00–20:00 of the block's day split evenly among that day's blocks; each block's ops
+  (devoluciones, entregas, then its control) take consecutive instants of its own share (step ≤
+  1 s), so blocks never overlap; for today the window ends at "now" (from midnight if now is before
+  08:00) and novedades are `min(sheet time, now)`: nothing imported is in the future. The stock
+  ingreso is one hour before the first delivery of that tool.
+- Writer decisions (conservative, all visible as preview cases):
+  1. A dated block whose cells are all 0/blank is `bloque_vacio` (the Excel + created blocks
+     prefilled with zeros); an undated block with data is `bloque_sin_fecha`; neither is imported.
+  2. Order inside a block (E9.V1): all its devoluciones, then all its entregas (reposiciones and
+     ajustes included), then its control; ops are applied in plan order, block by block. Blocks
+     sorted by date; on the same date the leftmost column is the newer one.
+  3. x,5 counts: x − 0,5 good units + 1 for recambio (0,5 = 1 recambio).
+  3b. Probable empty count (`conteo_vacio_probable`, parent decision, E9.V1): a count below the
+     assigned quantity, without recambio, that a LATER block of the same sheet exceeds (in units)
+     with no ENTREGA of that tool in the blocks in between (the later block included) is most
+     likely an unfilled cell. Default `skip` = "sin dato": the item is left out of that control
+     (no faltante, no note, not in the faltante totals; the count is not the "previous count" for
+     devoluciones and the tool's loss flag keeps its prior value). `Importar` = faltante with the
+     usual note (no separate `faltante` case). Other lower counts keep the faltante rule. "Sin
+     dato" is exactly how stage 4/8 treat an assignment not counted in a finalized control:
+     `controlHistory` keeps the previous effective state (`stateOf`), `asgUnits` shows it as
+     `pendiente` only if it was never counted, so the Existencia matrix, the faltante/recambio
+     alerts and the control reports count only the items present; a control whose items are all
+     "sin dato" is not created.
+  4. Positive saldo: one `ajuste` case per legajo + tool (not per block, so skipping does not
+     cascade); skipped → the count is clamped to what was delivered.
+  5. DEVOLUCIÓN equal to the previous count → devolución of ceil(previous) units to `disponible`;
+     when the previous count was x,5 only the recambio unit (1) goes to `baja` and the x − 0,5 good
+     units go to `disponible` (E9.V1; the rule that decides devolución vs baja). Another whole value → `devolucion_dudosa`, skipped by default; a 0,5 next
+     to an x,5 count → ignored (`devolucion_05`); returns take the newest assignments first.
+  6. ENTREGA when the tech has none → entrega inicial; when the last imported item of that tool had
+     faltante or recambio and one assignment of the same quantity exists → reposición (returned,
+     the old one to `baja`, no pending return); otherwise adicional.
+  7. Two blocks in the same control period (week of the month) → the later is a correction
+     superseding the earlier (stage 4 semantics); both stay, the later is effective.
+  8. Stock: one `ingreso` per tool with everything the import delivers; server stock untouched.
+  9. Tools match by normalized name (case, accents, spaces) among non-archived tools; a match that
+     is unit-tracked or inactive is `herramienta_no_importable` (its cells are ignored). New tools
+     go to "sin categoría", appended to that order scope in Excel order (scope version bumped).
+     Only tools in BLANCO or with a non-zero value in an imported sheet are created.
+  10. Kit base = BLANCO tools, qty 1 each (BLANCO has no quantities). If the server base kit already
+      has items the `kit_base` case defaults to skip (keep the server kit). If the server has no
+      base kit, it is created from BLANCO (an archived base row is recovered instead; E9.V1).
+  11. Legajos: a sheet not in RESUMEN is `legajo_sin_resumen`, skipped by default (accepting creates
+      "Legajo N"); repeated RESUMEN legajos keep the first column; an unknown especialidad leaves it
+      empty. Conflict (nothing of the sheet imported): legajo with operational history
+      (`tech_has_history`), archived or inactive. An existing tech without history keeps its name,
+      especialidad and plantilla and receives the data (control snapshot = `plantilla_on`).
+  12. Novedades: a legajo not imported (unknown, conflict or skipped) → novedad without técnico and
+      "[Legajo N] " prefixed to the comment; comments over 2000 chars are cut (`novedad_recortada`);
+      no comment or date → `novedad_invalida`; missing time → 00:00.
+  13. Faltante notes are "Conteo 0 en Excel"; imported controls have cleaning NULL ("sin dato").
+- Case ids are stable for the same file (`tec:l<n>`, `herr:t<n>`, `kit`, `aj:l<n>:t<n>`,
+  `dev:l<n>:c<col>:t<n>`, …). Decisions are `{id: accept|skip}`; only skippable cases take them;
+  ids that name no skippable case are returned as `staleDecisions` and ignored.
+- API: `POST /api/import/excel/preview {fileName, file (base64), decisions?}` and
+  `POST /api/import/excel/confirm {…, token}` (`import_excel`, admin only by default; 10 MB file,
+  `.xlsx`/`.xlsm` names only; 400 bad base64, 422 `invalid_workbook`/`invalid_file_name`, 413);
+  `GET /api/import/excel/batches`. Token = sha256 of the file hash, plan version, operations and
+  case decisions: a changed server state or other decisions → 409 `import_changed` ("volvé a
+  previsualizar", with the new report). Same file hash → 409 `already_imported` in preview and
+  confirm (unique index backstop). The web re-previews after decision changes before confirming.
+  E9.V1: the token hashes the ops without their `at` (today's window depends on "now", which moves
+  between preview and confirm; everything else, the dates included, is still bound); 422
+  `import_timeout` (worker over 30 s), 422 `invalid_workbook` for limits and damaged XML, 409
+  `import_busy` while another Excel preview/confirm runs in the process.
+- Deviation (documented, E9.V1): a `.txt` restore (stage 1 format) does not carry
+  `import_batch_id`, so restored techs/tools/movements/controls/novedades lose the "importado del
+  Excel" mark while `import_batches` stays (append-only); re-importing that same file is still
+  refused as already imported. Accepted: the batch is the audit record and the `.txt` format is
+  unchanged by stage 9.
+- Apply: one SERIALIZABLE transaction; lock order named locks (`import:excel`, `techs.legajo`,
+  `tools.name`) → order scope `tools:` → base kit FOR UPDATE → especialidades FOR SHARE → attached
+  techs FOR UPDATE → matched tools FOR UPDATE, then the plan is re-built and compared with the
+  token. Movements go through `planMovement` with an in-memory chained context (no per-movement
+  audit); controls through `buildControlDoc` + `saveControl` already finalized. Marks:
+  `import_batch_id` on techs/tools created, movements, controls and novedades (+ `imported`);
+  `import_batches` is append-only; one audit `import_excel` with counts only (no file name or
+  data). Purchase bypass: imported controls never pass through `finalizeControl`, so
+  `autoPurchasesOnFinalize` never runs for them (integration test: 0 requests after import; a new
+  app control on imported assignments creates its request as usual). Alerts and days-since use the
+  imported effective controls like any other (only the current state of active assignments).
+- Web: Administración › Importar Excel tab (`features/excelimport/view.js`, pure helpers in
+  `state/excelimport.js`), marks "Importado del Excel" on movement rows, control detail banner
+  and control lists. No new hash route (it is an admin tab), so `ROUTES` is unchanged.
+- Real-file observation (counts only): about half of the imported faltante items (813 of 1558)
+  are counted again in a later block, i.e. many zeros were probably unfilled cells; the rule
+  "less than assigned = faltante" was kept as decided and they are listed as cases. Superseded by
+  rule 3b (`conteo_vacio_probable`, parent decision in E9.V1).
+
+## Stage 9 verification (local, sequential, delegated writer)
+- `npm test` 267/267 (on `8e80906`); `npm run test:db` 266/266 (775 s; run on the server code of
+  `928c59a`, unchanged after: the later commits touch only web/, E2E and this doc); `npm run build`
+  ok, `web/dist/index.html` with 0 inline script/style/handlers; `PANOL_E2E_BUILD=1 npm run
+  test:e2e` 70 passed, 0 failed, 0 skipped (598 s, on `8e80906`).
+- Dry-run on the real workbook (`node server/scripts/excel-dry-run.mjs`, against an empty server,
+  output in `$TEMP` only, COUNTS): 27 legajo sheets (0 without the format, 0 ignored), RESUMEN 26
+  columns, BLANCO 57 tools, NOVEDADES 2 rows, 0 errors. Totals: 26 techs to create, 57 tools to
+  create, kit base 57 items, 448 controls (54 same-week corrections), 322 entregas, 269 entregas de
+  ajuste, 0 reposiciones, 1 devolución, 0 bajas, 55 stock ingresos, 1 novedad. Cases: tecnico_nuevo
+  26, legajo_sin_resumen 1, herramienta_nueva 57, kit_base 1, ajuste 268, faltante 1517, recambio
+  315, devolucion 1, devolucion_dudosa 1, semana_duplicada 54, bloque_sin_fecha 7, bloque_vacio 4,
+  hoja_sin_bloques 2, novedad_invalida 1; 2 skippable cases default to skip.
+- Commits: `9dffad4` (T1), `928c59a` (T2), `da820c9` + `8e80906` (T3), then the doc commit. Not
+  pushed.
+- E9.V1 (on `acf01df`, sequential): `npm test` 289/289; `npm run test:db` 270/270 (637 s; the
+  excel file 18/18 incl. 4 new: same-day blocks with 65 tools, probable empty count, `import_busy`,
+  kit base created); `npm run build` ok, 0 inline script/style/handlers; `PANOL_E2E_BUILD=1 npm run
+  test:e2e` 70 passed, 0 failed, 0 skipped (578 s). Dry-run on the real workbook now runs the
+  plan in the worker (339 ms), COUNTS: 27 legajo sheets, 0 errors; totals 26 techs, 57 tools, kit
+  57, 445 controls (53 corrections), 322 entregas, 269 ajustes, 0 reposiciones, 1 devolución,
+  0 bajas, 55 ingresos, 1 novedad. Cases: tecnico_nuevo 26, legajo_sin_resumen 1,
+  herramienta_nueva 57, kit_base 1, ajuste 268, faltante 1194, conteo_vacio_probable 323,
+  recambio 315, devolucion 1, devolucion_dudosa 1, semana_duplicada 53, bloque_sin_fecha 7,
+  bloque_vacio 4, hoja_sin_bloques 2, novedad_invalida 1; 325 skippable cases default to skip
+  (323 of them probable empty counts). 3 controls fewer than before: blocks whose only counted
+  items became "sin dato". Integration tests were written with the fix (RED observed in the unit
+  tests, not separately in the DB tests).
+
 ## Next step
-- Stage 8: independent review, CI and PR #8 → `v3/etapa-7-gerencia`.
-- PRs #1–#7 await user review (stacked: #1 → `v3-servidor`, each next PR → the previous stage). Engram mirror of this document: pending (multiple active
+- Stage 9: E9.T1–E9.T3 (one delegated writer), then independent review, CI and PR #9 →
+  `v3/etapa-8-existencia`.
+- PRs #1–#8 await user review (stacked: #1 → `v3-servidor`, each next PR → the previous stage). Engram mirror of this document: pending (multiple active
   sessions). PR #1 awaits user review; after it is merged, rebase stage 2 onto `v3-servidor`.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);

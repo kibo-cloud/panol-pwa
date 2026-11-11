@@ -86,6 +86,8 @@ export const PERMS = [
   ['purchases_decide', 'Aprobar o rechazar solicitudes de compra'],
   ['purchases_create', 'Crear solicitudes de compra a mano (desde la herramienta o una alerta)'],
   ['purchases_receive', 'Recibir compras aprobadas (genera el ingreso al inventario)'],
+  // Etapa 9: importar el Excel anterior de herramientas (solo admin por defecto).
+  ['import_excel', 'Importar el Excel anterior de herramientas'],
 ];
 export const PERM_KEYS = PERMS.map(([k]) => k);
 
