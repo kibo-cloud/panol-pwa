@@ -1469,21 +1469,137 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   transition, as in earlier stages.
 
 ## Stage 7 tasks (branch `v3/etapa-7-gerencia`, stacked on stage 6)
-- [ ] E7.T1 Backend: migration `015_compras.sql` (requests, request↔control links, ingreso link,
+- [x] E7.T1 Backend: migration `015_compras.sql` (requests, request↔control links, ingreso link,
       novedad link column, perms, records type), domain (state machine, dedupe, qty rules),
       application (auto creation in finalize/correct, manual create, decide, purchase, receive
       with ingreso, cancel, lists/filters/totals, period query), routes, SSE, audit; unit +
       integration tests (test-first where a RED is meaningful).
-- [ ] E7.T2 Frontend: Gerencia section (inbox, quick approve, reject sheet, filters, monthly
+      Commit `40bdc9b`. Route: delegated writer. Code: migration `015_compras.sql`,
+      `domain/compras.js` (states, `checkTransition`, `cleanCost`, `cleanManualPurchase`,
+      `lossesOf`, `countedPairs`, `sameKey`, `planAutoPurchases`, `parsePurchaseFilters`),
+      `adapters/pg/compras-repo.js` (`lockCandidates`, `queryPurchases`, `purchaseTotals`,
+      `loadPurchaseSummary`, `queryDecidedPage`), `application/compras.js`
+      (`autoPurchasesOnFinalize` called from `controls.js#finalizeControl`, `createPurchase`,
+      `transitionPurchase`, `updatePurchase`, `checkReposicionLink`/`linkReposicion` called from
+      `movements.js#registerMovement`, `listPurchases`, `getPurchaseDetail`, `purchaseTotals`,
+      `purchasesOfPeriod`), `adapters/http/compras-routes.js`; records type `compras`
+      (`domain/records.js`, `application/records.js`: blocker `purchase_not_pending`, always
+      history, restore refused with another open request); novedades `purchaseRequestId`;
+      `/api/state` `purchases` summary and `purchase` on faltante/cambio alerts; `.txt` replace
+      refusal; demo-clear guard. Test-first: `unit/compras.test.js` RED (missing module) then
+      GREEN; `unit/permissions` RED (2 failures: new keys/defaults) then GREEN.
+      `integration/compras-api.test.js` (19) written with the code: passed on its first run
+      except the DB-guard test it gained afterwards, which was RED for a real defect (the
+      `rechazada` CHECK accepted a NULL comment: `length(trim(NULL))` is NULL) -> CHECK fixed in
+      015 -> GREEN. Contract changes in existing tests: `unit/novedades` filters have
+      `purchaseRequestId`, `unit/records` type list has `compras`, `auth.test` gerencia
+      permissions, `web/test/constants` mirror (`web/src/state/constants.js`). New
+      `txt-import` test: replace refused with `replace_has_purchases`.
+- [x] E7.T2 Frontend: Gerencia section (inbox, quick approve, reject sheet, filters, monthly
       totals, badge, alert), request detail with timeline, manual create from tool sheet/alert,
       "Compras a recibir" + receive sheet, reposición link to a received request, status on tool
       sheet/alert ("compra rechazada"), novedad link; design guide, classes in `v3.css`.
-- [ ] E7.T3 E2E: control with faltante → automatic request (and no duplicate on a second control
+      Commit `d2f986e`. Route: delegated writer. Code: `features/compras/view.js` (`#compras`
+      tabs Pendientes / Todas / Totales por mes / A recibir by permission; quick approve sheet,
+      reject sheet with chips, purchase and receive sheets, edit sheet; `#compra-<id>` detail with
+      data, decision/purchase/reception, linked controls, novedades, timeline; `openCompraNew`
+      from the tool sheet and from alerts; `toolComprasCard`), `state/compras.js` (pure),
+      `ui/components.js` (`alertRow`: purchase chip, "Solicitar compra"), `alertas/view.js`
+      ("compras pendientes" banner for `purchases_decide`), `entregas/view.js` (reposición
+      select of received requests), `novedades/view.js` (purchase select/chip, linked label),
+      `inventario/view.js` (tool sheet card), nav entry + badge (`ui/app.js`, `ui/router.js`),
+      Más group, `records/view.js` label, `IC.cart`, `.cmp*`/`.alcmp` classes in `v3.css`.
+      Test-first: `web/test/compras.test.js` RED (missing module) then GREEN.
+- [x] E7.T3 E2E: control with faltante → automatic request (and no duplicate on a second control
       or a correction), approve on 390 px, reject with comment → "compra rechazada" alert,
       receive → ingreso, reposición linked, gerencia vs. responsable permissions, totals.
+      Commit `62f013b`. Route: delegated writer. New `t14-compras` (2): automatic requests from
+      a control and none on a correction; Gerencia at 390 px: "compras pendientes" banner, inbox,
+      44 px approve target, one tap + confirm, reject needs a comment; totals KPIs; responsable
+      sees "compra rechazada" with the reason and "Solicitar compra"; A recibir only for the
+      responsable, receive with codes -> ingreso and unit AM-9 available; reposición linked from
+      the entregas form; manual requests from the tool sheet (cost `1500,50`) and from the
+      rejected alert; novedad linked from the detail; consulta without nav/access; Gerencia nav
+      badge; detail, inbox, reject sheet and Todas at 1280 and 390 without overflow. `compras`
+      added to E2E `ROUTES`. Written with the code; first run found one spec defect (expected 5
+      rows, there are 4), fixed in the spec.
+
+## Stage 7 implementation notes
+- API: `GET /api/compras` (filters `status` (a state or `open`), `month` (local month of the
+  creation), `plantillaId`, `techId`, `cajaId`, `toolId`, `reason`, `q`, `archived`, `scope=receive`,
+  `limit`, `before` cursor built in SQL with microseconds); `GET /api/compras/totals?from&to`
+  (months, default the last 6; approved per month of the decision: count, known-cost sum, count
+  without cost, rejected; plus `pending`); `GET /api/compras/:id` (+ `controls`, `timeline` from
+  the audit, `novedades`); `POST /api/compras`; `PATCH /api/compras/:id` (cost, supplier,
+  observation while open; qty only while pendiente); `POST /api/compras/:id/approve|reject|
+  purchase|receive` (If-Match + Idempotency-Key). Records: `/api/compras/:id/archive|restore|
+  delete-check` (DELETE always 409 `has_history`). `POST /api/movements` accepts
+  `purchaseRequestId` on a reposición. `POST /api/novedades` accepts `purchaseRequestId`
+  (fixed after creation, like the movement link); `GET /api/novedades` filters by it and
+  `linked=yes|no` = movement OR purchase request. Costs are numbers in the API, `numeric(12,2)`
+  in the DB; `estimatedCost` accepts a number or a decimal string.
+- Permissions (parent decision followed): `purchases_view` and `purchases_decide` for gerencia
+  (+admin); `purchases_create` for responsable and supervisor; `purchases_receive` for the
+  responsable only — so supervisor = responsable + `shift_change` − `purchases_receive` (the
+  unit test invariant was updated accordingly). Marking `comprada` is allowed to
+  `purchases_decide` or `purchases_receive` (writer decision: either who buys or who receives).
+  The full list needs `purchases_view`; with only `purchases_receive`, `scope=receive` (aprobada
+  and comprada). The detail is readable with view, receive or create (the responsable sees the
+  status from the tool sheet and alerts through the `/api/state` summary, without costs).
+- Automatic creation runs inside `finalizeControl` (originals and corrections) after the control
+  is rewritten: every counted item with missing units -> reason `faltante`, with units for
+  change -> `cambio` (both can exist); dedupe by assignment (or unit) + reason, never by alert
+  key. Lock order: holder FOR SHARE -> control -> assignments FOR SHARE -> advisory lock
+  `purchases.asg:<assignment>` (sorted, only assignments with a loss) -> candidate requests FOR
+  UPDATE (by id). Manual creation takes holder -> assignment -> the same advisory lock. The
+  partial unique indexes (assignment+reason, unit+reason over open, non-archived requests) are
+  the backstop. Concurrency proven deterministically: two finalizes waiting on the held lock
+  produce one request linked to both controls.
+- Quantity: a pendiente request follows the newest effective control: it is updated only when the
+  finalizing control's period is >= the newest period already linked (correcting an older period
+  links without changing the qty). An approved or later request is only linked.
+- Correction that removes the loss: a pendiente, origin `control` request linked to the
+  superseded control whose linked controls are all of that same holder and period is archived
+  with "Corregido en el control" (actor = who finalized). With a control of another period
+  linked, it is left untouched (writer decision: "only source" = same holder+period chain).
+  A later ordinary control without the loss leaves an open request untouched (cancel by hand).
+- Rejection: `loss_resolved_at` / `loss_resolved_control_id` on the rejected request are set by
+  the first finalized control whose item for that assignment+reason has no loss; until then the
+  automatic creation is blocked (`blocked` in the plan), the alert keeps `purchase` =
+  rechazada with the comment. Manual creation is always possible (409 `purchase_exists` only
+  while another request is open for the same key).
+- Reception: request FOR UPDATE -> `applyMovement` (`ingreso`, tool FOR UPDATE, `units.code`
+  lock); serialized tools need one code per received unit (qty = codes); the ingreso id is
+  stored on the request. Reposición link: checked before the movement (no lock), then the
+  request FOR UPDATE after the movement (order movement -> request), same tool and same holder
+  (or a stock request without holder), only once (unique index).
+- DB guards: trigger `purchase_requests_guard` (valid transitions only; origin fields, decisions,
+  receptions and the reposición link are fixed once written; closed requests keep qty/cost/
+  supplier); CHECKs for each state; the app role has no DELETE on the purchase tables.
+- History: a purchase request is history of its tool, tech, caja, plantilla and users (records
+  `HISTORY`, `tech_has_history` redefined in 015). Existing finalized controls are NOT
+  backfilled into requests (requests start with stage 7).
+- Deviation: `.txt` v2 has no purchases (not exported/imported); replace is refused once any
+  request exists (report error + 409 `replace_has_purchases`). Merge tombstones that hard-delete
+  a tool named by a request hit the FK and keep answering the generic 409 `import_conflict`.
+- UI: Spanish copy, status chips with icon + text + color; quick approve and reject buttons are
+  44 px targets and wrap at 390 px; no inline styles in the new code (classes `.cmp*`).
+- Size: the backend work unit is ~1.7k authored lines (migration, domain, application, repo,
+  routes and ~600 lines of tests) — one inseparable behavior (automatic creation needs the
+  schema, state machine and locking together); not split artificially.
+- `purchasesOfPeriod(db, actor, filters)` (stage 10): `filters` = `from`, `to` (local days of the
+  decision), `plantillaId`, `techId`, `cajaId`, `toolId`, `reason`; returns approved (also
+  comprada/recibida) and rejected requests, oldest decision first, paging 200 inside one
+  `withSnapshot`; the caller checks its own permission.
+
+## Stage 7 verification (local, sequential, delegated writer)
+- On `62f013b` (all three work units): `npm test` 215/215; `npm run test:db` 234/234 (549 s);
+  `npm run build` ok; `PANOL_E2E_BUILD=1 npm run test:e2e` 65 passed, 0 failed, 0 skipped
+  (519 s). An earlier `test:db` run on the same server code was also 234/234 (491 s).
+- Commits: `40bdc9b` (server), `d2f986e` (web), `62f013b` (E2E), then this doc commit. Not pushed.
 
 ## Next step
-- Stage 7: E7.T1–E7.T3 (one delegated writer), then independent review, CI and PR #7 →
+- Stage 7: E7.T1–E7.T3 done (delegated writer); next: independent review, CI and PR #7 →
   `v3/etapa-6-novedades`.
 - PRs #1–#6 await user review (stacked: #1 → `v3-servidor`, each next PR → the previous stage). Engram mirror of this document: pending (multiple active
   sessions). PR #1 awaits user review; after it is merged, rebase stage 2 onto `v3-servidor`.
