@@ -17,6 +17,7 @@ export const TL_LABEL = {
   purchase_create: 'Alta', purchase_link: 'Vinculada a un control', purchase_approve: 'Aprobada', purchase_reject: 'Rechazada',
   purchase_purchase: 'Comprada', purchase_receive: 'Recibida', purchase_reposicion: 'Reposición vinculada', purchase_edit: 'Editada',
   purchase_archive: 'Eliminada (cancelada)', purchase_restore: 'Restaurada', purchase_resolved: 'Pérdida resuelta en un control',
+  purchase_loss_gone: 'La pérdida ya no figura en un control', purchase_loss_back: 'La pérdida vuelve a figurar en un control',
 };
 
 // Filtros vacíos de la lista (holder: id de técnico o `caja:<id>`).
@@ -53,13 +54,15 @@ export function parseCost(v) {
 export const pendingCount = (summary) => (summary || []).filter((p) => p.status === 'pendiente').length;
 export const toolPurchases = (summary, toolId) => (summary || []).filter((p) => p.toolId === toolId);
 
-// Compras recibidas, sin reposición, de esa herramienta y de ese poseedor (o de stock, sin poseedor).
-export function receivableFor(summary, holderKey, toolId) {
-  const isCaja = String(holderKey || '').startsWith('caja:');
-  const id = isCaja ? holderKey.slice(5) : holderKey;
-  return (summary || []).filter((p) => p.status === 'recibida' && p.toolId === toolId
-    && ((!p.techId && !p.cajaId) || (isCaja ? p.cajaId === id : p.techId === id)));
+// Compras recibidas, sin reposición, de esa misma asignación (E7.V1: el servidor solo vincula la
+// reposición de la asignación de la compra; una compra para stock no se ofrece).
+export function receivableFor(summary, asgId) {
+  if (!asgId) return [];
+  return (summary || []).filter((p) => p.status === 'recibida' && p.assignmentId === asgId);
 }
+
+// E7.V1: una pendiente cuyo control más nuevo ya no muestra la pérdida (Gerencia lo ve antes de decidir).
+export const lossGoneNote = (p) => (p && p.status === 'pendiente' && p.lossResolvedAt ? 'La pérdida ya no figura en el último control' : '');
 
 // Marca de compra en una alerta de faltante o cambio.
 export function alertPurchase(p) {
@@ -79,5 +82,7 @@ export function cmpActions(p, can) {
     receive: live && (st === 'aprobada' || st === 'comprada') && can('purchases_receive'),
     edit: live && OPEN.includes(st) && (can('purchases_create') || can('purchases_decide')),
     qty: live && st === 'pendiente' && (can('purchases_create') || can('purchases_decide')),
+    // E7.V1: costo y proveedor, solo quien los ve; después de la decisión, solo quien decide.
+    cost: live && OPEN.includes(st) && can('purchases_view') && (st === 'pendiente' ? can('purchases_create') || can('purchases_decide') : can('purchases_decide')),
   };
 }

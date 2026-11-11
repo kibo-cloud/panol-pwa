@@ -21,7 +21,7 @@ import { S, derive, can, who, markArchived, toolName, holderName, plantillaName 
 import { LIM } from '../../state/constants.js';
 import { fdt, fdate, plabel, mlabel } from '../../state/period.js';
 import { parseRoute } from '../../ui/router.js';
-import { CMP_ST, CMP_REASON, CMP_ORIGIN, CMP_EMPTY, TL_LABEL, cmpQuery, activeCmpFilters, money, parseCost, toolPurchases, cmpActions } from '../../state/compras.js';
+import { CMP_ST, CMP_REASON, CMP_ORIGIN, CMP_EMPTY, TL_LABEL, cmpQuery, activeCmpFilters, money, parseCost, toolPurchases, cmpActions, lossGoneNote } from '../../state/compras.js';
 
 const PAGE = 30;
 const OFFLINE_TXT = 'Sin conexión con el servidor: las compras se ven y se deciden cuando vuelve la conexión.';
@@ -128,11 +128,14 @@ function rowActions(p, tab) {
   return out.join('');
 }
 
+// E7.V1: la pérdida ya no figura en el último control (texto e ícono, además del color).
+const lossChip = (p) => { const t = lossGoneNote(p); return t ? `<span class="chip warn">${icon('info', 12)}${esc(t)}</span>` : ''; };
+
 export function cmpRow(p, tab = 'all') {
   const sub = [holderTxt(p), CMP_REASON[p.reason], p.plantillaName ? markArchived({ archived: p.plantillaArchived }, p.plantillaName) : '', fdt(p.createdAt)].filter(Boolean).join(' · ');
   const cost = can('purchases_view') ? `<span class="s">${esc(money(p.estimatedCost))}${p.supplier ? ' · ' + esc(p.supplier) : ''}</span>` : '';
   const acts = rowActions(p, tab);
-  return `<div class="row cmprow${p.archived ? ' novarch' : ''}" data-cmp="${esc(p.id)}"><span class="tile cmpic">${icon('cart', 18)}</span><div class="grow"><a class="t cmpt" href="#compra-${esc(p.id)}">${esc(titleOf(p))}</a><div class="s">${esc(sub)}</div>${p.observation ? `<div class="s cmpobs">${esc(p.observation)}</div>` : ''}${p.status === 'rechazada' && p.decisionComment ? `<div class="s cmpobs">Motivo del rechazo: ${esc(p.decisionComment)}</div>` : ''}<div class="cmpmeta">${stChipCmp(p.status)}${p.archived ? '<span class="chip pend">Eliminada</span>' : ''}${cost}</div></div>${acts ? `<span class="cmpacts">${acts}</span>` : ''}</div>`;
+  return `<div class="row cmprow${p.archived ? ' novarch' : ''}" data-cmp="${esc(p.id)}"><span class="tile cmpic">${icon('cart', 18)}</span><div class="grow"><a class="t cmpt" href="#compra-${esc(p.id)}">${esc(titleOf(p))}</a><div class="s">${esc(sub)}</div>${p.observation ? `<div class="s cmpobs">${esc(p.observation)}</div>` : ''}${p.status === 'rechazada' && p.decisionComment ? `<div class="s cmpobs">Motivo del rechazo: ${esc(p.decisionComment)}</div>` : ''}<div class="cmpmeta">${stChipCmp(p.status)}${lossChip(p)}${p.archived ? '<span class="chip pend">Eliminada</span>' : ''}${cost}</div></div>${acts ? `<span class="cmpacts">${acts}</span>` : ''}</div>`;
 }
 
 // ------------------------------------------------------------------ pantalla
@@ -218,7 +221,7 @@ VIEWS.compra = (id) => {
   const p = st.row; const href = holderHref(p);
   const holder = href ? `<a href="${esc(href)}">${esc(holderTxt(p))}</a>` : esc(holderTxt(p));
   const origin = p.origin === 'control' && p.originControlId ? `<a href="#controlver-${esc(p.originControlId)}">${CMP_ORIGIN.control}</a>` : esc(CMP_ORIGIN[p.origin] || p.origin);
-  const data = `<section class="card cmpcard"><h2 class="si">Datos de la solicitud</h2><div class="cmpkv">${kv('Herramienta', esc(markArchived({ archived: p.toolArchived }, p.toolName)))}${kv('Código', esc(p.unitCode || ''))}${kv('Técnico o caja', holder)}${kv('Plantilla', p.plantillaId ? esc(markArchived({ archived: p.plantillaArchived }, p.plantillaName || plantillaName(p.plantillaId))) : '')}${kv('Motivo', esc(CMP_REASON[p.reason]))}${kv('Cantidad', String(p.qty))}${kv('Observación', esc(p.observation))}${kv('Costo estimado', esc(money(p.estimatedCost)))}${kv('Proveedor', esc(p.supplier))}${kv('Origen', origin)}${kv('Generada', esc(`${fdt(p.createdAt)} por ${p.byName || who(p.by)}`))}</div></section>`;
+  const data = `<section class="card cmpcard"><h2 class="si">Datos de la solicitud</h2><div class="cmpkv">${kv('Herramienta', esc(markArchived({ archived: p.toolArchived }, p.toolName)))}${kv('Código', esc(p.unitCode || ''))}${kv('Técnico o caja', holder)}${kv('Plantilla', p.plantillaId ? esc(markArchived({ archived: p.plantillaArchived }, p.plantillaName || plantillaName(p.plantillaId))) : '')}${kv('Motivo', esc(CMP_REASON[p.reason]))}${kv('Cantidad', String(p.qty))}${kv('Observación', esc(p.observation))}${can('purchases_view') ? kv('Costo estimado', esc(money(p.estimatedCost))) + kv('Proveedor', esc(p.supplier || '')) : ''}${kv('Origen', origin)}${kv('Generada', esc(`${fdt(p.createdAt)} por ${p.byName || who(p.by)}`))}</div></section>`;
   const steps = [];
   if (p.decidedAt) steps.push(`<div class="cmpstep">${stChipCmp(p.status === 'rechazada' ? 'rechazada' : 'aprobada')}<span class="s">${esc(`${fdt(p.decidedAt)} · ${p.decidedByName || who(p.decidedBy)}`)}</span>${p.decisionComment ? `<div class="s cmpobs">${p.status === 'rechazada' ? 'Motivo' : 'Comentario'}: ${esc(p.decisionComment)}</div>` : ''}</div>`);
   if (p.purchasedAt) steps.push(`<div class="cmpstep">${stChipCmp('comprada')}<span class="s">${esc(`${fdt(p.purchasedAt)} · ${p.purchasedByName || who(p.purchasedBy)}`)}</span>${p.purchaseNote ? `<div class="s cmpobs">${esc(p.purchaseNote)}</div>` : ''}</div>`);
@@ -229,7 +232,7 @@ VIEWS.compra = (id) => {
   const novs = p.novedades && p.novedades.length ? `<section class="card cmpcard"><h2 class="si">Novedades</h2><div class="list">${p.novedades.map((n) => `<div class="row"><div class="grow"><div class="s">${esc(`${fdt(n.occurredAt)} · ${n.name}`)}</div><div class="t novtxt">${esc(n.comment)}</div></div></div>`).join('')}</div></section>` : '';
   const tl = p.timeline && p.timeline.length ? `<section class="card cmpcard"><h2 class="si">Línea de tiempo</h2><div class="tl">${p.timeline.map((x) => `<div class="tl-i"><span class="tl-dot ${x.action === 'purchase_reject' ? 'bad' : x.action === 'purchase_approve' || x.action === 'purchase_receive' ? 'ok' : 'pri'}"></span><div class="grow"><div class="cmptlt">${esc(TL_LABEL[x.action] || x.action)}</div><div class="muted sm">${esc(`${fdt(x.at)} · ${x.byName || who(x.by)}`)}</div><div class="muted sm cmpobs">${esc(x.detail || '')}</div></div></div>`).join('')}</div></section>` : '';
   return pageHead(esc(p.name), `${stChipCmp(p.status)} <span class="cmpsub">${esc(`${p.toolName}${p.unitCode ? ' ' + p.unitCode : ''} · ${holderTxt(p)}`)}</span>`, { back, acts: detailActions(p) })
-    + (p.archived ? archivedBanner(p, 'compras') : '') + `<div class="two cmptwo"><div>${data}${decision}</div><div>${ctls}${novs}${tl}</div></div>`;
+    + (p.archived ? archivedBanner(p, 'compras') : '') + (lossGoneNote(p) ? `<p class="hint warn">${icon('info', 16)}<span>${esc(lossGoneNote(p))}. Revisá el control antes de decidir.</span></p>` : '') + `<div class="two cmptwo"><div>${data}${decision}</div><div>${ctls}${novs}${tl}</div></div>`;
 };
 
 // ------------------------------------------------------------------ decisión y recepción
@@ -257,7 +260,7 @@ function openAction(id, { title, label, kind = 'pri', render: body, build }) {
 }
 
 // Aprobar: un toque y confirmar.
-ACT.cmpApprove = (ds) => openAction(ds.id, { title: 'Aprobar compra', label: 'Aprobar', render: (st, p) => `<p class="cmpq">¿Aprobás esta compra?${p.estimatedCost != null ? ` Costo estimado: ${esc(money(p.estimatedCost))}.` : ''}</p>`, build: () => ({ action: 'approve', payload: {} }) });
+ACT.cmpApprove = (ds) => openAction(ds.id, { title: 'Aprobar compra', label: 'Aprobar', render: (st, p) => `<p class="cmpq">¿Aprobás esta compra?${p.estimatedCost != null ? ` Costo estimado: ${esc(money(p.estimatedCost))}.` : ''}</p>${lossGoneNote(p) ? `<p class="hint warn">${icon('info', 16)}<span>${esc(lossGoneNote(p))}.</span></p>` : ''}`, build: () => ({ action: 'approve', payload: {} }) });
 
 const REJ_QUICK = ['Hay stock en el depósito', 'Se puede reparar', 'No corresponde', 'Pedir otra cotización'];
 ACT.cmpReject = (ds) => openAction(ds.id, {
@@ -272,8 +275,8 @@ const costOf = (st) => { try { return parseCost(st.cost); } catch (e) { throw ne
 
 ACT.cmpPurchase = (ds) => openAction(ds.id, {
   title: 'Marcar como comprada', label: 'Marcar comprada',
-  render: (st) => supplierField(st) + costField(st) + field('Nota (opcional)', `<input id="cmp-pn" type="text" maxlength="${LIM.text}" data-mi="note" value="${esc(st.note || '')}" placeholder="Orden de compra, remito">`, 'cmp-pn'),
-  build: (st) => { const payload = { note: String(st.note || '').trim() }; const c = costOf(st); if (c != null) payload.estimatedCost = c; if (String(st.supplier || '').trim()) payload.supplier = String(st.supplier).trim(); return { action: 'purchase', payload }; },
+  render: (st) => (can('purchases_decide') ? supplierField(st) + costField(st) : '') + field('Nota (opcional)', `<input id="cmp-pn" type="text" maxlength="${LIM.text}" data-mi="note" value="${esc(st.note || '')}" placeholder="Orden de compra, remito">`, 'cmp-pn'),
+  build: (st) => { const payload = { note: String(st.note || '').trim() }; if (can('purchases_decide')) { const c = costOf(st); if (c != null) payload.estimatedCost = c; if (String(st.supplier || '').trim()) payload.supplier = String(st.supplier).trim(); } return { action: 'purchase', payload }; },
 });
 
 ACT.cmpReceive = (ds) => {
@@ -300,10 +303,10 @@ ACT.cmpEdit = (ds) => {
   openModal({
     title: 'Editar solicitud de compra', rec: { get: () => known(ds.id), version: p.version },
     reload: (cur) => ({ cost: cur.estimatedCost ?? '', supplier: cur.supplier || '', observation: cur.observation || '', qty: cur.qty }),
-    render: (st) => summaryOf(p) + costField(st) + supplierField(st) + field('Observación', `<textarea id="cmp-obs" rows="2" maxlength="${LIM.text}" data-mi="observation">${esc(st.observation || '')}</textarea>`, 'cmp-obs') + (a.qty ? field('Cantidad', `<input id="cmp-q" type="number" min="1" inputmode="numeric" data-mi="qty" value="${esc(st.qty)}">`, 'cmp-q') : ''),
+    render: (st) => summaryOf(p) + (a.cost ? costField(st) + supplierField(st) : '') + field('Observación', `<textarea id="cmp-obs" rows="2" maxlength="${LIM.text}" data-mi="observation">${esc(st.observation || '')}</textarea>`, 'cmp-obs') + (a.qty ? field('Cantidad', `<input id="cmp-q" type="number" min="1" inputmode="numeric" data-mi="qty" value="${esc(st.qty)}">`, 'cmp-q') : ''),
     actions: [{ label: 'Cancelar', close: true }, { label: 'Guardar', kind: 'pri', run: async (st, m) => {
       offlineCheck();
-      const body = { estimatedCost: costOf(st), supplier: String(st.supplier || '').trim(), observation: String(st.observation || '').trim() };
+      const body = { observation: String(st.observation || '').trim(), ...(a.cost ? { estimatedCost: costOf(st), supplier: String(st.supplier || '').trim() } : {}) };
       tooLong(body.observation, LIM.text, 'La observación');
       if (a.qty) { const q = parseInt(st.qty, 10); if (!(q >= 1)) throw new UErr('Indicá una cantidad válida.'); body.qty = q; }
       const r = await api.updateCompra(ds.id, body, m.rec.version);

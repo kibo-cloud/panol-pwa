@@ -55,13 +55,13 @@ export async function registerMovement(db, actor, input, { idempotencyKey, path 
   return idempotent(db, { userId: actor.id, key: idempotencyKey, method: 'POST', path, body: input }, async (c) => {
     // Etapa 7: reposición vinculada a una compra recibida (se revisa antes y, bloqueada, después).
     if (purchaseRequestId) {
-      const a = (await c.query('SELECT tool_id, tech_id, caja_id FROM assignments WHERE id = $1', [mv.asgId ?? null])).rows[0];
-      await checkReposicionLink(c, purchaseRequestId, { toolId: a ? a.tool_id : mv.toolId, techId: mv.cajaId ? null : mv.techId, cajaId: mv.cajaId });
+      const a = (await c.query('SELECT tool_id, unit_id FROM assignments WHERE id = $1', [mv.asgId ?? null])).rows[0];
+      await checkReposicionLink(c, purchaseRequestId, { toolId: a ? a.tool_id : mv.toolId, techId: mv.cajaId ? null : mv.techId, cajaId: mv.cajaId, asgId: mv.asgId ?? null, unitId: a ? a.unit_id : null });
     }
     const plan = await applyMovement(c, actor, mv);
     if (purchaseRequestId) {
       const h = plan.movement.cajaId ? (await c.query('SELECT name FROM cajas WHERE id = $1', [plan.movement.cajaId])).rows[0] : (await c.query('SELECT name FROM techs WHERE id = $1', [plan.movement.techId])).rows[0];
-      await linkReposicion(c, actor, purchaseRequestId, { id: plan.movement.id, toolId: plan.movement.toolId, techId: plan.movement.cajaId ? null : plan.movement.techId, cajaId: plan.movement.cajaId || null, holderName: h && h.name });
+      await linkReposicion(c, actor, purchaseRequestId, { id: plan.movement.id, toolId: plan.movement.toolId, techId: plan.movement.cajaId ? null : plan.movement.techId, cajaId: plan.movement.cajaId || null, asgId: plan.movement.oldAssignmentId || null, unitId: plan.movement.oldUnitId || null, holderName: h && h.name });
     }
     return {
       status: 201,

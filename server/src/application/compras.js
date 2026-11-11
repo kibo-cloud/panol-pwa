@@ -20,7 +20,7 @@ import { plantillaOn } from '../adapters/pg/plantilla-repo.js';
 import { can } from '../domain/permissions.js';
 import {
   OPEN_STATUSES, PURCHASE_STATUS_LABEL, checkTransition, cleanDecision, cleanCost, cleanSupplier, cleanObservation, cleanManualPurchase,
-  lossesOf, countedPairs, planAutoPurchases, parsePurchaseFilters, parseMonth, sameKey,
+  lossesOf, countedPairs, planAutoPurchases, parsePurchaseFilters, parseMonth, sameKey, stripCosts, COST_MARK,
 } from '../domain/compras.js';
 import { parseNovedadFilters } from '../domain/novedades.js';
 import { DomainError, ConflictError, notFoundError } from '../domain/errors.js';
@@ -44,6 +44,14 @@ async function permsOf(db, actor) {
 
 const what = (r) => `${r.tool_name}${r.unit_code ? ' ' + r.unit_code : ''}${r.holder_name ? ` (${r.holder_name})` : ''}`;
 const money = (v) => (v == null ? 'sin costo' : `$ ${Number(v).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+// E7.V1: costos y proveedores solo con purchases_view (Gerencia, admin). En la auditoría van al
+// final, después de COST_MARK, para poder ocultarlos.
+const shown = (perms, row) => (perms.view ? row : stripCosts(row));
+const costText = (cost, supplier) => `${COST_MARK}${money(cost)}${supplier ? `, proveedor ${supplier}` : ''}`;
+// Marca de la transacción para el trigger de 015: después de la decisión, el costo y el proveedor
+// solo los cambia quien decide (purchases_decide).
+const asDecider = (c) => c.query("SELECT set_config('panol.purchase_decider', 'on', true)");
+const costForbidden = () => new DomainError('Después de la decisión, el costo y el proveedor solo los cambia Gerencia.', 'forbidden', 403);
 
 // ---------------------------------------------------------------- creación automática
 /**
@@ -110,12 +118,26 @@ export async function autoPurchasesOnFinalize(c, actor, { controlId, period, doc
       await record(c, actor, { action: 'purchase_resolved', entity: 'purchase_requests', id, version: r.version, detail: `${r.name}: el control de la ${when} muestra la pérdida resuelta` });
     }
   }
+  // E7.V1: una pendiente cuyo control más nuevo ya no muestra la pérdida queda marcada (no se
+  // cancela); si un control posterior la vuelve a mostrar, se quita la marca.
+  for (const [ids, set, action, txt] of [
+    [plan.flag, 'loss_resolved_at = now(), loss_resolved_control_id = $2', 'purchase_loss_gone', 'la pérdida ya no figura en el control de la'],
+    [plan.unflag, 'loss_resolved_at = NULL, loss_resolved_control_id = NULL', 'purchase_loss_back', 'la pérdida vuelve a figurar en el control de la'],
+  ]) {
+    if (!ids.length) continue;
+    await c.query(`UPDATE purchase_requests SET ${set} WHERE id = ANY($1)`, set.includes('$2') ? [ids, controlId] : [ids]);
+    for (const id of ids) {
+      const r = (await c.query('SELECT name, version FROM purchase_requests WHERE id = $1', [id])).rows[0];
+      await record(c, actor, { action, entity: 'purchase_requests', id, version: r.version, detail: `${r.name}: ${txt} ${when}` });
+    }
+  }
   return out;
 }
 
 // ---------------------------------------------------------------- alta manual
 export async function createPurchase(db, actor, input, { idempotencyKey, path } = {}) {
   const v = cleanManualPurchase(input);
+  const perms = await permsOf(db, actor);
   return idempotent(db, { userId: actor.id, key: idempotencyKey, method: 'POST', path, body: v }, async (c) => {
     let snap = { assignmentId: null, unitId: null, techId: null, cajaId: null, plantillaId: null, holderName: null, unitCode: null };
     let toolName;
@@ -158,9 +180,9 @@ export async function createPurchase(db, actor, input, { idempotencyKey, path } 
     const row = await repo.getPurchase(c, id);
     await record(c, actor, {
       action: 'purchase_create', entity: 'purchase_requests', id, version: row.version, event: 'create',
-      detail: `Alta de ${row.name} desde ${v.origin === 'alert' ? 'una alerta' : 'la ficha de la herramienta'}: ${toolName}${snap.unitCode ? ' ' + snap.unitCode : ''}${snap.holderName ? ` (${snap.holderName})` : ''}, ${REASON_TXT[v.reason]}, cantidad ${v.qty}, ${money(v.estimatedCost)}`,
+      detail: `Alta de ${row.name} desde ${v.origin === 'alert' ? 'una alerta' : 'la ficha de la herramienta'}: ${toolName}${snap.unitCode ? ' ' + snap.unitCode : ''}${snap.holderName ? ` (${snap.holderName})` : ''}, ${REASON_TXT[v.reason]}, cantidad ${v.qty}${costText(v.estimatedCost, v.supplier)}`,
     });
-    return { status: 201, body: { compra: row } };
+    return { status: 201, body: { compra: shown(perms, row) } };
   });
 }
 
@@ -189,13 +211,16 @@ export async function transitionPurchase(db, actor, id, action, input = {}, vers
   const perms = await permsOf(db, actor);
   const allowed = { approve: perms.decide, reject: perms.decide, purchase: perms.decide || perms.receive, receive: perms.receive }[action];
   if (!allowed) throw forbidden();
+  // E7.V1: quien solo recibe marca comprada sin tocar el costo ni el proveedor.
+  if (!perms.decide && (input.estimatedCost !== undefined || input.supplier !== undefined)) throw costForbidden();
   const dec = action === 'approve' || action === 'reject' ? cleanDecision(action, input) : { comment: '' };
   const cost = input.estimatedCost !== undefined ? cleanCost(input.estimatedCost) : undefined;
   const supplier = input.supplier !== undefined ? cleanSupplier(input.supplier) : undefined;
   return idempotent(db, { userId: actor.id, key: idempotencyKey, method: 'POST', path, body: { id, action, version, input } }, async (c) => {
     const cur = await repo.lockPurchase(c, id);
     if (!cur || (cur.archived_at && !perms.deleted)) throw notFound();
-    if (cur.version !== version) throw new ConflictError(await repo.getPurchase(c, id));
+    if (cur.version !== version) throw new ConflictError(shown(perms, await repo.getPurchase(c, id)));
+    if (perms.decide) await asDecider(c);
     const to = checkTransition({ status: cur.status, archived: !!cur.archived_at }, action);
     const set = { status: to };
     if (cost !== undefined) set.estimated_cost = cost;
@@ -219,9 +244,9 @@ export async function transitionPurchase(db, actor, id, action, input = {}, vers
     const note = action === 'reject' || action === 'approve' ? dec.comment : cleanObservation(input.note);
     await record(c, actor, {
       action: `purchase_${action}`, entity: 'purchase_requests', id, version: row.version,
-      detail: `${row.name} ${ACTION_TXT[action]}: ${what(cur)}, ${REASON_TXT[cur.reason]}, cantidad ${cur.qty}${cost !== undefined ? `, ${money(cost)}` : ''}${supplier ? `, proveedor ${supplier}` : ''}${extra}${note ? `. ${action === 'reject' ? 'Motivo' : 'Comentario'}: ${note}` : ''}`,
+      detail: `${row.name} ${ACTION_TXT[action]}: ${what(cur)}, ${REASON_TXT[cur.reason]}, cantidad ${cur.qty}${extra}${note ? `. ${action === 'reject' ? 'Motivo' : 'Comentario'}: ${note}` : ''}${cost !== undefined || supplier ? costText(cost !== undefined ? cost : cur.estimated_cost, supplier) : ''}`,
     });
-    return { status: 200, body: { compra: row } };
+    return { status: 200, body: { compra: shown(perms, row) } };
   });
 }
 
@@ -240,31 +265,44 @@ export async function updatePurchase(db, actor, id, input, version) {
   return withTransaction(db, async (c) => {
     const cur = await repo.lockPurchase(c, id);
     if (!cur || (cur.archived_at && !perms.deleted)) throw notFound();
-    if (cur.version !== version) throw new ConflictError(await repo.getPurchase(c, id));
+    if (cur.version !== version) throw new ConflictError(shown(perms, await repo.getPurchase(c, id)));
     if (cur.archived_at) throw rule('La solicitud está eliminada: restaurala antes de editarla.', 'archived', 409);
     if (!OPEN_STATUSES.includes(cur.status)) throw rule(`La solicitud está ${PURCHASE_STATUS_LABEL[cur.status].toLowerCase()}: ya no se modifica.`, 'closed', 409);
+    // E7.V1: después de la decisión, el costo y el proveedor solo los cambia quien decide.
+    if (!perms.decide && cur.status !== 'pendiente' && ('estimated_cost' in next || 'supplier' in next)) throw costForbidden();
+    if (perms.decide) await asDecider(c);
     if (next.qty !== undefined && next.qty !== cur.qty && cur.status !== 'pendiente') throw rule('La cantidad solo se cambia mientras la solicitud está pendiente.', 'qty_locked', 409);
     const LABEL = { estimated_cost: 'costo estimado', supplier: 'proveedor', observation: 'observación', qty: 'cantidad' };
     const fmt = (k, v) => (k === 'estimated_cost' ? money(v) : v == null || v === '' ? '(vacío)' : String(v));
     const changed = Object.keys(next).filter((k) => String(cur[k] ?? '') !== String(next[k] ?? '') && !(k === 'estimated_cost' && cur[k] != null && next[k] != null && Number(cur[k]) === Number(next[k])));
-    if (!changed.length) return repo.getPurchase(c, id);
+    if (!changed.length) return shown(perms, await repo.getPurchase(c, id));
     await c.query(`UPDATE purchase_requests SET ${changed.map((k, i) => `${k} = $${i + 2}`).join(', ')} WHERE id = $1`, [id, ...changed.map((k) => next[k])]);
     const row = await repo.getPurchase(c, id);
-    await record(c, actor, { action: 'purchase_edit', entity: 'purchase_requests', id, version: row.version, detail: `Edición de ${row.name}. ${changed.map((k) => `${LABEL[k]}: ${fmt(k, cur[k])} → ${fmt(k, next[k])}`).join('; ')}` });
-    return row;
+    // El costo y el proveedor van al final, después de COST_MARK (se ocultan sin purchases_view).
+    const isCost = (k) => k === 'estimated_cost' || k === 'supplier';
+    const part = (ks) => ks.map((k) => `${LABEL[k]}: ${fmt(k, cur[k])} → ${fmt(k, next[k])}`).join('; ');
+    const plain = changed.filter((k) => !isCost(k));
+    const costs = changed.filter(isCost);
+    await record(c, actor, { action: 'purchase_edit', entity: 'purchase_requests', id, version: row.version, detail: `Edición de ${row.name}.${plain.length ? ' ' + part(plain) : ''}${costs.length ? COST_MARK + part(costs) : ''}` });
+    return shown(perms, row);
   });
 }
 
 // ---------------------------------------------------------------- reposición vinculada
 // Antes de registrar la reposición (sin bloquear): la solicitud recibida, sin reposición, de la
-// misma herramienta y del mismo poseedor (o de stock, sin poseedor).
+// misma herramienta y de la misma asignación (E7.V1: el mismo poseedor no alcanza; si la
+// solicitud nombra una unidad, la unidad que sale es esa). Una compra para stock (sin
+// asignación) no se vincula. mv: { toolId, techId, cajaId, asgId, unitId }.
 export async function checkReposicionLink(c, requestId, mv) {
   const r = (await c.query('SELECT * FROM purchase_requests WHERE id = $1', [requestId])).rows[0];
   if (!r || r.archived_at) throw rule('No se encontró la compra a vincular.', 'invalid_purchase');
   if (r.status !== 'recibida') throw rule('Solo se vincula una compra recibida.', 'invalid_purchase');
   if (r.reposicion_movement_id) throw rule(`${r.name} ya está vinculada a otra reposición.`, 'invalid_purchase', 409);
   if (r.tool_id !== mv.toolId) throw rule(`${r.name} es de otra herramienta.`, 'invalid_purchase');
-  if ((r.tech_id || r.caja_id) && (r.tech_id !== (mv.techId || null) || r.caja_id !== (mv.cajaId || null))) throw rule(`${r.name} es de otro poseedor.`, 'invalid_purchase');
+  if (!r.assignment_id) throw rule(`${r.name} es una compra para stock: no se vincula a una reposición.`, 'invalid_purchase');
+  if (r.tech_id !== (mv.techId || null) || r.caja_id !== (mv.cajaId || null)) throw rule(`${r.name} es de otro poseedor.`, 'invalid_purchase');
+  if (r.assignment_id !== (mv.asgId || null)) throw rule(`${r.name} es de otra asignación de esa herramienta.`, 'invalid_purchase');
+  if (r.unit_id && r.unit_id !== (mv.unitId || null)) throw rule(`${r.name} es de otra unidad.`, 'invalid_purchase');
   return r;
 }
 
@@ -285,9 +323,10 @@ function checkList(perms, f) {
 
 export async function listPurchases(db, actor, query) {
   const f = parsePurchaseFilters(query);
-  checkList(await permsOf(db, actor), f);
-  const r = await repo.queryPurchases(db, f);
-  return { compras: r.rows, next: r.next, total: r.total };
+  const perms = await permsOf(db, actor);
+  checkList(perms, f);
+  const r = await repo.queryPurchases(db, { ...f, costs: perms.view });
+  return { compras: r.rows.map((x) => shown(perms, x)), next: r.next, total: r.total };
 }
 
 export async function getPurchaseDetail(db, actor, id) {
@@ -298,7 +337,7 @@ export async function getPurchaseDetail(db, actor, id) {
     if (!row || (row.archived && !perms.deleted)) throw notFound();
     const novedades = (await c.query('SELECT id, name, comment, occurred_at FROM novedades WHERE purchase_request_id = $1 AND archived_at IS NULL ORDER BY occurred_at DESC, id DESC LIMIT 50', [id])).rows
       .map((n) => ({ id: n.id, name: n.name, comment: n.comment, occurredAt: n.occurred_at.toISOString() }));
-    return { ...row, controls: await repo.controlsOf(c, id), timeline: await repo.timelineOf(c, id), novedades };
+    return shown(perms, { ...row, controls: await repo.controlsOf(c, id), timeline: await repo.timelineOf(c, id), novedades });
   });
 }
 

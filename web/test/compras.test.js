@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  CMP_ST, CMP_REASON, CMP_EMPTY, cmpQuery, activeCmpFilters, money, parseCost, pendingCount, toolPurchases, receivableFor, cmpActions, alertPurchase, TL_LABEL,
+  CMP_ST, CMP_REASON, CMP_EMPTY, cmpQuery, activeCmpFilters, money, parseCost, pendingCount, toolPurchases, receivableFor, cmpActions, alertPurchase, TL_LABEL, lossGoneNote,
 } from '../src/state/compras.js';
 
 test('estados y motivos con texto e ícono (además del color)', () => {
@@ -43,9 +43,18 @@ const SUM = [
 test('pendientes, compras de una herramienta y recibidas para la reposición del poseedor', () => {
   assert.equal(pendingCount(SUM), 2);
   assert.deepEqual(toolPurchases(SUM, 'tool-b').map((p) => p.id), ['p5', 'p6']);
-  assert.deepEqual(receivableFor(SUM, 't1', 'tool-a').map((p) => p.id), ['p2', 'p3']);
-  assert.deepEqual(receivableFor(SUM, 'caja:k1', 'tool-a').map((p) => p.id), ['p3', 'p4']);
-  assert.deepEqual(receivableFor(SUM, 't1', 'tool-b'), []);
+  // E7.V1: solo las de esa misma asignación; una compra para stock (sin asignación) no se ofrece.
+  assert.deepEqual(receivableFor(SUM, 'a2').map((p) => p.id), ['p2']);
+  assert.deepEqual(receivableFor(SUM, 'a9').map((p) => p.id), ['p4']);
+  assert.deepEqual(receivableFor(SUM, 'a1'), []);
+  assert.deepEqual(receivableFor(SUM, null), []);
+});
+
+test('E7.V1: marca de una pendiente cuya pérdida ya no figura en el último control', () => {
+  assert.equal(lossGoneNote({ status: 'pendiente', lossResolvedAt: '2026-11-10T10:00:00Z' }), 'La pérdida ya no figura en el último control');
+  assert.equal(lossGoneNote({ status: 'pendiente', lossResolvedAt: null }), '');
+  assert.equal(lossGoneNote({ status: 'aprobada', lossResolvedAt: '2026-11-10T10:00:00Z' }), '');
+  assert.equal(lossGoneNote(null), '');
 });
 
 test('la compra de una alerta: la abierta o la rechazada, con su texto', () => {
@@ -58,9 +67,14 @@ test('acciones según el estado y los permisos', () => {
   const can = (set) => (k) => set.includes(k);
   const ger = can(['purchases_view', 'purchases_decide']);
   const resp = can(['purchases_create', 'purchases_receive']);
-  assert.deepEqual(cmpActions({ status: 'pendiente' }, ger), { approve: true, reject: true, purchase: false, receive: false, edit: true, qty: true });
-  assert.deepEqual(cmpActions({ status: 'aprobada' }, resp), { approve: false, reject: false, purchase: true, receive: true, edit: true, qty: false });
-  assert.deepEqual(cmpActions({ status: 'comprada' }, ger), { approve: false, reject: false, purchase: false, receive: false, edit: true, qty: false });
-  assert.deepEqual(cmpActions({ status: 'recibida' }, resp), { approve: false, reject: false, purchase: false, receive: false, edit: false, qty: false });
-  assert.deepEqual(cmpActions({ status: 'pendiente', archived: true }, ger), { approve: false, reject: false, purchase: false, receive: false, edit: false, qty: false });
+  assert.deepEqual(cmpActions({ status: 'pendiente' }, ger), { approve: true, reject: true, purchase: false, receive: false, edit: true, qty: true, cost: true });
+  assert.deepEqual(cmpActions({ status: 'aprobada' }, resp), { approve: false, reject: false, purchase: true, receive: true, edit: true, qty: false, cost: false });
+  assert.deepEqual(cmpActions({ status: 'comprada' }, ger), { approve: false, reject: false, purchase: false, receive: false, edit: true, qty: false, cost: true });
+  assert.deepEqual(cmpActions({ status: 'recibida' }, resp), { approve: false, reject: false, purchase: false, receive: false, edit: false, qty: false, cost: false });
+  assert.deepEqual(cmpActions({ status: 'pendiente', archived: true }, ger), { approve: false, reject: false, purchase: false, receive: false, edit: false, qty: false, cost: false });
+  // E7.V1: el costo y el proveedor se editan solo viéndolos (purchases_view) y, después de la
+  // decisión, solo con purchases_decide.
+  assert.equal(cmpActions({ status: 'pendiente' }, resp).cost, false);
+  assert.equal(cmpActions({ status: 'pendiente' }, can(['purchases_view', 'purchases_create'])).cost, true);
+  assert.equal(cmpActions({ status: 'aprobada' }, can(['purchases_view', 'purchases_create'])).cost, false);
 });

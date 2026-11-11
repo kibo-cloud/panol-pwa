@@ -1467,6 +1467,13 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   refused once requests exist (like novedades).
 - Audit, SSE refresh, idempotency keys on create/decide/receive, If-Match versions on every
   transition, as in earlier stages.
+- E7.V1 (parent decisions after the review): marking `comprada` is allowed to whoever decides
+  (`purchases_decide`) or receives (`purchases_receive`), but only `purchases_decide` changes the
+  estimated cost or the supplier once the request is no longer `pendiente` (API 403 and a DB
+  guard). Costs and suppliers are visible only with `purchases_view`. A later effective control of
+  the same holder (same assignment) that no longer shows the loss marks a `pendiente` request with
+  `loss_resolved_at` — it is NOT cancelled — and the inbox, detail and approve sheet show "La
+  pérdida ya no figura en el último control"; a later control showing the loss again clears it.
 
 ## Stage 7 tasks (branch `v3/etapa-7-gerencia`, stacked on stage 6)
 - [x] E7.T1 Backend: migration `015_compras.sql` (requests, request↔control links, ingreso link,
@@ -1542,7 +1549,8 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   (+admin); `purchases_create` for responsable and supervisor; `purchases_receive` for the
   responsable only — so supervisor = responsable + `shift_change` − `purchases_receive` (the
   unit test invariant was updated accordingly). Marking `comprada` is allowed to
-  `purchases_decide` or `purchases_receive` (writer decision: either who buys or who receives).
+  `purchases_decide` or `purchases_receive` (writer decision, confirmed by the parent in E7.V1);
+  with only `purchases_receive` the `purchase` body cannot carry `estimatedCost`/`supplier` (403).
   The full list needs `purchases_view`; with only `purchases_receive`, `scope=receive` (aprobada
   and comprada). The detail is readable with view, receive or create (the responsable sees the
   status from the tool sheet and alerts through the `/api/state` summary, without costs).
@@ -1562,7 +1570,11 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   superseded control whose linked controls are all of that same holder and period is archived
   with "Corregido en el control" (actor = who finalized). With a control of another period
   linked, it is left untouched (writer decision: "only source" = same holder+period chain).
-  A later ordinary control without the loss leaves an open request untouched (cancel by hand).
+  A later ordinary control without the loss leaves an open request open (cancel by hand); since
+  E7.V1 a `pendiente` one is marked (`loss_resolved_at`/`loss_resolved_control_id`, audit
+  `purchase_loss_gone`) when the control is the newest of the request (period >= the newest
+  linked) and names the same assignment; the mark is cleared (`purchase_loss_back`) by a control as
+  new showing the loss again. Approved or later requests are not marked.
 - Rejection: `loss_resolved_at` / `loss_resolved_control_id` on the rejected request are set by
   the first finalized control whose item for that assignment+reason has no loss; until then the
   automatic creation is blocked (`blocked` in the plan), the alert keeps `purchase` =
@@ -1571,17 +1583,33 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 - Reception: request FOR UPDATE -> `applyMovement` (`ingreso`, tool FOR UPDATE, `units.code`
   lock); serialized tools need one code per received unit (qty = codes); the ingreso id is
   stored on the request. Reposición link: checked before the movement (no lock), then the
-  request FOR UPDATE after the movement (order movement -> request), same tool and same holder
-  (or a stock request without holder), only once (unique index).
+  request FOR UPDATE after the movement (order movement -> request), same tool, same holder and
+  (E7.V1) the same assignment — and the same unit when the request names one; a stock request
+  (no assignment) is not linkable nor offered in the reposición selector; only once (unique index).
+  The `/api/state` summary lists received requests without reposición only when they have an
+  assignment and were received in the last 90 days.
 - DB guards: trigger `purchase_requests_guard` (valid transitions only; origin fields, decisions,
   receptions and the reposición link are fixed once written; closed requests keep qty/cost/
-  supplier); CHECKs for each state; the app role has no DELETE on the purchase tables.
+  supplier; E7.V1: after `pendiente`, cost/supplier change only in a transaction marked
+  `panol.purchase_decider = on`, which the app sets only for `purchases_decide`); CHECKs for each
+  state; the app role has no DELETE on the purchase tables.
+- Costs (E7.V1): without `purchases_view` the API omits `estimatedCost` and `supplier` (detail,
+  lists including `scope=receive`, create/transition/edit responses), the text search skips the
+  supplier, and audit details are cut at the marker ". Costo y proveedor: " (cost and supplier are
+  always written last, so a cut never leaks them). `/api/state` and alert enrichment never had
+  them. The web detail hides those rows, and the purchase/edit sheets hide the fields, unless the
+  user may see/edit them (`cmpActions(...).cost`).
+- Restore of `compras` (E7.V1): refused 409 `assignment_inactive` when the assignment or its
+  holder is no longer active; another open request for the same key is 409 `duplicate` (also when
+  the partial unique index fires); the assignment advisory lock is taken before the row lock.
 - History: a purchase request is history of its tool, tech, caja, plantilla and users (records
   `HISTORY`, `tech_has_history` redefined in 015). Existing finalized controls are NOT
   backfilled into requests (requests start with stage 7).
 - Deviation: `.txt` v2 has no purchases (not exported/imported); replace is refused once any
-  request exists (report error + 409 `replace_has_purchases`). Merge tombstones that hard-delete
-  a tool named by a request hit the FK and keep answering the generic 409 `import_conflict`.
+  request exists (report error + 409 `replace_has_purchases`). E7.V1: a merge deletion of a
+  record named by a purchase request (tool, unit, assignment, tech, users, controls) or a novedad
+  (tech, users) is a reported conflict and the record is kept (`ledger.refs` in `txt-repo.js`,
+  checked in `plan.js`), instead of the FK error.
 - UI: Spanish copy, status chips with icon + text + color; quick approve and reject buttons are
   44 px targets and wrap at 390 px; no inline styles in the new code (classes `.cmp*`).
 - Size: the backend work unit is ~1.7k authored lines (migration, domain, application, repo,

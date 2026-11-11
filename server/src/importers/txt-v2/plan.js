@@ -52,7 +52,7 @@ export function deriveUsername(name, taken) {
 }
 
 /**
- * server: { doc, creds: { [userId]: { hasPassword, legacyPinHash } }, ledger: { movements, controls, novedades, purchases },
+ * server: { doc, creds: { [userId]: { hasPassword, legacyPinHash } }, ledger: { movements, controls, novedades, purchases, refs? },
  *           archived?, hidden?, tombstones?: { 'colección/id': fecha } }
  * file:   { data, deleted, savedAt }
  * Devuelve { mode, errors, conflicts, assumptions, changes, counts, token, final }.
@@ -78,6 +78,8 @@ export function planImport(server, file, { mode, actorId, now = new Date() }) {
   // E5.V1: lo eliminado definitivamente en el servidor (sus marcas de borrado, por la auditoría)
   // no se vuelve a crear desde un archivo que todavía lo tiene: se informa.
   const tombstones = server.tombstones || {};
+  // E7.V1: { 'colección/id': true } de lo que nombran las compras y las novedades del servidor.
+  const refs = server.ledger?.refs || {};
 
   if (mode === 'replace') {
     if (server.ledger.movements > 0 || server.ledger.controls > 0) {
@@ -181,6 +183,12 @@ export function planImport(server, file, { mode, actorId, now = new Date() }) {
       }
       if (c === 'users' && id === actorId) {
         conflict(c, id, 'El archivo borra tu usuario: se conserva.');
+        continue;
+      }
+      // E7.V1: las solicitudes de compra y las novedades no están en el .txt v2; lo que nombran
+      // tiene historial en el servidor y no se borra.
+      if (refs[`${c}/${id}`]) {
+        conflict(c, id, 'El archivo lo borra, pero una solicitud de compra o una novedad del servidor lo nombra: se conserva.');
         continue;
       }
       delete final[c][id];

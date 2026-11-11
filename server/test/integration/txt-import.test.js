@@ -297,6 +297,24 @@ describe('combinar', () => {
     assert.equal(await count('movements', "id = 'm21i1'"), 1);
   });
 
+  test('E7.V1: lo que nombran una compra o una novedad no se borra (conflicto, no error de clave foránea)', async () => {
+    await q("INSERT INTO tools (id, name) VALUES ('tool-txt-pr', 'Herramienta con compra')");
+    await q("INSERT INTO purchase_requests (id, tool_id, reason, qty, origin, created_by) VALUES ('pr-txt-m', 'tool-txt-pr', 'cambio', 1, 'tool', 'u-imp')");
+    await q("INSERT INTO techs (id, name, legajo, active) VALUES ('t-txt-nv', 'Técnico con novedad', 'TXT-9', true)");
+    await q("INSERT INTO tech_plantilla_history (id, tech_id, plantilla_id, reason) VALUES ('ph-txt-nv', 't-txt-nv', 'manana', 'Alta')");
+    await q("INSERT INTO novedades (id, author_id, comment, tech_id, created_by) VALUES ('nv-txt-t', 'u-imp', 'Novedad del técnico', 't-txt-nv', 'u-imp')");
+    const p = await current();
+    assert.ok(p.data.tools['tool-txt-pr'] && p.data.techs['t-txt-nv']);
+    delete p.data.tools['tool-txt-pr'];
+    delete p.data.techs['t-txt-nv'];
+    p.data.deleted = { 'tools/tool-txt-pr': soon(), 'techs/t-txt-nv': soon() };
+    const { dry } = await apply(toTxt(p));
+    assert.deepEqual(dry.conflicts.map((c) => c.collection + '/' + c.id).sort(), ['techs/t-txt-nv', 'tools/tool-txt-pr']);
+    for (const c of dry.conflicts) assert.match(c.message, /solicitud de compra o una novedad/);
+    assert.equal(await count('tools', "id = 'tool-txt-pr'"), 1);
+    assert.equal(await count('techs', "id = 't-txt-nv'"), 1);
+  });
+
   test('libro de solo agregar: un movimiento o un control finalizado distinto es un conflicto', async () => {
     const p = await current();
     p.data.movements.m21i1 = { ...p.data.movements.m21i1, qty: 50, notes: 'Cambiado' };
@@ -341,6 +359,7 @@ describe('fechas vacías', () => {
     const rep = await dryRun(fileWith((d) => { d.controls.c21f.finishedAt = ''; }));
     assert.deepEqual(rep.errors.map((x) => [x.collection, x.id, x.field]), [['controls', 'c21f', 'finishedAt']]);
   });
+
 });
 
 describe('exportar', () => {

@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   PURCHASE_STATUSES, OPEN_STATUSES, checkTransition, cleanDecision, cleanCost, cleanManualPurchase, lossesOf, countedPairs,
-  planAutoPurchases, parsePurchaseFilters, purchaseLabel, sameKey,
+  planAutoPurchases, parsePurchaseFilters, purchaseLabel, sameKey, stripCosts, stripCostText, COST_MARK,
 } from '../../src/domain/compras.js';
 
 test('estados: pendiente -> aprobada | rechazada; aprobada -> comprada -> recibida (o recibida directo)', () => {
@@ -119,6 +119,30 @@ test('una corrección que quita la pérdida archiva la pendiente que solo venía
   // La corrección mantiene la pérdida: se vincula y sigue la cantidad.
   const keep = planAutoPurchases({ pnum: 1, losses: [{ assignmentId: 'a1', unitId: null, toolId: 'tool-pinza', reason: 'faltante', qty: 2, note: '' }], counted, candidates: [{ ...only, qty: 1 }] });
   assert.deepEqual([keep.archive, keep.link, keep.create], [[], [{ id: 'r1', qty: 2 }], []]);
+});
+
+test('E7.V1: un control más nuevo sin la pérdida marca la pendiente; si la pérdida vuelve, se desmarca', () => {
+  const counted = countedPairs({ a1: { state: 'bueno', expected: 3, good: 3, change: 0, missing: 0 } }, ASG);
+  const run = (r, o = {}) => planAutoPurchases({ pnum: 20261121, losses: [], counted, candidates: [r], ...o });
+  assert.deepEqual(run(req({ maxLinkedPnum: 20261111 })).flag, ['r1']);
+  assert.deepEqual(run(req({ maxLinkedPnum: 20261121 })).flag, ['r1']);
+  // Un control más viejo, una aprobada, ya marcada, de otra asignación (misma unidad) o archivada: no.
+  for (const r of [req({ maxLinkedPnum: 20261131 }), req({ status: 'aprobada' }), req({ lossResolvedAt: '2026-11-01T00:00:00Z' }), req({ assignmentId: 'viejo', unitId: 'u9' })]) {
+    assert.deepEqual(run(r).flag, [], JSON.stringify(r));
+  }
+  assert.deepEqual(run(req({ linkedToSuperseded: true, onlyThisPeriod: true })).flag, []);
+  // La pérdida vuelve a figurar en un control igual o más nuevo: se quita la marca.
+  const back = plan([req({ lossResolvedAt: '2026-11-01T00:00:00Z', maxLinkedPnum: 20261111 })]);
+  assert.deepEqual([back.unflag, back.flag], [['r1'], []]);
+  assert.deepEqual(plan([req({ lossResolvedAt: '2026-11-01T00:00:00Z', maxLinkedPnum: 20261131 })]).unflag, []);
+});
+
+test('E7.V1: sin purchases_view no se ven costos ni proveedores (fila y auditoría)', () => {
+  const row = { id: 'p1', qty: 1, estimatedCost: 1500, supplier: 'Ferretería', observation: 'x' };
+  assert.deepEqual(stripCosts(row), { id: 'p1', qty: 1, observation: 'x' });
+  assert.equal(stripCostText(`Compra 1 aprobada: Pinza, extraviada, cantidad 1${COST_MARK}$ 1.500,00, proveedor Ferretería`), 'Compra 1 aprobada: Pinza, extraviada, cantidad 1');
+  assert.equal(stripCostText('Compra 1 rechazada. Motivo: no'), 'Compra 1 rechazada. Motivo: no');
+  assert.equal(stripCostText(null), null);
 });
 
 test('filtros de la lista: estado, mes, poseedor, herramienta, motivo, texto, eliminadas y página', () => {

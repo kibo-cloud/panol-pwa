@@ -128,7 +128,8 @@ export async function lockCandidates(q, { assignmentIds, unitIds, supersededId =
 }
 
 // Resumen para /api/state (todos los perfiles): estado de las abiertas, de las rechazadas sin
-// resolver (alerta "compra rechazada") y de las recibidas que todavía no tienen reposición. Sin
+// resolver (alerta "compra rechazada") y de las recibidas que todavía no tienen reposición (E7.V1:
+// solo las de un poseedor, las únicas que se vinculan, recibidas en los últimos 90 días). Sin
 // costos ni proveedores.
 export async function loadPurchaseSummary(q) {
   const { rows } = await q.query(
@@ -136,7 +137,7 @@ export async function loadPurchaseSummary(q) {
             r.decision_comment, r.decided_at, r.received_at, r.created_at, r.holder_name, r.tool_name
        FROM purchase_requests r
       WHERE r.archived_at IS NULL AND (r.status = ANY($1) OR (r.status = 'rechazada' AND r.loss_resolved_at IS NULL)
-            OR (r.status = 'recibida' AND r.reposicion_movement_id IS NULL))
+            OR (r.status = 'recibida' AND r.reposicion_movement_id IS NULL AND r.assignment_id IS NOT NULL AND r.received_at >= now() - interval '90 days'))
       ORDER BY r.created_at, r.id`,
     [OPEN_STATUSES],
   );
@@ -164,7 +165,8 @@ function whereOf(f, p) {
   if (f.reason) where.push(`r.reason = ${p(f.reason)}`);
   if (f.archived === 'exclude') where.push('r.archived_at IS NULL');
   if (f.archived === 'only') where.push('r.archived_at IS NOT NULL');
-  if (f.q) where.push(`concat_ws(' ', r.name, r.tool_name, r.unit_code, r.holder_name, r.observation, r.supplier, r.decision_comment, tl.name, p.name) ILIKE ${p(likePattern(f.q))}`);
+  // Sin purchases_view (f.costs === false) el texto no busca en el proveedor.
+  if (f.q) where.push(`concat_ws(' ', r.name, r.tool_name, r.unit_code, r.holder_name, r.observation, ${f.costs === false ? '' : 'r.supplier, '}r.decision_comment, tl.name, p.name) ILIKE ${p(likePattern(f.q))}`);
   return where;
 }
 

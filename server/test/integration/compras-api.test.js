@@ -215,9 +215,15 @@ describe('decisión', () => {
   test('comprada (opcional) y recepción con el ingreso al inventario', async () => {
     let v = await verOf(rTal.id);
     assert.equal((await act('consulta', rTal.id, 'purchase', {}, v)).statusCode, 403);
-    const p = await act('responsable', rTal.id, 'purchase', { supplier: 'Herramientas SA', estimatedCost: 85000 }, v);
+    // E7.V1: después de la decisión, el costo y el proveedor solo los cambia Gerencia.
+    assert.equal((await act('responsable', rTal.id, 'purchase', { supplier: 'Herramientas SA', estimatedCost: 85000 }, v)).statusCode, 403);
+    const g = await api.call('gerencia', 'PATCH', `/api/compras/${rTal.id}`, { supplier: 'Herramientas SA', estimatedCost: 85000 }, ifMatch(v));
+    assert.equal(g.statusCode, 200, g.body);
+    const p = await act('responsable', rTal.id, 'purchase', {}, g.json().compra.version);
     assert.equal(p.statusCode, 200, p.body);
-    assert.deepEqual([p.json().compra.status, p.json().compra.supplier, p.json().compra.estimatedCost], ['comprada', 'Herramientas SA', 85000]);
+    assert.equal(p.json().compra.status, 'comprada');
+    const gp = (await get('gerencia', rTal.id)).json().compra;
+    assert.deepEqual([gp.supplier, gp.estimatedCost], ['Herramientas SA', 85000]);
     v = p.json().compra.version;
     assert.equal((await act('supervisor', rTal.id, 'receive', { codes: 'TAL-900' }, v)).statusCode, 403);
     assert.equal((await act('responsable', rTal.id, 'receive', {}, v)).json().error, 'codes_required');
@@ -262,7 +268,9 @@ describe('alta manual, edición, listas y totales', () => {
   test('desde la ficha de la herramienta (sin poseedor) y desde una alerta (con la asignación)', async () => {
     const r = await api.call('responsable', 'POST', '/api/compras', { toolId: 'tool-pinza', reason: 'cambio', qty: 3, estimatedCost: '1500.5', supplier: ' Ferretería ' }, { 'idempotency-key': 'compra-manual-0001' });
     assert.equal(r.statusCode, 201, r.body);
-    manual = r.json().compra;
+    // Sin purchases_view, la respuesta no trae el costo ni el proveedor (Gerencia sí los ve).
+    assert.equal('estimatedCost' in r.json().compra, false);
+    manual = (await get('gerencia', r.json().compra.id)).json().compra;
     assert.deepEqual([manual.origin, manual.techId, manual.assignmentId, manual.estimatedCost, manual.supplier, manual.status], ['tool', null, null, 1500.5, 'Ferretería', 'pendiente']);
     // Ya hay una abierta para la pinza de Ana por faltante.
     const dup = await api.call('responsable', 'POST', '/api/compras', { toolId: 'tool-pinza', assignmentId: asg.pinza.id, reason: 'faltante', qty: 1, origin: 'alert', alertKey: 'falt-x' });
@@ -336,7 +344,7 @@ describe('eliminar, restaurar, novedad y detalle', () => {
     const o = await api.call('responsable', 'POST', '/api/compras', { toolId: 'tool-pinza', assignmentId: asg.pinza.id, reason: 'faltante', qty: 1, origin: 'alert' });
     assert.equal(o.statusCode, 201, o.body);
     const rs = await api.call('admin', 'POST', `/api/compras/${rPin.id}/restore`, { reason: 'Error' }, ifMatch(a.json().compra.version));
-    assert.equal(rs.json().error, 'duplicate');
+    assert.deepEqual([rs.statusCode, rs.json().error], [409, 'duplicate']);
     await api.call('admin', 'POST', `/api/compras/${o.json().compra.id}/archive`, { reason: 'Repetida' }, ifMatch(o.json().compra.version));
     const ok = await api.call('admin', 'POST', `/api/compras/${rPin.id}/restore`, { reason: 'Error' }, ifMatch(a.json().compra.version));
     assert.equal(ok.statusCode, 200, ok.body);
@@ -367,7 +375,7 @@ describe('eliminar, restaurar, novedad y detalle', () => {
     assert.equal(r.headers.etag, `"${d.version}"`);
     // Los dos controles concurrentes y las tres correcciones siguientes con el mismo recambio.
     assert.equal(d.controls.length, 5);
-    assert.deepEqual(d.timeline.map((x) => x.action), ['purchase_create', 'purchase_link', 'purchase_link', 'purchase_link', 'purchase_link', 'purchase_approve', 'purchase_purchase', 'purchase_receive', 'purchase_reposicion']);
+    assert.deepEqual(d.timeline.map((x) => x.action), ['purchase_create', 'purchase_link', 'purchase_link', 'purchase_link', 'purchase_link', 'purchase_approve', 'purchase_edit', 'purchase_purchase', 'purchase_receive', 'purchase_reposicion']);
     const actor = { id: 'u-gerencia', role: 'gerencia' };
     const all = await purchasesOfPeriod(api.appPool, actor, {});
     const st = all.map((x) => x.status).sort();

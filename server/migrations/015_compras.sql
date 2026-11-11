@@ -6,7 +6,8 @@
 --   y cuándo la generó.
 -- - Estados: pendiente -> aprobada | rechazada; aprobada -> comprada (opcional) -> recibida
 --   (también aprobada -> recibida). Cada transición guarda quién y cuándo; rechazar pide comentario.
---   Un trigger impide los saltos de estado y que cambien los datos de origen.
+--   Un trigger impide los saltos de estado y que cambien los datos de origen, y (E7.V1) que el
+--   costo o el proveedor cambien después de la decisión sin la marca de quien decide.
 -- - Una sola solicitud abierta (pendiente, aprobada o comprada, no eliminada) por asignación y
 --   motivo, y por unidad y motivo (índices únicos parciales). Los controles siguientes se vinculan
 --   a la existente (purchase_request_controls).
@@ -99,6 +100,12 @@ BEGIN
   -- Cerradas (rechazada o recibida): solo la marca de pérdida resuelta y el vínculo a la reposición.
   IF OLD.status IN ('rechazada', 'recibida') AND (NEW.qty IS DISTINCT FROM OLD.qty OR NEW.estimated_cost IS DISTINCT FROM OLD.estimated_cost OR NEW.supplier IS DISTINCT FROM OLD.supplier) THEN
     RAISE EXCEPTION 'Una solicitud cerrada no se modifica' USING ERRCODE = 'restrict_violation';
+  END IF;
+  -- Después de la decisión, el costo y el proveedor solo los cambia quien decide (la aplicación
+  -- marca la transacción con panol.purchase_decider cuando el usuario tiene purchases_decide).
+  IF OLD.status <> 'pendiente' AND (NEW.estimated_cost IS DISTINCT FROM OLD.estimated_cost OR NEW.supplier IS DISTINCT FROM OLD.supplier)
+     AND coalesce(current_setting('panol.purchase_decider', true), '') <> 'on' THEN
+    RAISE EXCEPTION 'Después de la decisión, el costo y el proveedor solo los cambia Gerencia' USING ERRCODE = 'restrict_violation';
   END IF;
   RETURN NEW;
 END $$;

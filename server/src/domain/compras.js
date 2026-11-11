@@ -123,14 +123,18 @@ export const sameKey = (r, x) => r.reason === x.reason && (r.assignmentId === x.
  * resolve: [id] (rechazadas cuya pérdida se resolvió), blocked: [{ assignmentId, reason, requestId }] }.
  */
 export function planAutoPurchases({ losses, counted, candidates, pnum }) {
-  const out = { create: [], link: [], archive: [], resolve: [], blocked: [] };
+  const out = { create: [], link: [], archive: [], resolve: [], blocked: [], flag: [], unflag: [] };
   const open = candidates.filter((r) => OPEN_STATUSES.includes(r.status));
   const rejected = candidates.filter((r) => r.status === 'rechazada' && !r.lossResolvedAt);
+  // E7.V1: el control es el más nuevo de la solicitud (o del mismo período).
+  const latest = (r) => r.status === 'pendiente' && pnum >= (r.maxLinkedPnum || 0);
   for (const l of losses) {
     const r = open.find((x) => sameKey(x, l));
     if (r) {
-      const follow = r.status === 'pendiente' && pnum >= (r.maxLinkedPnum || 0) && r.qty !== l.qty;
+      const follow = latest(r) && r.qty !== l.qty;
       if (!out.link.some((x) => x.id === r.id)) out.link.push({ id: r.id, qty: follow ? l.qty : null });
+      // La pérdida vuelve a figurar: se quita la marca "ya no figura".
+      if (latest(r) && r.lossResolvedAt && !out.unflag.includes(r.id)) out.unflag.push(r.id);
       continue;
     }
     const rej = rejected.find((x) => sameKey(x, l));
@@ -144,7 +148,31 @@ export function planAutoPurchases({ losses, counted, candidates, pnum }) {
       if (r.status === 'pendiente' && r.origin === 'control' && r.linkedToSuperseded && r.onlyThisPeriod && sameKey(r, p) && !out.archive.includes(r.id)) out.archive.push(r.id);
     }
   }
+  // E7.V1 (decisión del parent): una pendiente del mismo poseedor (misma asignación) cuyo control
+  // más nuevo ya no muestra la pérdida queda marcada (no se cancela) para que Gerencia lo vea.
+  for (const p of counted.filter((x) => !lost(x))) {
+    for (const r of open) {
+      if (latest(r) && !r.lossResolvedAt && r.assignmentId === p.assignmentId && r.reason === p.reason && !out.archive.includes(r.id) && !out.flag.includes(r.id)) out.flag.push(r.id);
+    }
+  }
   return out;
+}
+
+// ---------------------------------------------------------------- costos (solo purchases_view)
+// La auditoría escribe el costo y el proveedor al final, después de esta marca: sin
+// purchases_view se corta ahí (si un texto anterior la contiene, se corta de más, nunca de menos).
+export const COST_MARK = '. Costo y proveedor: ';
+export function stripCostText(detail) {
+  if (detail == null) return detail;
+  const i = String(detail).indexOf(COST_MARK);
+  return i < 0 ? detail : String(detail).slice(0, i);
+}
+// Solicitud sin el costo estimado ni el proveedor.
+export function stripCosts(row) {
+  if (!row) return row;
+  const { estimatedCost, supplier, ...rest } = row;
+  if (Array.isArray(rest.timeline)) rest.timeline = rest.timeline.map((x) => ({ ...x, detail: stripCostText(x.detail) }));
+  return rest;
 }
 
 // Etiqueta corta (la que se ve en las listas y en Registros eliminados).

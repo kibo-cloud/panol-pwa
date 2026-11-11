@@ -288,6 +288,7 @@ const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 // ---------------------------------------------------------------- restaurar
 const NAME_TAKEN = (T, name) => rule(`Ya hay otro registro activo con el nombre ${name}. Renombralo antes de restaurar este registro.`, 'duplicate');
+const PURCHASE_TAKEN = (name) => rule(`Ya hay otra solicitud abierta para esa herramienta y motivo${name ? ` (${name})` : ''}.`, 'duplicate');
 const UNIQUE_NAME = new Set(['tools', 'categories', 'cajas', 'plantillas', 'lineas', 'especialidades']);
 
 async function restoreChecks(c, T, row) {
@@ -304,11 +305,20 @@ async function restoreChecks(c, T, row) {
     if (l && l.archived_at) throw rule(`Restaurá antes la línea o sector ${l.name}.`, 'parent_archived');
   }
   if (T.type === 'compras') {
-    // Una sola abierta por asignación (o unidad) y motivo: si ya hay otra, no se restaura.
-    if (row.assignment_id) await repo.lockName(c, `purchases.asg:${row.assignment_id}`);
+    // E7.V1: la asignación (y su poseedor) tiene que seguir vigente.
+    if (row.assignment_id) {
+      const a = (await c.query(
+        `SELECT a.active, coalesce(t.active AND t.archived_at IS NULL, k.archived_at IS NULL, false) AS holder_ok
+           FROM assignments a LEFT JOIN techs t ON t.id = a.tech_id LEFT JOIN cajas k ON k.id = a.caja_id WHERE a.id = $1`,
+        [row.assignment_id],
+      )).rows[0];
+      if (!a || !a.active || !a.holder_ok) throw rule('La herramienta de esta solicitud ya no está asignada a ese poseedor: no se restaura. Creá una solicitud nueva si hace falta.', 'assignment_inactive');
+    }
+    // Una sola abierta por asignación (o unidad) y motivo: si ya hay otra, no se restaura. El
+    // nombre por asignación ya se tomó antes que la fila (restoreRecord), como en el alta.
     const other = (await c.query(`SELECT name FROM purchase_requests WHERE id <> $1 AND archived_at IS NULL AND status = ANY($2) AND reason = $3
         AND (($4::text IS NOT NULL AND assignment_id = $4::text) OR ($5::text IS NOT NULL AND unit_id = $5::text)) LIMIT 1`, [row.id, OPEN_STATUSES, row.reason, row.assignment_id, row.unit_id])).rows[0];
-    if (other) throw rule(`Ya hay otra solicitud abierta para esa herramienta y motivo (${other.name}).`, 'duplicate');
+    if (other) throw PURCHASE_TAKEN(other.name);
   }
   if (T.type === 'kits') {
     const e = (await c.query('SELECT name, archived_at FROM especialidades WHERE id = $1 FOR SHARE', [row.especialidad_id])).rows[0];
@@ -323,6 +333,12 @@ export async function restoreRecord(db, actor, type, id, input, version) {
   return withTransaction(db, async (c) => {
     if (T.type === 'users') await lockAdmins(c);
     const scopes = await lockOrderScope(c, T, id);
+    // Compras: el nombre por asignación antes que la fila (orden del alta y de finalizar un
+    // control); la asignación de una solicitud no cambia nunca (trigger de 015).
+    if (T.type === 'compras') {
+      const a = (await c.query('SELECT assignment_id FROM purchase_requests WHERE id = $1', [id])).rows[0];
+      if (a && a.assignment_id) await repo.lockName(c, `purchases.asg:${a.assignment_id}`);
+    }
     const row = await lockRow(c, T, id);
     checkVersionOf(row, version);
     checkScope(T, row, scopes);
@@ -332,7 +348,8 @@ export async function restoreRecord(db, actor, type, id, input, version) {
     // reactiva para que pueda ingresar).
     const extra = ['techs', 'tools'].includes(T.type) ? ', active = true' : '';
     await c.query(`UPDATE ${T.table} SET archived_at = NULL, archived_by = NULL, archive_reason = NULL${extra} WHERE id = $1`, [id]).catch((err) => {
-      if (err && err.code === '23505') throw NAME_TAKEN(T, row.name);
+      // Compras: el índice único parcial de las abiertas (otra solicitud por la misma unidad).
+      if (err && err.code === '23505') throw T.type === 'compras' ? PURCHASE_TAKEN() : NAME_TAKEN(T, row.name);
       throw err;
     });
     if (T.type === 'tools') await c.query('UPDATE units SET archived_at = NULL, archived_by = NULL, archive_reason = NULL WHERE tool_id = $1 AND archived_at IS NOT NULL', [id]);
