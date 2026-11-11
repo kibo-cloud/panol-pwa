@@ -40,6 +40,8 @@ export function toApi(r) {
     // Etapa 7: vínculo a una solicitud de compra.
     purchaseRequestId: r.purchase_request_id ?? null,
     purchase: r.purchase_request_id ? { id: r.purchase_request_id, name: r.purchase_name, status: r.purchase_status, toolName: r.purchase_tool_name, archived: r.purchase_archived_at != null } : null,
+    // Etapa 9: novedad importada del Excel (lote de importación).
+    importBatchId: r.import_batch_id ?? null,
     archived: r.archived_at != null, archivedAt: iso(r.archived_at), archivedBy: r.archived_by, archiveReason: r.archive_reason,
     version: r.version, createdAt: iso(r.created_at), updatedAt: iso(r.updated_at), by: r.created_by,
   };

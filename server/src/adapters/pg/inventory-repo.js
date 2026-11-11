@@ -45,6 +45,8 @@ export async function loadControls(q, { status, id, lock = false } = {}) {
       items: byCtl[r.id] || {}, counts: { bueno: r.count_bueno, cambio: r.count_cambio, faltante: r.count_faltante },
       cleaning: { status: r.cleaning_status, note: r.cleaning_note || '' },
       correction: r.correction, supersedes: r.supersedes_id, startedAt: iso(r.started_at), finishedAt: iso(r.finished_at), updatedAt: iso(r.updated_at), version: r.version, by: r.created_by, demo: r.demo,
+      // Etapa 9: control importado del Excel (lote de importación).
+      importBatchId: r.import_batch_id ?? null,
     };
   });
 }
@@ -94,15 +96,17 @@ function updateSql(table, id, set, cols) {
 }
 
 // Guarda un plan de planMovement(). Llamar dentro de una transacción.
-export async function applyMovementPlan(client, plan, { actorId = null, auditId, ip = null, demo = false } = {}) {
+// importBatchId (etapa 9): el movimiento entra con el importador del Excel (marca imported).
+export async function applyMovementPlan(client, plan, { actorId = null, auditId, ip = null, demo = false, importBatchId = null } = {}) {
   const m = plan.movement;
   await client.query(
     `INSERT INTO movements (id, type, tech_id, tool_id, qty, unit_id, new_assignment_id, old_assignment_id, old_unit_id, new_unit_id,
-       old_state, returned, old_dest, condition, linked_control_id, resolves_movement_id, reason, notes, at, created_by, demo, caja_id, voids_movement_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
+       old_state, returned, old_dest, condition, linked_control_id, resolves_movement_id, reason, notes, at, created_by, demo, caja_id, voids_movement_id, imported, import_batch_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`,
     [m.id, m.type, m.techId ?? null, m.toolId ?? null, m.qty ?? null, m.unitId ?? null, m.newAssignmentId ?? null, m.oldAssignmentId ?? null,
       m.oldUnitId ?? null, m.newUnitId ?? null, m.oldState ?? null, m.returned ?? null, m.oldDest ?? null, m.condition ?? null,
-      m.linkedControlId ?? null, m.resolvesMovementId ?? null, m.reason || null, m.notes || null, m.at, actorId, demo, m.cajaId ?? null, m.voidsMovementId ?? null],
+      m.linkedControlId ?? null, m.resolvesMovementId ?? null, m.reason || null, m.notes || null, m.at, actorId, demo, m.cajaId ?? null, m.voidsMovementId ?? null,
+      !!importBatchId, importBatchId],
   );
   // Unidades nuevas antes de las transferencias y asignaciones que las nombran.
   for (const u of plan.newUnits) {
@@ -126,13 +130,14 @@ export async function applyMovementPlan(client, plan, { actorId = null, auditId,
 
 // Guarda un control como borrador con sus ítems y, si corresponde, lo finaliza. Los ítems
 // solo se pueden escribir mientras el control es borrador (lo exige un trigger).
-export async function saveControl(client, id, doc, { actorId = null, startedAt, finishedAt, demo = false } = {}) {
+// importBatchId (etapa 9): control importado del Excel (marca imported, ya finalizado).
+export async function saveControl(client, id, doc, { actorId = null, startedAt, finishedAt, demo = false, importBatchId = null } = {}) {
   await client.query(
     `INSERT INTO controls (id, tech_id, tech_name, shift_id, period_y, period_m, period_w, status, count_bueno, count_cambio, count_faltante,
-       correction, supersedes_id, started_at, created_by, demo, plantilla_id_snapshot, caja_id, cleaning_status, cleaning_note)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,'borrador',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+       correction, supersedes_id, started_at, created_by, demo, plantilla_id_snapshot, caja_id, cleaning_status, cleaning_note, imported, import_batch_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'borrador',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
     [id, doc.techId ?? null, doc.techName, doc.shiftId, doc.period.y, doc.period.m, doc.period.w, doc.counts.bueno, doc.counts.cambio, doc.counts.faltante,
-      doc.correction, doc.supersedes, startedAt ?? null, actorId, demo, doc.plantillaId ?? null, doc.cajaId ?? null, ...cleaningCols(doc)],
+      doc.correction, doc.supersedes, startedAt ?? null, actorId, demo, doc.plantillaId ?? null, doc.cajaId ?? null, ...cleaningCols(doc), !!importBatchId, importBatchId],
   );
   await insertItems(client, id, doc.items);
   if (doc.status === 'finalizado') {

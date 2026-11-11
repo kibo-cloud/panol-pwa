@@ -5,7 +5,7 @@ import { PERM_KEYS, ROLE_KEYS } from '../../src/domain/constants.js';
 
 test('roles y claves de permiso de 2.1 más gerencia y supervisor', () => {
   assert.deepEqual(ROLE_KEYS, ['admin', 'gerencia', 'supervisor', 'responsable', 'consulta']);
-  assert.deepEqual(PERM_KEYS, ['controls_do', 'movements_do', 'techs_edit', 'shift_change', 'tools_edit', 'inventory_edit', 'alerts_resolve', 'shifts_edit', 'reports_export', 'demo_manage', 'plantillas_edit', 'plantilla_rotate', 'lineas_edit', 'kits_edit', 'records_delete', 'movements_void', 'novedades_view', 'novedades_create', 'novedades_edit', 'purchases_view', 'purchases_decide', 'purchases_create', 'purchases_receive']);
+  assert.deepEqual(PERM_KEYS, ['controls_do', 'movements_do', 'techs_edit', 'shift_change', 'tools_edit', 'inventory_edit', 'alerts_resolve', 'shifts_edit', 'reports_export', 'demo_manage', 'plantillas_edit', 'plantilla_rotate', 'lineas_edit', 'kits_edit', 'records_delete', 'movements_void', 'novedades_view', 'novedades_create', 'novedades_edit', 'purchases_view', 'purchases_decide', 'purchases_create', 'purchases_receive', 'import_excel']);
 });
 
 test('etapa 2: plantillas, rotación y líneas son solo de admin por defecto', () => {
@@ -43,6 +43,10 @@ test('etapa 7: Gerencia ve y decide compras; crear, quien opera el pañol; recib
   for (const r of ['gerencia', 'consulta']) assert.equal(can(r, 'purchases_create'), false, r);
   for (const r of ['admin', 'responsable']) assert.equal(can(r, 'purchases_receive'), true, r);
   for (const r of ['supervisor', 'gerencia', 'consulta']) assert.equal(can(r, 'purchases_receive'), false, r);
+  // Etapa 9: importar el Excel anterior, solo admin por defecto.
+  assert.equal(can('admin', 'import_excel'), true);
+  for (const r of ['supervisor', 'responsable', 'gerencia', 'consulta']) assert.equal(can(r, 'import_excel'), false, r);
+  assert.equal(can('responsable', 'import_excel', { responsable: { import_excel: true } }), true);
 });
 
 test('supervisor = responsable + shift_change (sin recibir compras); gerencia = reports_export, novedades y compras', () => {

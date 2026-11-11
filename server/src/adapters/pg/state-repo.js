@@ -16,6 +16,8 @@ const MOVEMENT = (r) => ({
   oldAssignmentId: r.old_assignment_id, oldUnitId: r.old_unit_id, newUnitId: r.new_unit_id, oldState: r.old_state, returned: r.returned,
   oldDest: r.old_dest, condition: r.condition, linkedControlId: r.linked_control_id, resolvesMovementId: r.resolves_movement_id, voidsMovementId: r.voids_movement_id,
   reason: r.reason || '', notes: r.notes || '', at: iso(r.at), by: r.created_by, demo: r.demo, transfers: [],
+  // Etapa 9: movimiento importado del Excel (lote de importación).
+  importBatchId: r.import_batch_id ?? null,
 });
 
 export async function loadMovementsFull(q) {
