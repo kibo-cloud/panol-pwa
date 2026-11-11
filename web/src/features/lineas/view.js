@@ -7,7 +7,7 @@ import { VIEWS, UI, render } from '../../ui/registry.js';
 import { ACT } from '../../ui/actions.js';
 import { openModal, modalRerender, MOD } from '../../ui/modal.js';
 import { toast, act, UErr } from '../../ui/feedback.js';
-import { kpi, pageHead, emptyBox, ctlBadge, stChip, mvList, field, optList, techOptions, weekCells, monthNav, qtyLine, cleanSummary } from '../../ui/components.js';
+import { kpi, pageHead, emptyBox, ctlBadge, stChip, mvList, field, optList, techOptions, weekCells, monthNav, qtyLine, cleanSummary, ageChip } from '../../ui/components.js';
 import { api, newIdempotencyKey } from '../../api/index.js';
 import { S, derive, can, who, refresh, toolName, catName } from '../../state/store.js';
 import { canDeliverKit } from '../kits/deliver.js';
@@ -87,7 +87,7 @@ VIEWS.caja = (id) => {
   } else body = mvList(d.movs.filter((m) => m.cajaId === id));
   // Etapa 5: Eliminar (con las herramientas resueltas en el mismo paso) o el aviso si ya lo está.
   const archBox = live ? '' : archivedBanner(k, 'cajas');
-  return `<a class="backl" href="#lineas">${icon('back', 16)}Líneas y cajas</a><div class="card" data-css="margin-bottom:12px"><div class="prof"><span class="tile">${icon('box', 20)}</span><div class="grow"><h1>${esc(k.name)}</h1><div class="s">${esc(lineaName(k.lineaId))} · Referente: ${esc(refName(k))}</div></div><span class="chip ${live ? 'ok' : 'pend'}">${live ? 'Activa' : 'Eliminada'}</span></div>${acts ? `<div class="toolbar" data-css="margin:0">${acts}</div>` : ''}</div>
+  return `<a class="backl" href="#lineas">${icon('back', 16)}Líneas y cajas</a><div class="card" data-css="margin-bottom:12px"><div class="prof"><span class="tile">${icon('box', 20)}</span><div class="grow"><h1>${esc(k.name)}</h1><div class="s">${esc(lineaName(k.lineaId))} · Referente: ${esc(refName(k))}</div></div><span class="chip ${live ? 'ok' : 'pend'}">${live ? 'Activa' : 'Eliminada'}</span></div>${live ? ageChip(hk) : ''}${acts ? `<div class="toolbar" data-css="margin:0">${acts}</div>` : ''}</div>
   <section class="kpis">${kpi(i.total, 'Herramientas asignadas')}${kpi(i.bueno, 'En buen estado', '', 'ok')}${kpi(i.cambio, 'Para cambio', '', 'warn')}${kpi(i.faltante, 'Faltantes', '', 'bad')}</section>
   <div class="tabs" role="tablist">${[['tools', 'Herramientas'], ['ctl', 'Controles'], ['mov', 'Movimientos']].map(([key, l]) => `<button role="tab" aria-selected="${tab === key}" class="${tab === key ? 'on' : ''}" data-act="cajaTab" data-v="${esc(key)}">${l}</button>`).join('')}</div>${body}${archBox}`;
 };

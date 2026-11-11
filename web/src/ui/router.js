@@ -2,7 +2,8 @@
 // Etapa 2: Plantillas reemplaza a Turnos (#turnos y #turno-<id> siguen funcionando como
 // alias), Líneas y cajas (#lineas, #caja-<id>) y el control de una caja (#control-caja:<id>).
 // Etapa 7: Gerencia (#compras) y el detalle de una solicitud (#compra-<id>).
-export const NAV = [['inicio', 'Panel', 'home'], ['plantillas', 'Plantillas', 'users'], ['tecnicos', 'Técnicos', 'users'], ['control', 'Control de herramientas', 'check'], ['entregas', 'Entregas y reposiciones', 'swap'], ['inventario', 'Inventario general', 'box'], ['lineas', 'Líneas y cajas', 'box'], ['controles', 'Historial de controles', 'hist'], ['reportes', 'Reportes', 'chart'], ['alertas', 'Alertas', 'bell'], ['novedades', 'Novedades', 'note'], ['compras', 'Gerencia: compras', 'cart'], ['config', 'Configuración de herramientas', 'wrench'], ['admin', 'Administración', 'shield']];
+// Etapa 8: Existencia por técnico (#existencia).
+export const NAV = [['inicio', 'Panel', 'home'], ['plantillas', 'Plantillas', 'users'], ['tecnicos', 'Técnicos', 'users'], ['control', 'Control de herramientas', 'check'], ['entregas', 'Entregas y reposiciones', 'swap'], ['inventario', 'Inventario general', 'box'], ['lineas', 'Líneas y cajas', 'box'], ['controles', 'Historial de controles', 'hist'], ['reportes', 'Reportes', 'chart'], ['existencia', 'Existencia', 'grid'], ['alertas', 'Alertas', 'bell'], ['novedades', 'Novedades', 'note'], ['compras', 'Gerencia: compras', 'cart'], ['config', 'Configuración de herramientas', 'wrench'], ['admin', 'Administración', 'shield']];
 export const NAV_PARENT = { plantilla: 'plantillas', tecnico: 'tecnicos', ck: 'control', ver: 'controles', herramienta: 'inventario', caja: 'lineas', compra: 'compras' };
 const DETAIL = { plantilla: 'plantilla', turno: 'plantilla', tecnico: 'tecnico', controlver: 'ver', herramienta: 'herramienta', caja: 'caja', compra: 'compra' };
 const ALIAS = { turnos: 'plantillas' };

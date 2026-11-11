@@ -1,5 +1,6 @@
 // Administración: usuarios y permisos (solo admin, en el servidor), configuración (lista de
-// turnos de las plantillas), datos e integridad, y auditoría paginada.
+// turnos de las plantillas y, etapa 8, el umbral de la alerta "Sin control hace N días"), datos e
+// integridad, y auditoría paginada.
 import { esc } from '../../ui/dom.js';
 import { icon } from '../../ui/icons.js';
 import { VIEWS, UI, render } from '../../ui/registry.js';
@@ -18,7 +19,7 @@ import { parseRoute } from '../../ui/router.js';
 import { deleteBtn, deletedTab } from '../records/view.js';
 
 // Datos que solo ve un administrador: se piden al abrir la pestaña.
-const AD = { users: null, perms: null, pending: {}, audit: null, labels: null, loading: {} };
+const AD = { users: null, perms: null, pending: {}, audit: null, labels: null, alertCfg: null, loading: {} };
 const isAdm = () => myRole() === 'admin';
 
 async function load(what, force) {
@@ -28,6 +29,7 @@ async function load(what, force) {
     if (what === 'users') AD.users = (await api.users()).users;
     if (what === 'perms') AD.perms = await api.permissions();
     if (what === 'audit') AD.audit = await api.audit();
+    if (what === 'alertCfg') { const r = await api.alertSettings(); AD.alertCfg = r; if (!UI.cfgOverdue || !UI.cfgOverdue.dirty) UI.cfgOverdue = { value: String(r.controlOverdueDays), version: r.version, dirty: false }; }
     if (what === 'labels') { const r = await api.shiftLabels(); AD.labels = r; if (!UI.cfgLabels || !UI.cfgLabels.dirty) UI.cfgLabels = { list: r.labels.slice(), version: r.version, dirty: false }; }
   } catch (e) { toast(errMsg(e), 'err'); } finally { AD.loading[what] = false; render(); }
 }
@@ -35,7 +37,7 @@ async function load(what, force) {
 hooks.afterState.push(() => {
   if (parseRoute(location.hash).name !== 'admin' || !isAdm()) return;
   if (UI.adminTab === 'users') { load('users', true); load('perms', true); }
-  if (UI.adminTab === 'config') load('labels', true);
+  if (UI.adminTab === 'config') { load('labels', true); load('alertCfg', true); }
 });
 const loading = '<div class="loading"><div class="spin"></div>Cargando…</div>';
 
@@ -67,7 +69,20 @@ function configTab() {
   const n = L.list.length;
   return `<div class="card"><h2 class="si">Turnos de las plantillas</h2><p class="muted sm" data-css="margin:6px 0 12px">El turno actual de cada plantilla es un dato informativo. Al cambiarlo se elige de esta lista y queda en el historial. Las plantillas se administran en Plantillas.</p>
   ${ed ? `<div class="labels">${L.list.map((l, i) => `<div class="lblrow"><input id="lbl-${i}" type="text" maxlength="120" data-in="cfgLabel" data-i="${i}" value="${esc(l)}" aria-label="Turno ${i + 1}"><button class="icon-btn" data-act="cfgLabelDel" data-i="${i}" aria-label="Quitar ${esc(l || 'turno')}" ${n <= 1 ? 'disabled' : ''}>${icon('x', 18)}</button></div>`).join('')}</div>
-  <div class="toolbar" data-css="margin-top:12px"><button class="btn sm" data-act="cfgLabelAdd" ${n >= 20 ? 'disabled' : ''}>${icon('plus', 16)}Agregar turno</button><span class="s grow">${L.dirty ? 'Cambios sin guardar' : 'Sin cambios sin guardar'}</span><button class="btn sm" data-act="cfgLabelReset" ${L.dirty ? '' : 'disabled'}>Descartar</button><button class="btn sm pri" data-act="cfgLabelSave" ${L.dirty ? '' : 'disabled'}>Guardar cambios</button></div>` : `<div class="list">${L.list.map((l) => `<div class="row"><div class="grow"><div class="t">${esc(l)}</div></div></div>`).join('')}</div><p class="muted sm">Tu perfil puede ver la lista pero no modificarla.</p>`}</div>`;
+  <div class="toolbar" data-css="margin-top:12px"><button class="btn sm" data-act="cfgLabelAdd" ${n >= 20 ? 'disabled' : ''}>${icon('plus', 16)}Agregar turno</button><span class="s grow">${L.dirty ? 'Cambios sin guardar' : 'Sin cambios sin guardar'}</span><button class="btn sm" data-act="cfgLabelReset" ${L.dirty ? '' : 'disabled'}>Descartar</button><button class="btn sm pri" data-act="cfgLabelSave" ${L.dirty ? '' : 'disabled'}>Guardar cambios</button></div>` : `<div class="list">${L.list.map((l) => `<div class="row"><div class="grow"><div class="t">${esc(l)}</div></div></div>`).join('')}</div><p class="muted sm">Tu perfil puede ver la lista pero no modificarla.</p>`}</div>` + overdueCard();
+}
+
+// Etapa 8: umbral de la alerta "Sin control hace N días" (0 la desactiva).
+function overdueCard() {
+  const ed = can('plantillas_edit');
+  load('alertCfg');
+  const O = UI.cfgOverdue;
+  if (!O) return loading;
+  const cur = AD.alertCfg ? AD.alertCfg.controlOverdueDays : 14;
+  const now = cur ? `Hoy avisa cuando un técnico o una caja con herramientas lleva más de ${cur} días sin control.` : 'Hoy la alerta está desactivada.';
+  return `<div class="card cfgcard"><h2 class="si">Alerta de días sin control</h2><p class="muted sm cfgp">Avisa en Alertas cuando el último control de un técnico o una caja con herramientas (o su primera entrega, si nunca se controló) es más viejo que este número de días. Con 0 no avisa. ${esc(now)}</p>
+  ${ed ? `<div class="cfgnum">${field('Días sin control', `<input id="cfg-overdue" type="number" inputmode="numeric" min="0" max="365" step="1" data-in="cfgOverdue" value="${esc(O.value)}">`, 'cfg-overdue')}</div>
+  <div class="toolbar cfgbar"><span class="s grow">${O.dirty ? 'Cambios sin guardar' : 'Sin cambios sin guardar'}</span><button class="btn sm" data-act="cfgOverdueReset" ${O.dirty ? '' : 'disabled'}>Descartar</button><button class="btn sm pri" data-act="cfgOverdueSave" ${O.dirty ? '' : 'disabled'}>Guardar cambios</button></div>` : '<p class="muted sm">Tu perfil puede ver este valor pero no modificarlo.</p>'}</div>`;
 }
 
 export function integrity() {
@@ -177,6 +192,17 @@ ACT.cfgLabelSave = async () => {
   const v = validateShiftLabels(x.list); if (!v.ok) { toast(v.error, 'err'); return; }
   const r = await act(() => api.setShiftLabels(v.labels, x.version), 'Turnos guardados');
   if (r) { AD.labels = r; UI.cfgLabels = { list: r.labels.slice(), version: r.version, dirty: false }; await refresh().catch(() => {}); render(); }
+};
+
+// ------------------------------------------------------------------ días sin control (etapa 8)
+IN.cfgOverdue = (v) => { const x = UI.cfgOverdue; if (!x) return; x.value = v; x.dirty = true; render(); };
+ACT.cfgOverdueReset = () => { if (AD.alertCfg) UI.cfgOverdue = { value: String(AD.alertCfg.controlOverdueDays), version: AD.alertCfg.version, dirty: false }; render(); };
+ACT.cfgOverdueSave = async () => {
+  const x = UI.cfgOverdue; if (!x || !gateUI('plantillas_edit')) return;
+  const s = String(x.value).trim(); const n = Number(s);
+  if (!/^\d{1,3}$/.test(s) || n > 365) { toast('Ingresá un número entero de días entre 0 y 365 (0 desactiva la alerta).', 'err'); return; }
+  const r = await act(() => api.setAlertSettings(n, x.version), 'Alerta de días sin control guardada');
+  if (r) { AD.alertCfg = r; UI.cfgOverdue = { value: String(r.controlOverdueDays), version: r.version, dirty: false }; await refresh().catch(() => {}); render(); }
 };
 
 // ------------------------------------------------------------------ auditoría

@@ -3,7 +3,7 @@
 import { api, setCsrf } from '../api/index.js';
 import { deriveState } from './derive.js';
 
-const COLS = ['techs', 'shiftChanges', 'categories', 'tools', 'units', 'assignments', 'controls', 'movements', 'alertRes', 'users', 'plantillas', 'plantillaHistory', 'lineas', 'cajas', 'especialidades', 'kits', 'orderVersions'];
+const COLS = ['techs', 'shiftChanges', 'categories', 'tools', 'units', 'assignments', 'controls', 'movements', 'alertRes', 'users', 'plantillas', 'plantillaHistory', 'lineas', 'cajas', 'especialidades', 'kits', 'orderVersions', 'settings'];
 // Listas (no objetos por id): plantillas activas con forma de turno 2.1, rotaciones, cambios de
 // supervisor y la lista de turnos configurable.
 // Etapa 7: `purchases` es el resumen de compras abiertas, rechazadas sin resolver y recibidas sin
@@ -70,4 +70,6 @@ export const catName = (id) => { const g = S.categories[id]; return g ? markArch
 export const espName = (id) => { if (!id) return 'Sin especialidad'; const e = S.especialidades[id]; return e ? markArchived(e, e.name) : 'Especialidad eliminada'; };
 export const lineaName = (id) => { const l = S.lineas[id]; return l ? markArchived(l, l.name) : 'Línea eliminada'; };
 // Versión del orden de un alcance ('categories', 'tools:<id>'), para el If-Match del reordenar.
+// Etapa 8: umbral de la alerta "Sin control hace N días" (Administración › Configuración; 0 = desactivada).
+export const overdueDays = () => { const v = (S.settings || {}).controlOverdueDays; return Number.isInteger(v) && v >= 0 ? v : 14; };
 export const orderVersion = (scope) => (S.orderVersions || {})[scope] || 1;

@@ -13,6 +13,7 @@ import './features/inventario/view.js';
 import './features/controles/view.js';
 import './features/reportes/view.js';
 import './features/reportes/export.js';
+import './features/existencia/view.js';
 import './features/alertas/view.js';
 import './features/config/view.js';
 import './features/kits/deliver.js';

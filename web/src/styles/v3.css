@@ -145,3 +145,71 @@ body.auth .netwrap{max-width:400px}
 .alcmp{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:6px}
 .alcmp .chip{white-space:normal;text-decoration:none;max-width:100%}
 @media (min-width:1024px){.cmpacts{flex:0 0 auto}.cmpbtn{flex:0 0 auto}}
+
+/* Etapa 8: existencia por técnico. La matriz se desplaza dentro de su caja (encabezado y primera
+   columna fijos); la página nunca se ensancha. Marcas con letra y número además del color. */
+.exi-f{margin-bottom:12px}
+.exi-k{margin-bottom:14px}
+.exiwrap{overflow:auto;max-height:70vh;max-width:100%;border:1px solid var(--line);border-radius:16px;background:var(--surface);overscroll-behavior:contain}
+.exiwrap:focus-visible{outline:2px solid var(--pri);outline-offset:2px}
+.tbl.exi{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%}
+.tbl.exi th,.tbl.exi td{padding:8px 10px;border-top:0;border-bottom:1px solid var(--line-soft);border-right:1px solid var(--line-soft);vertical-align:middle}
+.tbl.exi thead th{position:sticky;top:0;z-index:2;background:var(--surface2);vertical-align:bottom;white-space:normal}
+.tbl.exi tfoot th,.tbl.exi tfoot td{background:var(--surface2);font-weight:700;border-top:1px solid var(--line)}
+.tbl.exi .exi-t{position:sticky;left:0;z-index:1;background:var(--surface);text-align:left;font-weight:600;color:var(--ink);min-width:150px;max-width:220px;white-space:normal;border-right:1px solid var(--line)}
+.tbl.exi thead .exi-t{z-index:3;background:var(--surface2);color:var(--ink2)}
+.tbl.exi tfoot .exi-t{background:var(--surface2)}
+.exi-t a{color:inherit}
+.exi-num{display:inline-block;min-width:22px;color:var(--ink3);font-weight:500;font-size:12px}
+.exi-h{min-width:104px;max-width:150px}
+.exi-hn{display:block;font-weight:650;color:var(--ink);font-size:13px;line-height:1.25;overflow-wrap:anywhere}
+.exi-hs{display:block;font-weight:500;font-size:11px;color:var(--ink2);line-height:1.3}
+.exi-age{display:inline-flex;align-items:center;gap:3px;margin-top:4px;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:650;border:1px solid transparent}
+.exi-age.ok{background:var(--ok-soft);color:var(--ok-ink)}
+.exi-age.pend{background:var(--pend-soft);color:var(--pend-ink)}
+.exi-age.bad{background:var(--bad-soft);color:var(--bad-ink);border-color:var(--bad-edge)}
+.exi-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.exi-c{white-space:nowrap}
+.exi-c .q{font-weight:650}
+.exi-c.warn{background:var(--warn-tint)}
+.exi-c.bad{background:var(--bad-tint)}
+.exi-0::before{content:"·";color:var(--ink3)}
+.exi-s{background:var(--surface2);white-space:nowrap}
+.mk{display:inline-block;margin-left:5px;padding:0 5px;border-radius:6px;font-size:11px;font-weight:700;border:1px solid}
+.mk.c{color:var(--warn-ink);background:var(--warn-soft);border-color:var(--warn-edge)}
+.mk.f{color:var(--bad-ink);background:var(--bad-soft);border-color:var(--bad-edge)}
+.exileg{margin-top:12px;font-size:12px;color:var(--ink2)}
+.exileg ul{margin:4px 0 0;padding-left:18px}
+.exi-ph{display:none}
+.ctlage{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px}
+.ctlage .chip{white-space:normal}
+.tc .ctlage{margin:6px 0 0}
+.cfgnum{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.cfgnum input{width:96px}
+
+@media print{
+  @page{size:A4 landscape;margin:10mm}
+  body.print-exi{background:#fff;color:#000;font-size:10px}
+  body.print-exi .side,body.print-exi .top,body.print-exi .bottom,body.print-exi #netbar,body.print-exi #toast,body.print-exi #modal-root,body.print-exi .ph .acts,body.print-exi .exi-f,body.print-exi .exi-k,body.print-exi .backl{display:none!important}
+  body.print-exi .app{display:block}
+  body.print-exi main{padding:0;margin:0;max-width:none}
+  body.print-exi .exi-ph{display:flex;flex-wrap:wrap;gap:4px 18px;margin-bottom:6px;font-size:11px}
+  body.print-exi .ph h1{font-size:16px;margin:0}
+  body.print-exi .exiwrap{overflow:visible;max-height:none;border:0;border-radius:0}
+  body.print-exi .tbl.exi{width:100%;min-width:0;font-size:9px}
+  body.print-exi .tbl.exi thead{display:table-header-group}
+  body.print-exi .tbl.exi tfoot{display:table-row-group}
+  body.print-exi .tbl.exi tr{break-inside:avoid}
+  body.print-exi .tbl.exi th,body.print-exi .tbl.exi td{position:static;border:1px solid #000;padding:2px 4px;background:#fff!important;color:#000}
+  body.print-exi .exi-hn,body.print-exi .exi-hs,body.print-exi .exi-num{color:#000}
+  body.print-exi .exi-age,body.print-exi .mk{background:#fff!important;color:#000!important;border:1px solid #000}
+  body.print-exi .exi-age.bad{font-weight:800;border-width:2px}
+  body.print-exi .exi-age .ic{display:none}
+  body.print-exi .exi-sr{position:static;width:auto;height:auto;clip:auto}
+  body.print-exi .exi-0::before{content:none}
+  body.print-exi .exileg{color:#000;font-size:9px;break-inside:avoid}
+  body.print-exi a{color:#000;text-decoration:none}
+}
+.cfgcard{margin-top:12px}
+.cfgp{margin:6px 0 12px}
+.cfgbar{margin-top:12px}
