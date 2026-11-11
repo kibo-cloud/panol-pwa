@@ -1734,7 +1734,7 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       header/first column; gerencia opens it (403 on the threshold), responsable sees the value
       read-only. `existencia` added to E2E `ROUTES`. Written with the code (passed on its first run).
 - [x] E8.V1 Review fixes. Route: delegated writer (one bounded writer, server + web + tests + doc).
-      Commit: see "Stage 8 verification" (E8.V1). Shared fixture `server/test/fixtures/existencia.js`
+      Commit `9a8e1b4`. Shared fixture `server/test/fixtures/existencia.js`
       (`fixture`, `reviewFixture`) used by the server unit test and the web parity test.
       (1) Overdue = alert rule (no active assignments -> never overdue, tone `idle`, days shown):
       `holderOverdue`, holders carry `active`/`overdue`, KPI/header/`ageChip` use it. RED: server
@@ -1800,6 +1800,10 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   `PANOL_E2E_BUILD=1 npm run test:e2e` 68 passed, 0 failed, 0 skipped (538 s).
 - Commits: `53eef77` (server), `6f68b20` (web), `bdf6492` (E2E), `2998411` (fix), then this doc
   commit. Not pushed.
+- E8.V1 (`9a8e1b4`, review fixes): `npm test` 238/238; `npm run test:db` 252/252 (579 s, on the
+  commit); `npm run build` ok; `PANOL_E2E_BUILD=1 npm run test:e2e` 68 passed, 0 failed, 0 skipped
+  (562 s; first runs failed only in `t15-existencia`, whose cell text and API cell assertions
+  predated the unit `codes` — spec updated). Not pushed.
 
 ## Next step
 - Stage 8: independent review, CI and PR #8 → `v3/etapa-7-gerencia`.
