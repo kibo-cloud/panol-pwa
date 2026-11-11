@@ -369,15 +369,18 @@ export async function purchaseTotals(db, actor, query = {}, { now = new Date() }
 export async function purchasesOfPeriod(db, actor, filters = {}) {
   const d = parseNovedadFilters({ from: filters.from, to: filters.to });
   const f = { ...parsePurchaseFilters({ plantillaId: filters.plantillaId, techId: filters.techId, cajaId: filters.cajaId, toolId: filters.toolId, reason: filters.reason }), from: d.from, to: d.to };
-  return withSnapshot(db, async (c) => {
-    const out = [];
-    let after = null;
-    do {
-      const r = await repo.queryDecidedPage(c, f, { afterAt: after && after.at, afterId: after && after.id });
-      out.push(...r.rows);
-      after = r.after;
-    } while (after);
-    return out;
-  });
+  return withSnapshot(db, (c) => collectDecided(c, f));
+}
+
+// Aprobadas y rechazadas de los filtros ya validados, con un cliente dentro de una instantánea.
+export async function collectDecided(c, f) {
+  const out = [];
+  let after = null;
+  do {
+    const r = await repo.queryDecidedPage(c, f, { afterAt: after && after.at, afterId: after && after.id });
+    out.push(...r.rows);
+    after = r.after;
+  } while (after);
+  return out;
 }
 

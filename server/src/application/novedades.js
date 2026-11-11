@@ -144,14 +144,18 @@ export async function listNovedades(db, actor, query) {
 export async function novedadesOfPeriod(db, actor, filters = {}) {
   const f = parseNovedadFilters({ ...filters, before: null });
   if (f.archived !== 'exclude' && !(await permsOf(db, actor)).deleted) throw forbidden();
-  return withSnapshot(db, async (c) => {
-    const out = [];
-    let before = null;
-    do {
-      const r = await repo.queryNovedades(c, { ...f, limit: 200, before }, { withTotal: false });
-      out.push(...r.rows);
-      before = r.cursor;
-    } while (before);
-    return out;
-  });
+  return withSnapshot(db, (c) => collectNovedades(c, f));
+}
+
+// Todas las novedades de los filtros ya validados (parseNovedadFilters), de a 200, con el cliente
+// `c` que ya está dentro de una instantánea (la impresión de auditoría usa la suya, etapa 10).
+export async function collectNovedades(c, f) {
+  const out = [];
+  let before = null;
+  do {
+    const r = await repo.queryNovedades(c, { ...f, limit: 200, before }, { withTotal: false });
+    out.push(...r.rows);
+    before = r.cursor;
+  } while (before);
+  return out;
 }
