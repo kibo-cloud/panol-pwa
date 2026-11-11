@@ -1,6 +1,7 @@
 // Lecturas (cualquier usuario con sesión) y auditoría (solo admin).
 import * as read from '../../application/read.js';
-import { S, obj, idParams, etag } from './rest.js';
+import { getAuditReport } from '../../application/auditoria.js';
+import { S, obj, idParams, etag, actorOf } from './rest.js';
 import { badRequest } from './errors.js';
 
 export function registerReadRoutes(app) {
@@ -28,6 +29,18 @@ export function registerReadRoutes(app) {
   app.get('/api/existencia', {
     schema: { querystring: obj({ plantilla: S.id, cajas: { type: 'string', enum: ['0', '1'] }, withTools: { type: 'string', enum: ['0', '1'] } }) },
   }, async (req) => read.getExistencia(db, { plantilla: req.query.plantilla, cajas: req.query.cajas !== '0', withTools: req.query.withTools === '1' }));
+
+  // Etapa 10: informe para auditoría (impresión y Excel), con el permiso de exportar informes.
+  // months (AAAA-MM separados por coma) o from/to; plantillas, techs, cajas: all | none | ids;
+  // sections: claves separadas por coma. La validación fina es del dominio (400/422 con mensaje).
+  app.get('/api/audit-report', {
+    preHandler: app.requirePerm('reports_export'),
+    schema: {
+      querystring: obj({
+        months: S.str(2000), from: S.str(7), to: S.str(7), plantillas: S.str(20000), techs: S.str(20000), cajas: S.str(20000), sections: S.str(500),
+      }),
+    },
+  }, async (req) => getAuditReport(db, actorOf(req), req.query));
 
   app.get('/api/controls', {
     schema: { querystring: obj({ techId: S.id, cajaId: S.id, plantillaId: S.id, status: { type: 'string', enum: ['borrador', 'finalizado'] } }) },

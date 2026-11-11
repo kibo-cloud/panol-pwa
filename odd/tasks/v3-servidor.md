@@ -66,8 +66,8 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 6. Novedades — done (PR #6)
 7. Gerencia — done (PR #7)
 8. Existencia por técnico y alertas — done (PR #8)
-9. Importador del Excel — in progress (`v3/etapa-9-importador`)
-10. Impresión de auditoría
+9. Importador del Excel — done (PR #9)
+10. Impresión de auditoría — in progress (`v3/etapa-10-impresion`)
 
 ## Stage 1 tasks
 - [x] E1.T0 Branch setup and docs: `chore` commit of `.gitignore` + `docs/` on `main`
@@ -2059,10 +2059,204 @@ Rules only; no real names, legajos or comments (the real workbook stays in `priv
   items became "sin dato". Integration tests were written with the fix (RED observed in the unit
   tests, not separately in the DB tests).
 
+- Stage 9 closed 2026-11-12: E9.V1 `acf01df` (blocker: quadratic XML parsing → linear tokenizer
+  + worker with timeout), CI run 43065016719, PR #9 → `v3/etapa-8-existencia`.
+
+## Stage 10 decisions (parent, within PEDIDO §2.11)
+- Entry: "Imprimir para auditoría" button in Reportes and in Más; permission `reports_export`
+  (as reports/existencia). One "Auditoría" screen: selection first, then an A4 print preview.
+- Selection: months as a range or individual months with checkboxes; plantillas, técnicos and
+  cajas (all or some); section checkboxes (the 8 PEDIDO sections, all on by default); option
+  "Formato planilla". The selection is kept in the URL/hash so the same report can be reprinted.
+- Data: ONE server endpoint `GET /api/audit-report` (or POST with the selection) builds the whole
+  report from a single REPEATABLE READ snapshot, reusing `novedadesOfPeriod`,
+  `purchasesOfPeriod`, effective controls, the stage 8 matrix rules and movements; only finalized
+  effective controls; corrections marked; imported controls marked "importado del Excel";
+  archived records shown with "(eliminado)". Purchases section shows estimated costs only when
+  the actor has `purchases_view`. Pure builder in `domain/` (unit-tested), web renders it.
+- Sections: (1) Resumen: técnicos, herramientas, controles realizados vs. esperados (stage 4
+  period model: expected = active holders × control periods in the range), % en condiciones,
+  faltantes, reposiciones, limpieza (% limpio); (2) per técnico/caja on a new page: tools in the
+  custom order (N° + name, unit codes where tracked — tools have no code), one column per
+  effective control of the period with ✓/C/F symbols, then observaciones, limpieza, who/when and
+  marked corrections; (3) faltantes and their resolution (reposición, devolución, compra, sin
+  resolver); (4) entregas, reposiciones, devoluciones y retiros (voids marked); (5) compras
+  aprobadas y rechazadas (with rejection reason); (6) novedades; (7) cambios de plantilla
+  (membership, supervisor, rotations); (8) signature block for the pañol responsable and the
+  auditor.
+- Format: A4 `@media print`, works with "Guardar como PDF"; header on every page with company
+  name and logo, period, issue date and issuer; page numbers; each holder starts a new page;
+  black-and-white legible, symbols + color, legend at the foot. Scope print rules: replace the
+  stage 8 global `@page` with named pages per print root (`page: audit` portrait, existencia
+  landscape), and make Ctrl+P on any screen print only the active print root (or a clean screen
+  view), never the app chrome.
+- "Formato planilla": the same data laid out like the old Excel sheet per legajo (dated 3-column
+  blocks ENTREGA / DEVOLUCIÓN / CONTEO, with the 1 / 0,5 / 0 convention derived from the counts),
+  because the auditor knows it.
+- Excel download of the same report with the existing self-hosted `xlsx` (one sheet per section,
+  one sheet per holder in planilla format), as the reportes export does.
+- Empresa settings (Administración › Empresa): company name (default "Villa D'agri ·
+  Mantenimiento") and logo upload — PNG or JPEG only (no SVG), ≤ 512 KB, magic-byte checked,
+  stored in the database, served from a same-origin route with the right content type and
+  `nosniff`; CSP keeps `img-src 'self'` (add `data:`/`blob:` only if strictly needed and
+  recorded). Permission: the existing settings permission (`plantillas_edit`, as stage 8);
+  If-Match versions; audited.
+- Large reports: render progressively per holder; a server size guard (e.g. max months 24) with
+  a clear message.
+
+## Stage 10 tasks (branch `v3/etapa-10-impresion`, stacked on stage 9)
+- [x] E10.T1 Backend: audit report builder (pure, unit-tested: expected vs. done, symbols,
+      corrections, imported marks, resolution of faltantes, cost gating), endpoint with one
+      snapshot, Empresa settings (name + logo upload/serve) with migration
+      `017_empresa.sql` if needed; integration tests.
+      Commit `9d73c2b`. Route: delegated writer. Code: `domain/auditoria.js`
+      (`parseAuditSelection`, `buildAuditReport`, `cellOf`, `planillaCount`, `periodLabel`),
+      `domain/empresa.js` (`cleanCompanyName`, `sniffImage`, `checkLogo`), migration
+      `017_empresa.sql` (`company_logo`), `adapters/pg/settings-repo.js` (empresa + logo),
+      `application/settings.js` (name/logo with If-Match, audit `empresa_settings`/`empresa_logo`),
+      `application/auditoria.js` (`getAuditReport`, one `withSnapshot`), `collectNovedades`
+      (novedades.js) and `collectDecided` (compras.js) extracted so the period queries run inside
+      the caller's snapshot, `compras-repo.js#loadControlLinks`, `state-repo.js`
+      (`settings.empresa`), routes `GET /api/audit-report` (read-routes) and
+      `GET|PUT /api/settings/empresa`, `PUT|DELETE /api/settings/empresa/logo`,
+      `GET /api/empresa/logo` (settings-routes). Test-first: not observed (domain written first);
+      `unit/auditoria.test.js` (11, fixture `test/fixtures/auditoria.js`) and
+      `integration/auditoria-api.test.js` (4) passed on their first complete run (two wrong
+      expectations in the unit test itself fixed: lowercase month names, a malformed assertion).
+- [x] E10.T2 Frontend: Auditoría screen (selection, preview, sections, planilla format), print
+      stylesheet with scoped named pages and Ctrl+P handling, Excel download, Empresa settings
+      with logo preview, entry points in Reportes and Más; design guide.
+      Commit `60b367f`. Route: delegated writer. Code: `state/auditoria.js` (pure: selection ↔
+      hash, API query, `auditWorkbook`, `planillaRows`, sheet names), `features/auditoria/view.js`
+      (`#auditoria[-<selección>]`: selection card, preview with the 8 sections, holders rendered
+      progressively 6 at a time, Imprimir, Excel), `features/empresa/view.js` (Administración ›
+      Empresa: name + logo upload/preview/remove), `ui/print.js` (beforeprint/afterprint, Ctrl+P),
+      router (`auditoria` route, parent Reportes), Reportes button `#rep-aud`, Más entry,
+      existencia print header and Excel title use the configured name, `api/index.js`, `.aud*`/
+      `.emp*` classes and the named `@page` rules in `v3.css`. Test-first:
+      `web/test/auditoria.test.js` RED (missing module) then GREEN; router test added (passed).
+- [x] E10.T3 E2E: selection → preview with all sections, print media emulation (page breaks per
+      holder, header/legend present, no app chrome), planilla format, Excel file produced, logo
+      upload and refusal of a non-image/oversized file, cost hidden without `purchases_view`,
+      390 px without overflow.
+      Commit `63623d6`. Route: delegated writer. New `t17-auditoria` (2): entry points; preview
+      with all 8 sections, symbols `✓1 C1 F1`, faltante resolved by its purchase request, voided
+      adicional marked; print (window.print, chrome/selection hidden, `page: audit`, thead/tfoot
+      repeated, `break-before: page` on every holder, header with company/issue/issuer, legend,
+      black symbols, stylesheet has `@page audit` portrait + `counter(page)` + `@page exi`
+      landscape); Ctrl+P via `beforeprint` on the preview (print-aud), Existencia (print-exi,
+      `page: exi`) and Inicio (print-screen, no chrome); planilla `1,5`; reprint from the URL;
+      xlsx (PK); server size guard 422; Empresa at 390 px (name saved, SVG and >512 KB refused in
+      the browser, a fake PNG refused by the server, real PNG shown, header with name + logo),
+      admin sees the cost, responsable does not (UI and API), 390 px without overflow. `auditoria`
+      added to E2E `ROUTES`. Written with the code; a first run hit the harness 10 s "dispose
+      page" timeout (closing the tab while the xlsx download was in flight; bisected to the
+      download step), fixed in the spec by waiting 6 s after the download.
+- [x] E10.V1 Review findings (independent review of E10.T1–T3). Route: delegated writer (one
+      bounded writer, server + web + doc). Strict test-first, RED observed before every fix:
+      1. Planilla block windows with late corrections: RED `entrega [3, null, 1]` vs `[1, 1, 1]`
+         (P1 03-05, P2 03-12, P1 corrected 03-20); GREEN.
+      2. Faltante `since`/`firstDay` from the original control of the chain: RED `sin_resolver`
+         vs `reposicion` (F 03-05, reposición 03-06, correction 03-10); GREEN, firstDay 03-05.
+      3. Historical expected per period (assignment `since`/`until`, archive date): RED expected
+         `[0, 8, 8]` vs `[2, 3, 0]` (archived 03-10, hired 04-09, idle); GREEN; done counted only
+         in expected periods (summary and per month); fixture expectations updated to the new rule
+         (Xenia 5, total 26, per month 16/10). On-screen note rewritten.
+      4. Logo cache: RED `cache-control: no-store` vs `private, max-age=3600` (integration);
+         GREEN; a 404 keeps `no-store`.
+      6. Recambio 0,5 only on the first block of the episode + SALDO per row: RED second block
+         `devolucion 0.5` vs `null`; GREEN with `saldo 0`; web Excel RED (no SALDO column) → GREEN
+         (`[3, '', 2, '', 0.5, 1.5, -1]`), preview column on the last block group.
+      7. Partial devolución: RED `devolucion` vs `parcial`; GREEN `Parcial (1 de 2)`, qty 2 resolves.
+      8. Missing tests (coverage, no behavior change, passed on first run): JPEG accepted and a
+         truncated JPEG (no FF D9) refused; `sections=resumen` without `poseedores` sends holders
+         without rows/notes/planilla.
+      Commit: see "Stage 10 verification".
+
+## Stage 10 implementation notes
+- API: `GET /api/audit-report?months=AAAA-MM,…` (or `from`/`to`), `plantillas=all|ids`,
+  `techs=all|none|ids`, `cajas=all|none|ids`, `sections=…` (`reports_export`). 400
+  `invalid_months`/`invalid_selection`, 422 `report_too_large` ("hasta 24 meses") and a month
+  that has not started. Response: `header` (company, logo url, period, filters, issuedAt,
+  issuer), `summary` (+`perMonth`), `holders[]` (columns = effective controls, rows in custom
+  order with cells `{state, text}`, notes, `planilla`), `faltantes`, `movements` (+totals),
+  `purchases` (+totals), `novedades` (null without `novedades_view`), `plantillas` (moves,
+  supervisors, rotations), `legend`, `costsShown`.
+- One snapshot: `getAuditReport` reads overrides, state, novedades, decided purchases, purchase
+  ↔ control links and empresa inside one `withSnapshot`; `novedadesOfPeriod`/`purchasesOfPeriod`
+  keep their contracts and now delegate to `collectNovedades`/`collectDecided`.
+- Writer decisions (consistent with stages 1–9):
+  1. Holders = techs and cajas of the selection that are active with assignments, or that have
+     effective controls or holder movements in the months (archived/inactive ones only through
+     history, with "(eliminado)"). Expected (E10.V1, parent decision) = per control period
+     already started in the months (4 per month), only for holders with at least one assignment
+     active in that period (`since` ≤ period end, `until` null or ≥ period start; ended
+     assignments included), never for a period that starts after the holder's `archivedAt`.
+     Done = effective controls in an expected period of that holder (so done ≤ expected, summary
+     and per month over the same set); `controls` keeps the count of all printed controls;
+     % cumplimiento = Σ done / Σ expected.
+  2. The plantilla filter applies to techs (control snapshots + membership ranges overlapping the
+     months, else the current plantilla); cajas are chosen apart (they belong to líneas).
+  3. Cells: qty 1 → ✓ / C / F; qty > 1 → `✓2 C1 F1`; an item absent from a control is "—" (sin
+     dato: e.g. stage 9 probable empty counts). Rows key on tool + unit code; tools have no code,
+     N° = position in the custom order (as stage 8).
+  4. Faltante = episode per assignment (consecutive effective controls with missing > 0) with at
+     least one control in the months; resolution = the first later reposición/devolución/retiro of
+     that assignment or the next control without the loss ("Apareció en el control siguiente");
+     a devolución/retiro resolves only when its qty (cumulative) covers the missing qty, otherwise
+     "Parcial (n de m)" (kind `parcial`); otherwise the purchase request linked to one of its
+     controls ("Compra N (estado)"); else "Sin resolver". Facts are taken up to the issue date,
+     not only the selected months, from the time of the ORIGINAL control of the first control's
+     correction chain (also `firstDay`), so a reposición before a later correction counts.
+  5. Purchases: decided in the months; with a holder filter only those of the included holders.
+     Without `purchases_view` cost and supplier are stripped (`stripCosts`) and totals have no sums.
+  6. Planilla: one block per effective control; ENTREGA/DEVOLUCIÓN = units into/out of `asignado`
+     for that holder and tool since the previous block (voided movements and voids left out);
+     block boundaries use the time of the ORIGINAL control of each correction chain (block `day`;
+     `correctedDay` for the correction), kept monotonic (max) so no window is reversed and no
+     movement counts twice; CONTEO = good + 0,5 × change; 0,5 per unit entering recambio is added
+     to DEVOLUCIÓN only on the first block of the episode (an increase adds the difference), as the
+     old Excel did; each row has SALDO = last CONTEO − (Σ ENTREGA − Σ DEVOLUCIÓN) over the blocks
+     shown (movements only of the selected months, noted on screen and in the Excel); a trailing
+     "Sin control" block shows later movements.
+  7. Novedades: only with `novedades_view` (the caller's permission; archived novedades excluded);
+     with a holder filter, those naming an included tech or a selected plantilla.
+- Empresa: name in `app_settings` 'empresa.profile' (with the logo hash, so one If-Match version
+  covers name and logo); logo bytes in `company_logo` (CHECK PNG/JPEG, 12 B–512 KB). PNG = 8-byte
+  signature + IHDR, JPEG = FF D8 FF … FF D9; no SVG. Up to 2× the limit reaches the domain (413
+  `too_large`); larger bodies are a 400. Served at `/api/empresa/logo?v=<hash>` (session required)
+  with its type, `inline` disposition, `Cache-Control: private, max-age=3600` (the global API
+  `no-store` onSend hook exempts only a 200 from this route; E10.V1) and the common
+  `nosniff`/CSP headers. CSP unchanged (`img-src 'self' data: blob:` was already there).
+  Permission `plantillas_edit` (as stage 8).
+- Print: the global stage 8 `@page` is now `@page` (A4 portrait default), `@page exi` (landscape,
+  `body.print-exi #view`) and `@page audit` (portrait, page numbers "Página N de M" in
+  `@bottom-right`, `body.print-aud #view`). Every print hides the side/top/bottom bars, netbar,
+  toasts and modals. Each audit section is a table whose thead (company, logo, period, issue date,
+  issuer) and tfoot (short legend) repeat on every printed page; each section after the first and
+  every holder start on a new page. `ui/print.js` picks the root on Ctrl+P (`beforeprint`):
+  print-aud on the preview, print-exi on Existencia, print-screen elsewhere; afterprint clears.
+  Page-number margin boxes need Chrome ≥ 131; older browsers ignore them (no other effect).
+- Selection in the URL: `#auditoria-mode=…&d=…&h=…&m=…&pl=…&t=…&c=…&s=…[&f=planilla]`.
+- Size: the backend unit is ~1.1k authored lines (builder + tests), the web ~700; each is one
+  behavior (the report needs all sections from one snapshot); not split artificially.
+
+## Stage 10 verification (local, sequential, delegated writer)
+- On `63623d6` (all three work units): `npm test` 304/304; `npm run test:db` 274/274 (666 s);
+  `npm run build` ok, `web/dist/index.html` with 0 inline script/style/handlers;
+  `PANOL_E2E_BUILD=1 npm run test:e2e` 72 passed, 0 failed, 0 skipped (570 s).
+- Commits: `9d73c2b` (server), `60b367f` (web), `63623d6` (E2E), then this doc commit. Not pushed.
+- E10.V1 on `3f9fa69` (`fix(audit): close stage 10 review findings`), run sequentially:
+  `npm test` 309/309; `npm run test:db` 274/274 (654 s); `npm run build` ok, `web/dist/index.html`
+  with 0 inline script/style/handlers; `PANOL_E2E_BUILD=1 npm run test:e2e` 72 passed, 0 failed,
+  0 skipped (575 s). Doc commit after it. Not pushed.
+- Pending (parent): independent review (done; findings closed in E10.V1), CI, PR #10 -> `v3/etapa-9-importador`. Engram mirror: pending.
+
 ## Next step
-- Stage 9: E9.T1–E9.T3 (one delegated writer), then independent review, CI and PR #9 →
-  `v3/etapa-8-existencia`.
-- PRs #1–#8 await user review (stacked: #1 → `v3-servidor`, each next PR → the previous stage). Engram mirror of this document: pending (multiple active
+- Stage 10: E10.T1–E10.T3 done (delegated writer); next: independent review, CI and PR #10 →
+  `v3/etapa-9-importador`. Then the v3 close: integrate `v3-servidor` → `main` only with user
+  approval, `versiones/panol v3.0.0`, LEEME/CLAUDE.md.
+- PRs #1–#9 await user review (stacked: #1 → `v3-servidor`, each next PR → the previous stage). Engram mirror of this document: pending (multiple active
   sessions). PR #1 awaits user review; after it is merged, rebase stage 2 onto `v3-servidor`.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);

@@ -33,3 +33,8 @@ test('la sección marcada de un detalle es la de su lista', () => {
   assert.equal(navKeyOf(parseRoute('#plantilla-p1')), 'plantillas');
   assert.equal(navKeyOf(parseRoute('#caja-k1')), 'lineas');
 });
+test('etapa 10: #auditoria con la selección en la dirección, dentro de Reportes', () => {
+  assert.deepEqual(parseRoute('#auditoria'), { name: 'auditoria', id: '' });
+  assert.deepEqual(parseRoute('#auditoria-mode=range&d=2026-10&h=2026-11'), { name: 'auditoria', id: 'mode=range&d=2026-10&h=2026-11' });
+  assert.equal(navKeyOf(parseRoute('#auditoria-mode=list')), 'reportes');
+});

@@ -12,7 +12,9 @@ import { act } from '../../ui/feedback.js';
 import { kpi, pageHead, field, optList, emptyBox } from '../../ui/components.js';
 import { saveFile, loadScript } from '../../ui/files.js';
 import { gateUI } from '../tecnicos/view.js';
-import { ME, derive, can, who, catName, shiftName, overdueDays } from '../../state/store.js';
+import { S, ME, derive, can, who, catName, shiftName, overdueDays } from '../../state/store.js';
+// Etapa 10: nombre configurado en Administración › Empresa.
+const company = () => ((S.settings || {}).empresa || {}).name || "Villa D'agri · Mantenimiento";
 import { mineFirst } from '../../state/plantillas.js';
 import { fdt, nowISO } from '../../state/period.js';
 import { buildExistencia, existenciaSheet, ageLabel, ageTone, localDay, holderLabel, cellCodes, EXI_LEGEND } from '../../state/existencia.js';
@@ -55,7 +57,7 @@ VIEWS.existencia = () => {
   const acts = exp ? `<button class="btn" data-act="exiXlsx">${icon('dl', 18)}Excel</button><button class="btn" data-act="exiPrint">${icon('print', 18)}Imprimir</button>` : '';
   const pl = optList([['all', 'Todas las plantillas'], ...mineFirst(d.shifts, d.myPlantilla.plantillaIds).map((p) => [p.id, p.name])], f.plantilla);
   const chip = (a, on, l) => `<button class="fchip ${on ? 'on' : ''}" data-act="${a}" aria-pressed="${on}">${l}</button>`;
-  const printHead = `<div class="exi-ph"><b>Villa D'agri · Mantenimiento</b><span>Existencia por técnico: ${esc(filterLabel(f))}</span><span>Emitido ${esc(fdt(nowISO()))} por ${esc(who(ME.id).replace(/ \(vos\)$/, ''))}</span></div>`;
+  const printHead = `<div class="exi-ph"><b>${esc(company())}</b><span>Existencia por técnico: ${esc(filterLabel(f))}</span><span>Emitido ${esc(fdt(nowISO()))} por ${esc(who(ME.id).replace(/ \(vos\)$/, ''))}</span></div>`;
   const legend = `<div class="exileg" id="exileg"><b>Referencias</b><ul>${EXI_LEGEND.map((l) => `<li>${esc(l)}</li>`).join('')}<li>${thr ? `Días: desde el último control efectivo (o desde la primera entrega si nunca se controló); vencido con más de ${thr} días.` : 'Días: desde el último control efectivo (o desde la primera entrega si nunca se controló). La alerta de días sin control está desactivada.'}</li></ul></div>`;
   return printHead + pageHead('Existencia por técnico', esc(filterLabel(f)), { acts }) +
   `<div class="card exi-f"><div class="formgrid c2">${field('Plantilla', `<select id="exi-pl" data-ch="exiPl">${pl}</select>`, 'exi-pl')}${field('Mostrar', `<div class="fchips">${chip('exiCajas', f.cajas, 'Incluir cajas')}${chip('exiWith', f.withTools, 'Solo con herramientas')}</div>`)}</div></div>
@@ -73,7 +75,7 @@ ACT.exiXlsx = async () => {
   if (!gateUI('reports_export')) return;
   await act(async () => {
     await loadScript(vendor.xlsx, () => window.XLSX); const XLSX = window.XLSX; const X = computeExistencia();
-    const rows = existenciaSheet(X, { title: "Villa D'agri · Mantenimiento: existencia por técnico", subtitle: `${filterLabel(filters())}. Generado ${fdt(nowISO())}.`, catName: (id) => (id ? catName(id) : 'Sin categoría') });
+    const rows = existenciaSheet(X, { title: `${company()}: existencia por técnico`, subtitle: `${filterLabel(filters())}. Generado ${fdt(nowISO())}.`, catName: (id) => (id ? catName(id) : 'Sin categoría') });
     const ws = XLSX.utils.aoa_to_sheet(rows);
     ws['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 18 }, ...X.holders.map((h) => ({ wch: Math.max(12, Math.min(28, holderLabel(h).length + 2)) })), { wch: 14 }, { wch: 11 }, { wch: 11 }, { wch: 14 }];
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Existencia');

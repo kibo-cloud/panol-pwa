@@ -22,6 +22,9 @@ import './features/records/view.js';
 import './features/novedades/view.js';
 import './features/compras/view.js';
 import './features/datos/view.js';
+import './features/auditoria/view.js';
 import { boot } from './ui/app.js';
+import { installPrint } from './ui/print.js';
 
+installPrint();
 boot();

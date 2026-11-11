@@ -240,3 +240,13 @@ export async function queryDecidedPage(q, f, { afterAt = null, afterId = null, l
   const last = rows[rows.length - 1];
   return { rows: rows.map(toApi), after: rows.length === limit && last ? { at: last.decided_cursor, id: last.id } : null };
 }
+
+/** Etapa 10: qué solicitud (no eliminada) quedó vinculada a cada control, para la resolución de los faltantes. */
+export async function loadControlLinks(q) {
+  const { rows } = await q.query(
+    `SELECT r.id, r.name, r.status, r.reason, r.assignment_id, l.control_id
+       FROM purchase_request_controls l JOIN purchase_requests r ON r.id = l.request_id
+      WHERE r.archived_at IS NULL ORDER BY r.seq`,
+  );
+  return rows.map((r) => ({ requestId: r.id, name: r.name, status: r.status, reason: r.reason, assignmentId: r.assignment_id, controlId: r.control_id }));
+}
