@@ -6,6 +6,7 @@ import { loadHistory, groupByTech, currentMembership, loadRotations, loadSupervi
 import { shiftChangesFromHistory } from '../../domain/plantillas.js';
 import { loadKits, loadOrderVersions } from './kits-repo.js';
 import { loadPurchaseSummary } from './compras-repo.js';
+import { loadAlertSettings } from './settings-repo.js';
 
 const iso = (d) => (d instanceof Date ? d.toISOString() : d ?? null);
 const byId = (list) => Object.fromEntries(list.map(({ id, ...x }) => [id, x]));
@@ -90,6 +91,8 @@ export async function readState(q) {
     // Etapa 7: estado de las compras abiertas, rechazadas sin resolver y recibidas sin reposición
     // (sin costos): fichas, alertas y la reposición vinculada.
     purchases: await loadPurchaseSummary(q),
+    // Etapa 8: ajustes de la empresa que usan las alertas y la existencia por técnico.
+    settings: { controlOverdueDays: (await loadAlertSettings(q)).controlOverdueDays },
   };
 }
 

@@ -8,13 +8,14 @@ import { computeReport } from '../domain/report.js';
 import { integrityIssues } from '../domain/integrity.js';
 import { effectiveControls } from '../domain/controls.js';
 import { notFoundError } from '../domain/errors.js';
+import { buildExistencia } from '../domain/existencia.js';
 
 const ids = (o) => Object.fromEntries(Object.entries(o).map(([k, c]) => [k, c.id]));
 const DEMO_COLS = ['techs', 'shiftChanges', 'categories', 'tools', 'units', 'assignments', 'controls', 'movements', 'alertRes'];
 
 function derived(S, now) {
   const d = deriveState(S, { now });
-  const alerts = deriveAlerts({ now, techs: S.techs, cajas: S.cajas, tools: S.tools, units: S.units, assignments: S.assignments, controls: d.ctls, movements: d.movs, alertRes: S.alertRes, purchases: S.purchases });
+  const alerts = deriveAlerts({ now, techs: S.techs, cajas: S.cajas, tools: S.tools, units: S.units, assignments: S.assignments, controls: d.ctls, movements: d.movs, alertRes: S.alertRes, purchases: S.purchases, controlOverdueDays: S.settings.controlOverdueDays });
   return { d, alerts };
 }
 
@@ -41,6 +42,13 @@ export async function getState(db, { now = new Date(), user = null } = {}) {
       myPlantilla: myPlantilla(S, user, alerts),
     },
   };
+}
+
+// Etapa 8: existencia por técnico (RESUMEN del Excel) con los filtros de la pantalla.
+export async function getExistencia(db, filters = {}, { now = new Date() } = {}) {
+  const S = await withSnapshot(db, readState);
+  const X = buildExistencia(deriveState(S, { now }), filters, { now });
+  return { now: now.toISOString(), controlOverdueDays: S.settings.controlOverdueDays, ...X };
 }
 
 export async function getInventory(db) {
