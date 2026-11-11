@@ -68,7 +68,8 @@ export const tests = [
       eq(await cellText(page, 'Llave Existencia', s.b.id), '1', 'B llave cell');
       eq(await cellText(page, 'Llave Existencia', ck), '2', 'caja llave cell');
       const tal = await cellText(page, 'Taladro Existencia', s.a.id);
-      eq(tal, '1', 'unit-tracked taladro counted, good in the control');
+      eq(tal, '1 Unidades: TX-1', 'unit-tracked taladro counted, good in the control, with its unit code');
+      eq(await page.eval(`[...document.querySelectorAll('#exitbl tbody tr')].find((r) => r.querySelector('th').textContent.includes('Taladro Existencia')).querySelector('td.exi-c[title]').title`), 'Unidades: TX-1', 'unit code in the cell title');
       eq((await rowTail(page, 'Llave Existencia')).join('|'), '6|C 1|F 1|4', 'row totals: assigned, recambio, faltante, pañol stock');
       eq((await rowTail(page, 'Taladro Existencia')).join('|'), '1|0|0|1', 'taladro totals');
       // Header: legajo, especialidad, last control today and its days.
@@ -123,7 +124,9 @@ export const tests = [
       // API parity: the server builds the same matrix.
       const X = ok(await api(page, 'GET', '/api/existencia'), 200, 'GET existencia');
       const row = X.rows.find((r) => r.toolId === s.llave.id);
-      eq(JSON.stringify(row.cells[s.a.id]), JSON.stringify({ qty: 3, cambio: 1, faltante: 1 }), 'server cell');
+      eq(JSON.stringify(row.cells[s.a.id]), JSON.stringify({ qty: 3, cambio: 1, faltante: 1, codes: [] }), 'server cell');
+      const tx = X.rows.find((r) => r.toolId === s.tal.id);
+      eq(JSON.stringify(tx && tx.cells[s.a.id].codes), JSON.stringify(['TX-1']), 'server unit codes');
       eq([X.totals.total, X.totals.cambio, X.totals.faltante].join('|'), '7|1|1', 'server totals');
     },
   },

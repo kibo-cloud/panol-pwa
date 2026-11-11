@@ -81,12 +81,13 @@ export function mvRow(m, { plain = false } = {}) {
 export const mvList = (l) => (l.length ? `<div class="list">${l.map(mvRow).join('')}</div>` : `<div class="list">${emptyBox('Sin movimientos registrados', 'Las entregas, devoluciones y reposiciones aparecen acá.')}</div>`);
 const AL_IC = { faltante: 'x', cambio: 'wrench', consecutiva: 'alert', devolucion: 'swap', pendiente: 'clock', limpieza: 'clean', sin_control: 'cal' };
 // Etapa 8: días desde el último control efectivo de un poseedor (`<techId>` o `caja:<id>`), con
-// el tono según el umbral de la alerta (vencido en rojo, nunca controlado en gris).
-const AGE_IC = { ok: 'ok', pend: 'clock', bad: 'cal' };
+// el tono según el umbral de la alerta (vencido en rojo, nunca controlado en gris; sin
+// herramientas activas nunca está vencido: los días se muestran en gris, como la alerta).
+const AGE_IC = { ok: 'ok', pend: 'clock', bad: 'cal', idle: 'clock' };
 export function ageChip(hk) {
   const a = holderAge(derive(), hk, new Date()); const thr = overdueDays(); const tone = ageTone(a, thr);
   const when = a.never ? '' : ` (${localDay(a.lastControlAt)})`;
-  return `<div class="ctlage" data-age="${esc(hk)}"><span class="chip ${tone}">${icon(AGE_IC[tone], 12)}${esc(ageLabel(a) + when)}${tone === 'bad' ? ` · más de ${thr} días` : ''}</span></div>`;
+  return `<div class="ctlage" data-age="${esc(hk)}"><span class="chip ${tone === 'idle' ? 'pend' : tone}">${icon(AGE_IC[tone], 12)}${esc(ageLabel(a) + when)}${tone === 'bad' ? ` · más de ${thr} días` : ''}</span></div>`;
 }
 function alertAction(a) {
   if (a.type === 'limpieza' && a.controlId) return `<a class="btn sm" href="#controlver-${esc(a.controlId)}">Ver control</a>`;

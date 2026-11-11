@@ -5,59 +5,7 @@ import assert from 'node:assert/strict';
 import { deriveState } from '../../src/domain/derive.js';
 import { deriveAlerts } from '../../src/domain/alerts.js';
 import { localDaysSince, controlAge, lastControlByHolder, firstActiveSince, isOverdue, buildExistencia, cleanOverdueDays, DEFAULT_CONTROL_OVERDUE_DAYS } from '../../src/domain/existencia.js';
-
-// Hoy (hora de Buenos Aires): miércoles 18 de marzo de 2026, 12:00.
-const NOW = new Date('2026-03-18T15:00:00.000Z');
-const tr = (toolId, qty, from, to, unitId = null) => ({ toolId, qty, from, to, unitId });
-const fin = (id, holder, period, finishedAt, items) => ({ ...holder, period, status: 'finalizado', finishedAt, counts: { bueno: 0, cambio: 0, faltante: 0 }, items });
-const it = (toolId, expected, good, change, missing) => ({ toolId, state: missing ? 'faltante' : change ? 'cambio' : 'bueno', expected, qty: expected, good, change, missing });
-
-function fixture() {
-  return {
-    shifts: [{ id: 'manana', name: 'Mañana', order: 1 }, { id: 'tarde', name: 'Tarde', order: 2 }],
-    plantillas: { manana: { name: 'Mañana', order: 1 }, tarde: { name: 'Tarde', order: 2 } },
-    especialidades: { e1: { name: 'Mecánico', order: 1 } },
-    techs: {
-      tA: { name: 'Ana', legajo: '10', shiftId: 'manana', plantillaId: 'manana', especialidadId: 'e1', active: true },
-      tB: { name: 'Beto', legajo: '20', shiftId: 'tarde', plantillaId: 'tarde', active: true },
-      tC: { name: 'Ciro', legajo: '30', shiftId: 'manana', plantillaId: 'manana', active: true },
-      tX: { name: 'Xenia', legajo: '90', shiftId: 'manana', plantillaId: 'manana', active: false, archivedAt: '2026-03-01T12:00:00.000Z' },
-    },
-    cajas: { k1: { name: 'Caja L1', lineaId: 'l1' }, k9: { name: 'Caja vieja', archivedAt: '2026-02-01T12:00:00.000Z' } },
-    categories: { cat: { name: 'Manuales', order: 1 } },
-    tools: {
-      llave: { name: 'Llave', categoryId: 'cat', order: 2, serialized: false },
-      pinza: { name: 'Pinza', categoryId: 'cat', order: 1, serialized: false },
-      taladro: { name: 'Taladro', categoryId: 'cat', order: 3, serialized: true },
-      vieja: { name: 'Vieja', categoryId: 'cat', order: 4, active: false, archivedAt: '2026-02-01T12:00:00.000Z' },
-    },
-    units: { u1: { toolId: 'taladro', code: 'TAL-1' }, u2: { toolId: 'taladro', code: 'TAL-2' } },
-    assignments: {
-      a1: { techId: 'tA', toolId: 'llave', qty: 5, active: true, since: '2026-02-01T12:00:00.000Z' },
-      a2: { techId: 'tA', toolId: 'taladro', unitId: 'u1', qty: 1, active: true, since: '2026-02-01T12:00:00.000Z' },
-      a3: { techId: 'tA', toolId: 'taladro', unitId: 'u2', qty: 1, active: true, since: '2026-02-01T12:00:00.000Z' },
-      a4: { techId: 'tB', toolId: 'pinza', qty: 2, active: true, since: '2026-02-20T12:00:00.000Z' },
-      a5: { cajaId: 'k1', toolId: 'llave', qty: 1, active: true, since: '2026-03-01T12:00:00.000Z' },
-      a6: { techId: 'tX', toolId: 'pinza', qty: 1, active: true, since: '2026-01-01T12:00:00.000Z' },
-      a7: { techId: 'tA', toolId: 'vieja', qty: 1, active: true, since: '2026-01-01T12:00:00.000Z' },
-      a8: { techId: 'tA', toolId: 'pinza', qty: 3, active: false, since: '2026-01-01T12:00:00.000Z' },
-      // Entregada después del último control de Ana: suma en la celda, sin marcas.
-      a9: { techId: 'tA', toolId: 'pinza', qty: 1, active: true, since: '2026-03-12T12:00:00.000Z' },
-    },
-    controls: {
-      // Corregido por c2 (mismo período): no es el vigente.
-      c1: fin('c1', { techId: 'tA' }, { y: 2026, m: 3, w: 2 }, '2026-03-09T15:00:00.000Z', { a1: it('llave', 5, 0, 0, 5), a2: it('taladro', 1, 1, 0, 0), a3: it('taladro', 1, 1, 0, 0) }),
-      // Finalizado el 9 de marzo a las 23:30 de Buenos Aires (10 de marzo en UTC).
-      c2: { ...fin('c2', { techId: 'tA' }, { y: 2026, m: 3, w: 2 }, '2026-03-10T02:30:00.000Z', { a1: it('llave', 5, 2, 2, 1), a2: it('taladro', 1, 0, 1, 0), a3: it('taladro', 1, 0, 0, 1), a7: it('vieja', 1, 0, 0, 1) }), supersedes: 'c1', correction: true },
-      c3: fin('c3', { techId: 'tA' }, { y: 2026, m: 2, w: 4 }, '2026-02-25T15:00:00.000Z', { a1: it('llave', 5, 5, 0, 0) }),
-      d1: { techId: 'tC', period: { y: 2026, m: 3, w: 3 }, status: 'borrador', items: {} },
-    },
-    movements: {
-      m1: { type: 'ingreso', toolId: 'llave', at: '2026-01-01T12:00:00.000Z', transfers: [tr('llave', 10, 'externo', 'disponible'), tr('llave', 6, 'disponible', 'asignado')] },
-      m2: { type: 'ingreso', toolId: 'pinza', at: '2026-01-01T12:00:00.000Z', transfers: [tr('pinza', 7, 'externo', 'disponible'), tr('pinza', 4, 'disponible', 'asignado')] },
-    },
-  };
-}
+import { NOW, fixture, reviewFixture } from '../fixtures/existencia.js';
 
 test('días desde: fecha local de Buenos Aires, nunca negativos, sin fecha = null', () => {
   // 9 de marzo 23:30 local -> 18 de marzo: 9 días (con la fecha UTC serían 8).
@@ -106,13 +54,13 @@ test('matriz: cantidades, marcas del último control (recambio no es faltante), 
   assert.deepEqual(X.holders.map((h) => h.key), ['tA', 'tB', 'tC', 'caja:k1']);
   const row = (id) => X.rows.find((r) => r.toolId === id);
   // Llave x5: 2 para recambio y 1 faltante en c2 (la corrección vigente, no c1).
-  assert.deepEqual(row('llave').cells.tA, { qty: 5, cambio: 2, faltante: 1 });
-  assert.deepEqual(row('llave').cells['caja:k1'], { qty: 1, cambio: 0, faltante: 0 });
+  assert.deepEqual(row('llave').cells.tA, { qty: 5, cambio: 2, faltante: 1, codes: [] });
+  assert.deepEqual(row('llave').cells['caja:k1'], { qty: 1, cambio: 0, faltante: 0, codes: [] });
   // Taladro por unidades: una para recambio, otra faltante, en la misma celda.
-  assert.deepEqual(row('taladro').cells.tA, { qty: 2, cambio: 1, faltante: 1 });
+  assert.deepEqual(row('taladro').cells.tA, { qty: 2, cambio: 1, faltante: 1, codes: ['TAL-1', 'TAL-2'] });
   // Pinza entregada después del control: cuenta, sin marcas; la asignación inactiva no cuenta.
-  assert.deepEqual(row('pinza').cells.tA, { qty: 1, cambio: 0, faltante: 0 });
-  assert.deepEqual(row('pinza').cells.tB, { qty: 2, cambio: 0, faltante: 0 });
+  assert.deepEqual(row('pinza').cells.tA, { qty: 1, cambio: 0, faltante: 0, codes: [] });
+  assert.deepEqual(row('pinza').cells.tB, { qty: 2, cambio: 0, faltante: 0, codes: [] });
   assert.equal(row('pinza').cells.tC, undefined);
   assert.deepEqual([row('llave').total, row('llave').cambio, row('llave').faltante, row('llave').disponible], [6, 2, 1, 4]);
   assert.deepEqual([row('pinza').total, row('pinza').disponible], [3, 3]);
@@ -158,4 +106,61 @@ test('alerta "Sin control hace N días": umbral, nunca controlado, clave con el 
   assert.ok(!at(1).some((a) => a.techId === 'tX' || a.techId === 'tC'));
   // Resuelta no aparece; un control nuevo cambia la clave y, si sigue vencido, vuelve a abrirla.
   assert.ok(!deriveAlerts(data({ controlOverdueDays: 8, alertRes: { 'sinctl-tA-c2': {} } })).some((a) => a.key === 'sinctl-tA-c2'));
+});
+
+// Revisión de la etapa 8 (E8.V1).
+const alertData = (S, extra = {}) => {
+  const d = deriveState(S, { now: NOW });
+  return { now: NOW, techs: S.techs, cajas: S.cajas, tools: S.tools, units: S.units, assignments: S.assignments, controls: d.ctls, movements: d.movs, alertRes: {}, ...extra };
+};
+
+test('sin herramientas activas nunca está vencido: se muestran los días, sin alerta', () => {
+  const S = reviewFixture();
+  const X = buildExistencia(deriveState(S, { now: NOW }), {}, { now: NOW, threshold: 14 });
+  const dora = X.holders.find((h) => h.key === 'tD');
+  assert.deepEqual([dora.active, dora.days, dora.never, dora.overdue], [0, 44, false, false]);
+  // Beto (26 días sin controles, con herramientas) sí está vencido, como su alerta.
+  assert.equal(X.holders.find((h) => h.key === 'tB').overdue, true);
+  assert.deepEqual(X.holders.filter((h) => h.overdue).map((h) => h.key), ['tB', 'caja:k1']);
+  const alerts = deriveAlerts(alertData(S, { controlOverdueDays: 14 })).filter((a) => a.type === 'sin_control');
+  assert.ok(!alerts.some((a) => a.techId === 'tD'));
+  assert.deepEqual(alerts.map((a) => a.techId || 'caja:' + a.cajaId).sort(), ['caja:k1', 'tB']);
+  // Sin umbral nadie está vencido.
+  assert.ok(!buildExistencia(deriveState(S, { now: NOW }), {}, { now: NOW }).holders.some((h) => h.overdue));
+});
+
+test('control finalizado sin fecha de finalización: cuenta desde el inicio de su semana', () => {
+  const X = buildExistencia(deriveState(reviewFixture(), { now: NOW }), {}, { now: NOW, threshold: 14 });
+  const k = X.holders.find((h) => h.key === 'caja:k1');
+  // Semana 1 de marzo: 1 de marzo a las 00:00 de Buenos Aires.
+  assert.deepEqual([k.lastControlId, k.lastControlAt, k.days], ['c6', '2026-03-01T03:00:00.000Z', 17]);
+});
+
+test('herramienta desactivada pero asignada: sigue en la matriz, marcada, y suma como en la ficha', () => {
+  const X = buildExistencia(deriveState(reviewFixture(), { now: NOW }), {}, { now: NOW });
+  const row = X.rows.find((r) => r.toolId === 'inact');
+  assert.ok(row, 'fila de la herramienta desactivada');
+  assert.deepEqual([row.inactive, row.total, row.cells.tB.qty], [true, 1, 1]);
+  assert.equal(X.rows.find((r) => r.toolId === 'pinza').inactive, false);
+  // La archivada sigue afuera (es historial).
+  assert.ok(!X.rows.some((r) => r.toolId === 'vieja'));
+  assert.equal(X.holders.find((h) => h.key === 'tB').total, 3);
+});
+
+test('herramientas por unidades: la celda lleva los códigos de ese poseedor', () => {
+  const X = buildExistencia(deriveState(fixture(), { now: NOW }), {}, { now: NOW });
+  const row = (id) => X.rows.find((r) => r.toolId === id);
+  assert.deepEqual(row('taladro').cells.tA.codes, ['TAL-1', 'TAL-2']);
+  assert.deepEqual(row('llave').cells.tA.codes, []);
+});
+
+test('alerta "nunca" resuelta: sigue oculta aunque después tenga una primera entrega nueva, hasta un control', () => {
+  // Ciro tuvo una entrega sin control, la alerta `sinctl-tC-nunca` se resolvió y la devolvió;
+  // ahora vuelve a tener herramientas desde hace 17 días: la clave es la misma ("nunca"), así que
+  // queda resuelta (oculta). Un control nuevo la cambia (`sinctl-tC-<control>`).
+  const S = fixture();
+  S.assignments.a11 = { techId: 'tC', toolId: 'pinza', qty: 1, active: true, since: '2026-03-01T12:00:00.000Z' };
+  const open = (alertRes) => deriveAlerts(alertData(S, { controlOverdueDays: 14, alertRes })).filter((a) => a.type === 'sin_control' && a.techId === 'tC');
+  assert.deepEqual(open({}).map((a) => [a.key, a.days]), [['sinctl-tC-nunca', 17]]);
+  assert.deepEqual(open({ 'sinctl-tC-nunca': { note: 'Ya se controló en papel' } }), []);
 });

@@ -15,17 +15,17 @@ import { gateUI } from '../tecnicos/view.js';
 import { ME, derive, can, who, catName, shiftName, overdueDays } from '../../state/store.js';
 import { mineFirst } from '../../state/plantillas.js';
 import { fdt, nowISO } from '../../state/period.js';
-import { buildExistencia, existenciaSheet, ageLabel, ageTone, isOverdue, localDay, holderLabel, EXI_LEGEND } from '../../state/existencia.js';
+import { buildExistencia, existenciaSheet, ageLabel, ageTone, localDay, holderLabel, cellCodes, EXI_LEGEND } from '../../state/existencia.js';
 
 const filters = () => UI.exi || (UI.exi = { plantilla: 'all', cajas: true, withTools: false });
 export function computeExistencia() {
   const f = filters();
   if (f.plantilla !== 'all' && !derive().shiftById[f.plantilla]) f.plantilla = 'all';
-  return buildExistencia(derive(), f, { now: new Date() });
+  return buildExistencia(derive(), f, { now: new Date(), threshold: overdueDays() });
 }
 const filterLabel = (f) => [f.plantilla === 'all' ? 'Todas las plantillas' : shiftName(f.plantilla), f.cajas ? 'con cajas compartidas' : 'sin cajas', f.withTools ? 'solo con herramientas' : ''].filter(Boolean).join(', ');
 
-const TONE_TXT = { ok: 'Al día', bad: 'Vencido', pend: 'Sin controles' };
+const TONE_TXT = { ok: 'Al día', bad: 'Vencido', pend: 'Sin controles', idle: 'Sin herramientas asignadas' };
 function holderHead(h, thr) {
   const tone = ageTone(h, thr);
   const href = h.kind === 'caja' ? `#caja-${h.id}` : `#tecnico-${h.id}`;
@@ -37,18 +37,20 @@ function holderHead(h, thr) {
     + `<span class="exi-age ${tone}" title="${esc(ageLabel(h))}">${icon(tone === 'ok' ? 'ok' : 'clock', 12)}${esc(days)}<span class="exi-sr"> ${TONE_TXT[tone]}</span></span></th>`;
 }
 const marks = (c) => `${c.cambio ? `<span class="mk c" title="${c.cambio} para recambio">C ${c.cambio}</span>` : ''}${c.faltante ? `<span class="mk f" title="${c.faltante} faltantes">F ${c.faltante}</span>` : ''}`;
-const cell = (c) => (c && c.qty ? `<td class="n exi-c${c.faltante ? ' bad' : c.cambio ? ' warn' : ''}"><span class="q">${c.qty}</span>${marks(c)}</td>` : '<td class="n exi-c exi-0"><span class="exi-sr">0</span></td>');
+const units = (c) => { const k = cellCodes(c); return k ? `<span class="exi-sr"> Unidades: ${esc(k)}</span>` : ''; };
+const cell = (c) => (c && c.qty ? `<td class="n exi-c${c.faltante ? ' bad' : c.cambio ? ' warn' : ''}"${cellCodes(c) ? ` title="Unidades: ${esc(cellCodes(c))}"` : ''}><span class="q">${c.qty}</span>${marks(c)}${units(c)}</td>` : '<td class="n exi-c exi-0"><span class="exi-sr">0</span></td>');
 
 function matrix(X, thr) {
   const head = `<tr><th scope="col" class="exi-t">Herramienta</th>${X.holders.map((h) => holderHead(h, thr)).join('')}<th scope="col" class="n exi-s">Total</th><th scope="col" class="n exi-s">Recambio</th><th scope="col" class="n exi-s">Faltante</th><th scope="col" class="n exi-s">Pañol</th></tr>`;
-  const body = X.rows.map((r) => `<tr><th scope="row" class="exi-t"><span class="exi-num">${r.n}</span><a href="#herramienta-${esc(r.toolId)}">${esc(r.name)}</a></th>${X.holders.map((h) => cell(r.cells[h.key])).join('')}<td class="n exi-s">${r.total}</td><td class="n exi-s">${r.cambio ? `<span class="mk c">C ${r.cambio}</span>` : '0'}</td><td class="n exi-s">${r.faltante ? `<span class="mk f">F ${r.faltante}</span>` : '0'}</td><td class="n exi-s">${r.disponible}</td></tr>`).join('');
+  const body = X.rows.map((r) => `<tr><th scope="row" class="exi-t"><span class="exi-num">${r.n}</span><a href="#herramienta-${esc(r.toolId)}">${esc(r.name)}</a>${r.inactive ? '<span class="exi-ina">(inactiva)</span>' : ''}</th>${X.holders.map((h) => cell(r.cells[h.key])).join('')}<td class="n exi-s">${r.total}</td><td class="n exi-s">${r.cambio ? `<span class="mk c">C ${r.cambio}</span>` : '0'}</td><td class="n exi-s">${r.faltante ? `<span class="mk f">F ${r.faltante}</span>` : '0'}</td><td class="n exi-s">${r.disponible}</td></tr>`).join('');
   const foot = `<tr><th scope="row" class="exi-t">Total</th>${X.holders.map((h) => cell({ qty: h.total, cambio: h.cambio, faltante: h.faltante })).join('')}<td class="n exi-s">${X.totals.total}</td><td class="n exi-s">${X.totals.cambio}</td><td class="n exi-s">${X.totals.faltante}</td><td class="n exi-s">${X.totals.disponible}</td></tr>`;
   return `<div class="exiwrap" id="exiwrap" role="region" aria-label="Existencia por técnico: herramientas en filas y técnicos o cajas en columnas" tabindex="0"><table class="tbl exi" id="exitbl"><thead>${head}</thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>`;
 }
 
 VIEWS.existencia = () => {
   const d = derive(); const f = filters(); const X = computeExistencia(); const thr = overdueDays();
-  const late = X.holders.filter((h) => isOverdue(h, thr)).length;
+  // Vencidos = la regla de la alerta (solo poseedores con herramientas activas).
+  const late = X.holders.filter((h) => h.overdue).length;
   const exp = can('reports_export');
   const acts = exp ? `<button class="btn" data-act="exiXlsx">${icon('dl', 18)}Excel</button><button class="btn" data-act="exiPrint">${icon('print', 18)}Imprimir</button>` : '';
   const pl = optList([['all', 'Todas las plantillas'], ...mineFirst(d.shifts, d.myPlantilla.plantillaIds).map((p) => [p.id, p.name])], f.plantilla);

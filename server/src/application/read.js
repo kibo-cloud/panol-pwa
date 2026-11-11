@@ -47,7 +47,7 @@ export async function getState(db, { now = new Date(), user = null } = {}) {
 // Etapa 8: existencia por técnico (RESUMEN del Excel) con los filtros de la pantalla.
 export async function getExistencia(db, filters = {}, { now = new Date() } = {}) {
   const S = await withSnapshot(db, readState);
-  const X = buildExistencia(deriveState(S, { now }), filters, { now });
+  const X = buildExistencia(deriveState(S, { now }), filters, { now, threshold: S.settings.controlOverdueDays });
   return { now: now.toISOString(), controlOverdueDays: S.settings.controlOverdueDays, ...X };
 }
 

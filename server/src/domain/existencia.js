@@ -33,6 +33,8 @@ export function cleanOverdueDays(v) {
 }
 
 export const isOverdue = (age, threshold) => threshold > 0 && !!age && age.days != null && age.days > threshold;
+// Vencido en pantalla = la regla de la alerta: solo un poseedor con asignaciones activas.
+export const holderOverdue = (age, threshold) => !!age && age.active > 0 && isOverdue(age, threshold);
 
 // Fecha de un control para "último control": cuando se finalizó (o el inicio de su semana).
 const controlAt = (c) => c.finishedAt || (c.period ? zonedDate(c.period.y, c.period.m, (c.period.w - 1) * 7 + 1).toISOString() : null);
@@ -66,13 +68,17 @@ export function controlAge(last, firstSince, now = new Date()) {
   return { lastControlId: null, lastControlAt: null, never: true, from, days: localDaysSince(from, now) };
 }
 
-const liveTool = (t) => !!t && !t.archivedAt && t.active !== false;
+// Las herramientas desactivadas (no eliminadas) siguen en la matriz mientras alguien las tenga,
+// como en la ficha del técnico y en la alerta; la fila las marca (`inactive`).
+const liveTool = (t) => !!t && !t.archivedAt;
 const liveTech = (t) => !!t && !t.archivedAt && t.active !== false;
 
 // Matriz herramientas x poseedores. f: { plantilla: 'all' | id, cajas (true por defecto),
 // withTools (solo poseedores con herramientas) }. Celda = unidades asignadas hoy; las marcas
-// (recambio y faltante) salen del último control efectivo del poseedor para esas asignaciones.
-export function buildExistencia(d, f = {}, { now = new Date() } = {}) {
+// (recambio y faltante) salen del último control efectivo del poseedor para esas asignaciones;
+// `codes`: los códigos de las unidades (herramientas por unidades). `threshold`: días de la alerta
+// (0 o sin umbral: nadie vencido); `active` = asignaciones activas del poseedor (todas).
+export function buildExistencia(d, f = {}, { now = new Date(), threshold = 0 } = {}) {
   const filters = { plantilla: f.plantilla && f.plantilla !== 'all' ? f.plantilla : 'all', cajas: f.cajas !== false, withTools: !!f.withTools };
   const tools = (d.tools || []).filter(liveTool);
   const toolSet = new Set(tools.map((t) => t.id));
@@ -80,6 +86,9 @@ export function buildExistencia(d, f = {}, { now = new Date() } = {}) {
   const plOf = (t) => t.plantillaId ?? t.shiftId ?? null;
   const last = lastControlByHolder(d.effList);
   const first = firstActiveSince(d.activeAsg);
+  const unitCode = Object.fromEntries((d.units || []).map((u) => [u.id, u.code || '']));
+  const activeBy = {};
+  for (const a of d.activeAsg || []) activeBy[holderKey(a)] = (activeBy[holderKey(a)] || 0) + 1;
 
   let holders = (d.activeTechs || []).filter(liveTech).filter((t) => filters.plantilla === 'all' || plOf(t) === filters.plantilla).map((t) => ({
     key: t.id, kind: 'tech', id: t.id, name: t.name || '', legajo: t.legajo || '', especialidadId: t.especialidadId || null,
@@ -98,8 +107,9 @@ export function buildExistencia(d, f = {}, { now = new Date() } = {}) {
     const hk = holderKey(a);
     if (!keys.has(hk) || !toolSet.has(a.toolId)) continue;
     const q = a.qty || 1;
-    const cell = ((cells[a.toolId] ||= {})[hk] ||= { qty: 0, cambio: 0, faltante: 0 });
+    const cell = ((cells[a.toolId] ||= {})[hk] ||= { qty: 0, cambio: 0, faltante: 0, codes: [] });
     cell.qty += q;
+    if (a.unitId && unitCode[a.unitId]) cell.codes.push(unitCode[a.unitId]);
     const ctl = last[hk];
     const item = ctl && ctl.items ? ctl.items[a.id] : null;
     if (item && item.state) {
@@ -118,14 +128,15 @@ export function buildExistencia(d, f = {}, { now = new Date() } = {}) {
       s.cambio += c.cambio;
       s.faltante += c.faltante;
     }
-    return { ...h, ...controlAge(last[h.key], first[h.key], now), ...s };
+    const age = { ...controlAge(last[h.key], first[h.key], now), active: activeBy[h.key] || 0 };
+    return { ...h, ...age, overdue: holderOverdue(age, threshold), ...s };
   });
   if (filters.withTools) holders = holders.filter((h) => h.total > 0);
   const shown = holders.map((h) => h.key);
 
   const totals = { total: 0, cambio: 0, faltante: 0, disponible: 0 };
   const rows = tools.map((t, i) => {
-    const r = { toolId: t.id, n: i + 1, name: t.name || '', categoryId: t.categoryId || null, serialized: !!t.serialized, cells: {}, total: 0, cambio: 0, faltante: 0, disponible: ((d.pools || {})[t.id] || {}).disponible || 0 };
+    const r = { toolId: t.id, n: i + 1, name: t.name || '', categoryId: t.categoryId || null, serialized: !!t.serialized, inactive: t.active === false, cells: {}, total: 0, cambio: 0, faltante: 0, disponible: ((d.pools || {})[t.id] || {}).disponible || 0 };
     for (const hk of shown) {
       const c = cells[t.id] && cells[t.id][hk];
       if (!c) continue;
@@ -137,5 +148,6 @@ export function buildExistencia(d, f = {}, { now = new Date() } = {}) {
     for (const k of Object.keys(totals)) totals[k] += r[k];
     return r;
   });
+  for (const r of rows) for (const c of Object.values(r.cells)) c.codes.sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
   return { filters, holders, rows, totals };
 }

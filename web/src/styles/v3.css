@@ -166,7 +166,8 @@ body.auth .netwrap{max-width:400px}
 .exi-hs{display:block;font-weight:500;font-size:11px;color:var(--ink2);line-height:1.3}
 .exi-age{display:inline-flex;align-items:center;gap:3px;margin-top:4px;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:650;border:1px solid transparent}
 .exi-age.ok{background:var(--ok-soft);color:var(--ok-ink)}
-.exi-age.pend{background:var(--pend-soft);color:var(--pend-ink)}
+.exi-age.pend,.exi-age.idle{background:var(--pend-soft);color:var(--pend-ink)}
+.exi-ina{display:block;font-size:11px;font-weight:600;color:var(--ink3)}
 .exi-age.bad{background:var(--bad-soft);color:var(--bad-ink);border-color:var(--bad-edge)}
 .exi-sr{position:absolute;left:0;top:0;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .exi-c{white-space:nowrap}

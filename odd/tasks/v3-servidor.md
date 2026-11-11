@@ -1661,7 +1661,9 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 ## Stage 8 decisions (parent, within PEDIDO §2.9)
 - Existencia screen (new nav item "Existencia", visible to every role that can see reports,
   gerencia included — user decision: gerencia has read-only stock per tech): equivalent of the
-  Excel RESUMEN. Rows = active tools in the custom order of stage 3 (code + name); columns = the
+  Excel RESUMEN. Rows = non-archived tools in the custom order of stage 3 (N° + name: tools have
+  no code; unit codes of each holder where the tool is tracked by unit, in the cell title and in
+  the Excel cell; deactivated tools still assigned are marked "(inactiva)"); columns = the
   holders (técnicos and cajas) of the selected plantilla (filter: plantilla, or all; toggles
   "incluir cajas" and "solo con herramientas"), each column header with legajo/name,
   especialidad, last effective control date and days since it.
@@ -1679,7 +1681,9 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   header, symbols + legend at the foot), `reports_export` permission for both, as reports.
 - Days since the last effective control: shown in the tech and caja sheets, in plantilla member
   lists and in the Existencia header; holders with active assignments and no control show
-  "Sin controles" (days counted from their first active assignment).
+  "Sin controles" (days counted from their first active assignment). "Overdue" on screen follows
+  the alert rule: a holder with no active assignments is never overdue (days still shown, neutral
+  tone).
 - Alert "Sin control hace N días": per holder with active assignments whose last effective
   control is older than the threshold (or never, counted from the first active assignment).
   Threshold configurable in Administración (company settings), default 14 days, 0 disables it;
@@ -1729,6 +1733,22 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
       plantilla member card; 390 px without page overflow, matrix scrolls in its box with sticky
       header/first column; gerencia opens it (403 on the threshold), responsable sees the value
       read-only. `existencia` added to E2E `ROUTES`. Written with the code (passed on its first run).
+- [x] E8.V1 Review fixes. Route: delegated writer (one bounded writer, server + web + tests + doc).
+      Commit: see "Stage 8 verification" (E8.V1). Shared fixture `server/test/fixtures/existencia.js`
+      (`fixture`, `reviewFixture`) used by the server unit test and the web parity test.
+      (1) Overdue = alert rule (no active assignments -> never overdue, tone `idle`, days shown):
+      `holderOverdue`, holders carry `active`/`overdue`, KPI/header/`ageChip` use it. RED: server
+      unit (no `overdue`/`active`), web unit (`ageTone` 'ok'/'bad' for Dora) -> GREEN.
+      (2) Web control date falls back to the start of its week (Buenos Aires midnight) like the
+      server; parity test runs both builders on the same fixtures (2 fixtures x 3 filters x 2
+      thresholds, deepEqual). RED: web parity + "sin fecha de finalización" -> GREEN.
+      (3) Tools filtered on archived only, `inactive` row flag, "(inactiva)" label (screen + Excel).
+      RED: server + web -> GREEN. (4) Unit codes per cell (`codes`): cell `title` + hidden text, Excel
+      cell `n (C · F) [TAL-1, TAL-2]`, legend lines. RED: server + web -> GREEN; E2E t15 updated
+      (cell text, title, API `codes`). (5) Doc notes (implementation notes, E8.V1). (6) Tests: resolved
+      `…-nunca` after a later first delivery stays hidden until a control (unit; passes on the old
+      code: documents existing behaviour); `/api/existencia?cajas=0&withTools=1` overdue holders =
+      tech `sin_control` alerts (integration; RED on the pre-fix server code, 1 failure -> GREEN).
 
 ## Stage 8 implementation notes
 - API: `GET /api/existencia?plantilla=<id>&cajas=0|1&withTools=0|1` (any session, like
@@ -1756,6 +1776,17 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   scoped to `body.print-exi` (set by "Imprimir", removed on `afterprint`); `@page` A4 landscape
   applies to any print (stage 10 may refine it).
 - `.txt` v2 unaffected (`app_settings` is not exported). No new migration.
+- E8.V1 review notes: (a) a resolved `sin_control` alert stays hidden until a new effective
+  control changes its key, consistent with the key-based resolution model (accepted by the
+  parent); for a never-controlled holder the key is `…-nunca`, so a resolution also covers a later
+  new first delivery until the first control (pinned in `unit/existencia.test.js`). (b) Stage 10:
+  `@page{size:A4 landscape}` is global today; stage 10 must scope print page settings (named
+  `@page` / per print class) and handle Ctrl+P outside the print buttons. (c) Unit codes: kept in
+  the cell (`codes`), shown as the cell `title` + hidden text on screen and as `[TAL-1, TAL-2]`
+  after the quantity/marks in the Excel cell (no extra columns, the matrix stays readable).
+  (d) Tools filter on archived only; `inactive` marks the row. (e) The control date falls back to
+  the start of its week when `finishedAt` is missing on both sides; holders carry `active`
+  (active assignments, any tool) and `overdue` (builder option `threshold`).
 
 ## Stage 8 verification (local, sequential, delegated writer)
 - On `bdf6492` (all three work units): `npm test` 229/229; `npm run test:db` 251/251 (542 s;

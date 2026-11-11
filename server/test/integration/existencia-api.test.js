@@ -118,4 +118,17 @@ describe('existencia por técnico', () => {
     assert.equal((await api.call('consulta', 'GET', '/api/existencia?cajas=si')).statusCode, 400);
     assert.equal((await api.call('consulta', 'GET', '/api/existencia?otro=1')).statusCode, 400);
   });
+
+  test('vencidos sin cajas y solo con herramientas = alertas "Sin control" de los técnicos (E8.V1)', async () => {
+    const { version } = await settings();
+    assert.equal((await put('admin', { controlOverdueDays: 14 }, version)).statusCode, 200);
+    const X = (await api.call('consulta', 'GET', '/api/existencia?cajas=0&withTools=1')).json();
+    assert.equal(X.controlOverdueDays, 14);
+    assert.ok(X.holders.every((h) => h.kind === 'tech' && h.total > 0 && h.active > 0));
+    const late = X.holders.filter((h) => h.overdue).map((h) => h.id).sort();
+    const alerts = (await overdue()).filter((a) => a.techId).map((a) => a.techId).sort();
+    // Bruno ya se controló; Ana tiene 7 días: solo Carla (28 días sin controles).
+    assert.deepEqual(late, ['t-carla']);
+    assert.deepEqual(late, alerts);
+  });
 });
