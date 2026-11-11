@@ -150,7 +150,7 @@ body.auth .netwrap{max-width:400px}
    columna fijos); la página nunca se ensancha. Marcas con letra y número además del color. */
 .exi-f{margin-bottom:12px}
 .exi-k{margin-bottom:14px}
-.exiwrap{overflow:auto;max-height:70vh;max-width:100%;border:1px solid var(--line);border-radius:16px;background:var(--surface);overscroll-behavior:contain}
+.exiwrap{position:relative;overflow:auto;max-height:70vh;max-width:100%;border:1px solid var(--line);border-radius:16px;background:var(--surface);overscroll-behavior:contain}
 .exiwrap:focus-visible{outline:2px solid var(--pri);outline-offset:2px}
 .tbl.exi{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%}
 .tbl.exi th,.tbl.exi td{padding:8px 10px;border-top:0;border-bottom:1px solid var(--line-soft);border-right:1px solid var(--line-soft);vertical-align:middle}
@@ -168,7 +168,7 @@ body.auth .netwrap{max-width:400px}
 .exi-age.ok{background:var(--ok-soft);color:var(--ok-ink)}
 .exi-age.pend{background:var(--pend-soft);color:var(--pend-ink)}
 .exi-age.bad{background:var(--bad-soft);color:var(--bad-ink);border-color:var(--bad-edge)}
-.exi-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.exi-sr{position:absolute;left:0;top:0;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .exi-c{white-space:nowrap}
 .exi-c .q{font-weight:650}
 .exi-c.warn{background:var(--warn-tint)}
