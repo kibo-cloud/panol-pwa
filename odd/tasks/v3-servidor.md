@@ -65,8 +65,8 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 5. Eliminar y anular — done (PR #5)
 6. Novedades — done (PR #6)
 7. Gerencia — done (PR #7)
-8. Existencia por técnico y alertas — implemented, in review (`v3/etapa-8-existencia`)
-9. Importador del Excel
+8. Existencia por técnico y alertas — done (PR #8)
+9. Importador del Excel — in progress (`v3/etapa-9-importador`)
 10. Impresión de auditoría
 
 ## Stage 1 tasks
@@ -1805,9 +1805,66 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
   (562 s; first runs failed only in `t15-existencia`, whose cell text and API cell assertions
   predated the unit `codes` — spec updated). Not pushed.
 
+- Stage 8 closed 2026-11-12: E8.V1 `9a8e1b4`, CI run 43049780022, PR #8 →
+  `v3/etapa-7-gerencia`.
+
+## Stage 9 decisions (parent, within PEDIDO §2.12, §1 and the user's import decision)
+- Source: the real `.xlsm` lives only in `privado/` (git-ignored). It is never committed, copied
+  to fixtures, logged with personal data, or summarised with names/legajos in commits, the
+  feature doc or PRs (counts only). Tests use synthetic workbooks generated in code with the
+  existing `xlsx` dependency, reproducing the real layout (one sheet per legajo, `BLANCO`,
+  `RESUMEN`, `NOVEDADES`, dated 3-column blocks ENTREGA/DEVOLUCIÓN/CONTEO, the 0,5 conventions,
+  missing initial delivery, two blocks in one week). The writer studies the real file and the
+  instructivo PDF read-only to learn the layout, and runs a local dry-run preview on it.
+- Flow: Administración › Importar Excel (new permission `import_excel`, admin only by default).
+  Upload `.xlsm`/`.xlsx` (size limit, macros never executed — parsed as data only) → the server
+  builds a plan WITHOUT writing → the preview lists every assumption case by case (adjustment
+  entregas for positive saldo, faltantes, recambios, duplicate weeks, devoluciones read as
+  devolución/baja, ignored 0,5 pairs, unknown or unmatched tools/legajos, sheets without blocks,
+  date problems) with accept/skip per case where skipping is meaningful → confirm applies the
+  accepted plan in ONE transaction, bound to the file hash and the plan version (a changed server
+  state between preview and confirm refuses with "volvé a previsualizar"). Re-importing the same
+  file hash is refused (already imported).
+- Mapping (PEDIDO §2.12): técnicos/referentes from RESUMEN (legajo, name, especialidad; created
+  without plantilla; legajos without sheet or controls created without tools); tools by quantity
+  in the Excel order (matched by normalized name to existing tools, otherwise created in that
+  order); `BLANCO` becomes the kit base (stage 3); first block = existencia inicial as
+  `entrega_inicial`, plus an adjustment entrega marked importada when the count exceeds the
+  delivered (positive saldo); each dated block = one finalized control on that date marked
+  "importado del Excel" (cleaning NULL = "sin dato", as stage 4 decided for imported controls):
+  count 1 = bueno, 0,5 = recambio (with or without the 0,5 in DEVOLUCIÓN), less than assigned =
+  faltante with note "Conteo 0 en Excel"; DEVOLUCIÓN 0,5 next to a 0,5 count is ignored; a
+  devolución equal to the previous count is a devolución (or baja — record which rule decides);
+  ENTREGA in later blocks = entrega adicional or reposición (reposición when it follows a
+  faltante/recambio of that tool); two blocks in the same week: the last is effective, the
+  earlier stays as history (stage 4 correction semantics); NOVEDADES rows become novedades
+  (date+time from the sheet, tech by legajo, author = the importing user, marked importada).
+- Imported controls never create purchase requests nor reopen alerts retroactively; the
+  stage 7 automatic creation is skipped for imported data (documented). Days-since and the
+  stage 8 alert use them like any effective control.
+- Target safety: a legajo that already has operational history on the server is skipped with a
+  conflict in the preview (no merging of histories); existing techs without history get the
+  imported data. Every imported row carries an import marker (`import_batch_id`) and the batch
+  (file hash, file name, who, when, counts) is audited; dates in Buenos Aires time.
+- No `.txt` change; stage 10 printing shows imported controls with their mark.
+
+## Stage 9 tasks (branch `v3/etapa-9-importador`, stacked on stage 8)
+- [ ] E9.T1 Parser + planner (pure, unit-tested on synthetic workbooks): sheet layout detection,
+      block parsing, rules above, the case list with stable ids; a local dry-run script that runs
+      the planner on `privado/*.xlsm` and prints COUNTS only (never committed output).
+- [ ] E9.T2 Backend: migration `016_importador.sql` (batch table, import markers, permission),
+      preview and confirm endpoints (one transaction, hash + plan version binding, skip/accept
+      per case, conflicts), purchase auto-creation bypass for imported controls, audit;
+      integration tests.
+- [ ] E9.T3 Frontend + E2E: Administración › Importar Excel (upload, preview grouped by case
+      type with accept/skip, totals, confirm, result), "importado del Excel" marks in controls
+      and movements; E2E with a synthetic workbook (preview, skip a case, confirm, re-import
+      refused, data visible in Existencia).
+
 ## Next step
-- Stage 8: independent review, CI and PR #8 → `v3/etapa-7-gerencia`.
-- PRs #1–#7 await user review (stacked: #1 → `v3-servidor`, each next PR → the previous stage). Engram mirror of this document: pending (multiple active
+- Stage 9: E9.T1–E9.T3 (one delegated writer), then independent review, CI and PR #9 →
+  `v3/etapa-8-existencia`.
+- PRs #1–#8 await user review (stacked: #1 → `v3-servidor`, each next PR → the previous stage). Engram mirror of this document: pending (multiple active
   sessions). PR #1 awaits user review; after it is merged, rebase stage 2 onto `v3-servidor`.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);
