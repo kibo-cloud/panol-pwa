@@ -24,6 +24,8 @@ export function cleanSummary(hk) {
 // Limpieza de un control (etapa 4): Limpio, Requiere limpieza o Sin dato (controles viejos).
 export const cleanChip = (cl) => { const c = cl && CLEAN[cl.status]; return c ? `<span class="chip ${c.cls}">${icon(cl.status === 'limpio' ? 'ok' : 'clean', 12)}${c.label}</span>` : `<span class="chip pend">${icon('clock', 12)}Sin dato de limpieza</span>`; };
 export const demoChip = (o) => (o && o.demo ? '<span class="chip demo">Demo</span>' : '');
+// Etapa 9: control o movimiento que vino del Excel anterior (lote de importación).
+export const impChip = (o) => (o && o.importBatchId ? `<span class="chip pri ximark">${icon('upload', 12)}Importado del Excel</span>` : '');
 export function initials(n) { return String(n || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0] || '').join('').toUpperCase() || '?'; }
 const LIGHT_LABEL = { ok: 'Todo en buen estado', warn: 'Tiene herramientas para cambio', bad: 'Tiene faltantes', pend: 'Sin controlar' };
 export function avatar(name, light, lg) { return `<span class="av ${lg ? 'lg' : ''}">${esc(initials(name))}${light ? `<span class="sem ${light}" role="img" aria-label="${LIGHT_LABEL[light]}"></span>` : ''}</span>`; }
@@ -76,7 +78,7 @@ export function mvRow(m, { plain = false } = {}) {
   const voidBtn = !plain && m.id && m.type !== 'anulacion' && !voidedBy && can('movements_void') ? `<button class="btn sm" data-act="mvVoid" data-m="${esc(m.id)}">Anular</button>` : '';
   // Etapa 6: una entrega o reposición (no anulada) abre Nueva novedad con el vínculo y el técnico.
   const novBtn = !plain && m.id && linkableMv(m, voidedBy) && can('novedades_create') ? `<button class="btn sm" data-act="novNew" data-mv="${esc(m.id)}" data-tech="${esc(m.techId || '')}">Agregar novedad</button>` : '';
-  return `<div class="row mvrow ${voidedBy ? 'voided' : ''}" data-mv="${esc(m.id || '')}"><span class="tag ${tg[1]}">${esc(tg[0])}</span><div class="grow"><div class="t">${esc(title)}</div><div class="s">${esc(meta)}</div>${voidOf}${m.reason || m.notes ? `<div class="s">${m.type === 'anulacion' ? 'Motivo: ' : ''}${esc([m.reason, m.notes].filter(Boolean).join('. '))}</div>` : ''}</div>${mark || voidBtn || novBtn || demoChip(m) ? `<span class="mvacts">${mark}${demoChip(m)}${novBtn}${voidBtn}</span>` : ''}</div>`;
+  return `<div class="row mvrow ${voidedBy ? 'voided' : ''}" data-mv="${esc(m.id || '')}"><span class="tag ${tg[1]}">${esc(tg[0])}</span><div class="grow"><div class="t">${esc(title)}</div><div class="s">${esc(meta)}</div>${voidOf}${m.reason || m.notes ? `<div class="s">${m.type === 'anulacion' ? 'Motivo: ' : ''}${esc([m.reason, m.notes].filter(Boolean).join('. '))}</div>` : ''}</div>${mark || voidBtn || novBtn || demoChip(m) || impChip(m) ? `<span class="mvacts">${mark}${impChip(m)}${demoChip(m)}${novBtn}${voidBtn}</span>` : ''}</div>`;
 }
 export const mvList = (l) => (l.length ? `<div class="list">${l.map(mvRow).join('')}</div>` : `<div class="list">${emptyBox('Sin movimientos registrados', 'Las entregas, devoluciones y reposiciones aparecen acá.')}</div>`);
 const AL_IC = { faltante: 'x', cambio: 'wrench', consecutiva: 'alert', devolucion: 'swap', pendiente: 'clock', limpieza: 'clean', sin_control: 'cal' };

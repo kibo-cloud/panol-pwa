@@ -214,3 +214,22 @@ body.auth .netwrap{max-width:400px}
 .cfgcard{margin-top:12px}
 .cfgp{margin:6px 0 12px}
 .cfgbar{margin-top:12px}
+/* Etapa 9: Administración › Importar Excel */
+.ximwrap{display:flex;flex-direction:column;gap:12px}
+.ximp{margin:6px 0 12px}
+.ximkpis{margin-top:12px}
+.ximgrp .list{margin-top:8px}
+.ximh{display:flex;align-items:center;gap:6px;font-size:15px;margin:0;min-width:0}
+.ximbulk{margin:0 0 4px;flex-wrap:wrap}
+.ximrow{flex-wrap:wrap;align-items:center}
+.ximrow .grow{min-width:0;flex:1 1 220px}
+.ximrow .s{overflow-wrap:anywhere}
+.ximrow.skipped .s{color:var(--ink2);text-decoration:line-through}
+.ximseg{display:inline-flex;flex:none;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.ximseg button{min-height:44px;min-width:76px;padding:0 12px;border:0;background:var(--surface);color:var(--ink2);font:inherit;font-size:13px;font-weight:600}
+.ximseg button+button{border-left:1px solid var(--line)}
+.ximseg button.on{background:var(--pri-soft);color:var(--pri)}
+.ximmore{margin-top:8px}
+.ximbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 0}
+.ximbar .s{flex:1 1 200px;min-width:0}
+.ximark{font-size:11px;padding:2px 8px}
