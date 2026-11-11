@@ -9,7 +9,7 @@ import { toast } from '../../ui/feedback.js';
 import { kpi, pageHead, emptyBox, alertList, field } from '../../ui/components.js';
 import { gateUI, espSelect } from '../tecnicos/view.js';
 import { api } from '../../api/index.js';
-import { S, derive, who, refresh, can } from '../../state/store.js';
+import { S, derive, who, refresh, can, overdueDays } from '../../state/store.js';
 import { pendingCount } from '../../state/compras.js';
 import { mineFirst } from '../../state/plantillas.js';
 
@@ -31,7 +31,7 @@ VIEWS.alertas = () => {
   const nCmp = can('purchases_decide') ? pendingCount(S.purchases) : 0;
   const cmpBanner = nCmp ? `<div class="banner warn cmpban" role="status"><div><b>${nCmp === 1 ? '1 compra pendiente' : nCmp + ' compras pendientes'} de aprobación.</b><div class="sm">Aprobalas o rechazalas desde Gerencia.</div></div><div class="acts"><a class="btn sm pri" href="#compras">${icon('cart', 14)}Ver compras</a></div></div>` : '';
   return pageHead('Alertas', 'Situaciones que requieren atención') + cmpBanner +
-  `<section class="kpis" data-css="margin-bottom:14px">${kpi(byType('faltante'), 'Faltantes', '', 'bad')}${kpi(byType('cambio') + byType('consecutiva'), 'Para cambio', '', 'warn', byType('consecutiva') ? `${byType('consecutiva')} en controles seguidos` : '')}${kpi(byType('devolucion'), 'Devoluciones pendientes', '', 'bad')}${kpi(byType('pendiente'), 'Controles pendientes', '', 'pend')}${kpi(byType('limpieza'), 'Limpieza', '', 'warn', 'dos controles seguidos')}</section>
+  `<section class="kpis" data-css="margin-bottom:14px">${kpi(byType('faltante'), 'Faltantes', '', 'bad')}${kpi(byType('cambio') + byType('consecutiva'), 'Para cambio', '', 'warn', byType('consecutiva') ? `${byType('consecutiva')} en controles seguidos` : '')}${kpi(byType('devolucion'), 'Devoluciones pendientes', '', 'bad')}${kpi(byType('pendiente'), 'Controles pendientes', '', 'pend')}${kpi(byType('limpieza'), 'Limpieza', '', 'warn', 'dos controles seguidos')}${overdueDays() ? kpi(byType('sin_control'), 'Sin control', '', 'warn', `más de ${overdueDays()} días`) : ''}</section>
   <div class="fchips" data-css="margin-bottom:12px" aria-label="Filtrar por plantilla">${chips.map(([k, l]) => `<button class="fchip ${pf === k ? 'on' : ''}" data-act="alertPl" data-v="${esc(k)}" aria-pressed="${pf === k}">${esc(l)}${k === 'all' ? '' : ` (${(k === 'all' ? d.alertsOpen : d.alertsByPlantilla[k] || []).length})`}</button>`).join('')}</div>
   <div class="toolbar">${espSelect('alert-esp', 'alertEsp', UI.alertEsp)}</div><div class="seg" role="tablist" data-css="margin-bottom:12px;max-width:420px"><button role="tab" aria-selected="${tab === 'open'}" class="${tab === 'open' ? 'on' : ''}" data-act="alertTab" data-v="open">Abiertas (${open.length})</button><button role="tab" aria-selected="${tab === 'res'}" class="${tab === 'res' ? 'on' : ''}" data-act="alertTab" data-v="res">Resueltas (${res.length})</button></div>
   ${tab === 'open' ? alertList(open, true) : res.length ? `<div class="list">${res.map((r) => `<div class="al"><span class="al-ic ok">${icon('ok', 16)}</span><div class="grow"><span class="t">${esc(r.title || 'Alerta')}</span><div class="s">${esc(r.text || '')}</div><div class="s" data-css="margin-top:4px">Resuelta por ${esc(who(r.by))} · ${fdt(r.at)}${r.note ? '. ' + esc(r.note) : ''}</div></div></div>`).join('')}</div>` : `<div class="list">${emptyBox('Todavía no se resolvieron alertas', '')}</div>`}`;

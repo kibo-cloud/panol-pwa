@@ -16,7 +16,7 @@ export async function resolveAlert(db, actor, key, input = {}, { now = new Date(
     if (await repo.getRow(c, 'alertRes', key)) throw new DomainError('La alerta ya está resuelta.', 'already_resolved', 409);
     const S = await readState(c);
     const d = deriveState(S, { now });
-    const a = deriveAlerts({ now, techs: S.techs, cajas: S.cajas, tools: S.tools, units: S.units, assignments: S.assignments, controls: d.ctls, movements: d.movs, alertRes: S.alertRes }).find((x) => x.key === key);
+    const a = deriveAlerts({ now, techs: S.techs, cajas: S.cajas, tools: S.tools, units: S.units, assignments: S.assignments, controls: d.ctls, movements: d.movs, alertRes: S.alertRes, controlOverdueDays: S.settings.controlOverdueDays }).find((x) => x.key === key);
     if (!a) throw new DomainError('La alerta ya no está abierta.', 'not_found', 404);
     // E5.V1: alert_resolutions no tiene claves foráneas; el poseedor se toma FOR SHARE para que no
     // se elimine definitivamente entre la revisión de su historial y esta fila.

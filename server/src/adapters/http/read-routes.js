@@ -24,6 +24,11 @@ export function registerReadRoutes(app) {
     },
   }, async (req) => read.getReport(db, req.query));
 
+  // Etapa 8: existencia por técnico. `cajas` y `withTools` son 0 o 1.
+  app.get('/api/existencia', {
+    schema: { querystring: obj({ plantilla: S.id, cajas: { type: 'string', enum: ['0', '1'] }, withTools: { type: 'string', enum: ['0', '1'] } }) },
+  }, async (req) => read.getExistencia(db, { plantilla: req.query.plantilla, cajas: req.query.cajas !== '0', withTools: req.query.withTools === '1' }));
+
   app.get('/api/controls', {
     schema: { querystring: obj({ techId: S.id, cajaId: S.id, plantillaId: S.id, status: { type: 'string', enum: ['borrador', 'finalizado'] } }) },
   }, async (req) => ({ controls: await read.listControls(db, req.query) }));

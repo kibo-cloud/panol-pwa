@@ -1,12 +1,18 @@
 // Alertas derivadas (portado de derive() de 2.1). Una alerta resuelta (alertRes[key]) no se
 // muestra; como la clave incluye el control o movimiento, un control nuevo la vuelve a abrir.
-import { periodOf, pkeyOf, plabel } from './period.js';
+import { periodOf, pkeyOf, plabel, localDateISO } from './period.js';
 import { effectiveControls, controlHistory, hasMissing, hasChange } from './controls.js';
 import { holderKey } from './lineas.js';
+import { lastControlByHolder, firstActiveSince, controlAge, isOverdue } from './existencia.js';
+
+const dayLabel = (iso) => {
+  const [y, m, d] = localDateISO(new Date(iso)).split('-');
+  return `${Number(d)}/${Number(m)}/${y}`;
+};
 
 const needsCleaning = (c) => !!c.cleaning && c.cleaning.status === 'requiere_limpieza';
 
-// data: { now, techs, cajas, tools, units, assignments, controls: [], movements: [], alertRes, purchases? }
+// data: { now, techs, cajas, tools, units, assignments, controls: [], movements: [], alertRes, purchases?, controlOverdueDays? }
 // Etapa 7: las de faltante y cambio llevan la solicitud de compra de esa asignación y motivo
 // (`purchase`: la abierta o, si no, la rechazada sin resolver: "compra rechazada" con su motivo).
 // Las cajas compartidas (etapa 2) tienen las mismas alertas que un técnico, con `cajaId`.
@@ -85,6 +91,27 @@ export function deriveAlerts(data) {
       key: `limp-${hk}-${last.id}`, type: 'limpieza', sev: 2, title: 'Requiere limpieza en controles consecutivos', text: `${t.name}${note ? '. ' + note : ''}`,
       ...(isCaja ? { cajaId: hk.slice(5) } : { techId: hk }), controlId: last.id, at: last.finishedAt,
     });
+  }
+
+  // Etapa 8: "Sin control hace N días". Poseedor activo con herramientas cuyo último control
+  // efectivo (o, si nunca tuvo, su primera entrega activa) es más viejo que el umbral (0 o sin
+  // umbral: desactivada). La clave lleva el último control: un control nuevo la cierra sola.
+  const limit = Number(data.controlOverdueDays) || 0;
+  if (limit > 0) {
+    const last = lastControlByHolder(effList);
+    const first = firstActiveSince(activeAsg);
+    for (const hk of [...new Set(activeAsg.map(holderKey))]) {
+      const isCaja = hk.startsWith('caja:');
+      const t = isCaja ? cajas[hk.slice(5)] : (data.techs || {})[hk];
+      if (!t || t.active === false || t.archivedAt) continue;
+      const age = controlAge(last[hk], first[hk], data.now || new Date());
+      if (!isOverdue(age, limit)) continue;
+      alerts.push({
+        key: `sinctl-${hk}-${age.lastControlId || 'nunca'}`, type: 'sin_control', sev: 2, title: `Sin control hace ${age.days} días`,
+        text: age.never ? `${t.name}. Sin controles desde la primera entrega` : `${t.name}. Último control: ${dayLabel(age.lastControlAt)}`,
+        ...(isCaja ? { cajaId: hk.slice(5) } : { techId: hk }), controlId: age.lastControlId, days: age.days, at: age.from,
+      });
+    }
   }
 
   const movs = data.movements || [];

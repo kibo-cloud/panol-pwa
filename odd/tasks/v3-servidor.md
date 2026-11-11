@@ -64,8 +64,8 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 4. Conteo por cantidad y limpieza — done (PR #4)
 5. Eliminar y anular — done (PR #5)
 6. Novedades — done (PR #6)
-7. Gerencia — in progress (`v3/etapa-7-gerencia`)
-8. Existencia por técnico y alertas
+7. Gerencia — done (PR #7)
+8. Existencia por técnico y alertas — implemented, in review (`v3/etapa-8-existencia`)
 9. Importador del Excel
 10. Impresión de auditoría
 
@@ -1655,10 +1655,159 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 - E7.V1 (`71c23a6`): `npm test` 218/218; `npm run test:db` 244/244 (514 s); `npm run build` ok;
   `PANOL_E2E_BUILD=1 npm run test:e2e` 65 passed, 0 failed, 0 skipped (514 s). Not pushed.
 
-## Next step
-- Stage 7: E7.T1–E7.T3 done (delegated writer); next: independent review, CI and PR #7 →
+- Stage 7 closed 2026-11-11: E7.V1 `71c23a6`, CI run 42965378623 green, PR #7 →
   `v3/etapa-6-novedades`.
-- PRs #1–#6 await user review (stacked: #1 → `v3-servidor`, each next PR → the previous stage). Engram mirror of this document: pending (multiple active
+
+## Stage 8 decisions (parent, within PEDIDO §2.9)
+- Existencia screen (new nav item "Existencia", visible to every role that can see reports,
+  gerencia included — user decision: gerencia has read-only stock per tech): equivalent of the
+  Excel RESUMEN. Rows = non-archived tools in the custom order of stage 3 (N° + name: tools have
+  no code; unit codes of each holder where the tool is tracked by unit, in the cell title and in
+  the Excel cell; deactivated tools still assigned are marked "(inactiva)"); columns = the
+  holders (técnicos and cajas) of the selected plantilla (filter: plantilla, or all; toggles
+  "incluir cajas" and "solo con herramientas"), each column header with legajo/name,
+  especialidad, last effective control date and days since it.
+- Cell = assigned quantity of that tool to that holder; when the holder's latest effective
+  control reports recambio or faltante for it, the cell shows the marks (C n / F n) with symbols
+  and color (legible in black and white). Per row: total assigned, total recambio, total
+  faltante, and pañol stock (available). Per column: total assigned, recambio, faltante. Grand
+  totals. Archived holders/tools excluded (they are history).
+- One pure domain function builds the matrix (server `domain/` + the web uses the same rules as
+  the reports do), tested in Node; the screen derives it from `/api/state` like the reports. Large
+  plantillas: sticky first column and header, horizontal scroll inside the table only (no page
+  overflow at 390 px).
+- Export to Excel with the existing self-hosted `xlsx` (same pattern as `reportes/export.js`),
+  same rows/columns/totals plus a legend; print with a print stylesheet (landscape, repeated
+  header, symbols + legend at the foot), `reports_export` permission for both, as reports.
+- Days since the last effective control: shown in the tech and caja sheets, in plantilla member
+  lists and in the Existencia header; holders with active assignments and no control show
+  "Sin controles" (days counted from their first active assignment). "Overdue" on screen follows
+  the alert rule: a holder with no active assignments is never overdue (days still shown, neutral
+  tone).
+- Alert "Sin control hace N días": per holder with active assignments whose last effective
+  control is older than the threshold (or never, counted from the first active assignment).
+  Threshold configurable in Administración (company settings), default 14 days, 0 disables it;
+  needs the existing settings permission. The alert key includes the last control id so it
+  resolves by itself with a new control; resolutions follow the existing alert model.
+- No new tables beyond the setting (migration `016_existencia.sql` only if the settings store
+  needs a column/row); `.txt` v2 unaffected.
+
+## Stage 8 tasks (branch `v3/etapa-8-existencia`, stacked on stage 7)
+- [x] E8.T1 Domain/back: matrix builder + days-since helper (pure, unit-tested), alert rule with
+      configurable threshold (server alerts + setting + migration if needed), any API the screen
+      needs; unit + integration tests (test-first where a RED is meaningful).
+      Commit `53eef77`. Route: delegated writer. Code: `domain/existencia.js` (`localDaysSince`,
+      `cleanOverdueDays`, `isOverdue`, `lastControlByHolder`, `firstActiveSince`, `controlAge`,
+      `buildExistencia`), `domain/alerts.js` (`sin_control` rule, `controlOverdueDays` input),
+      `adapters/pg/settings-repo.js`, `application/settings.js`, `adapters/http/settings-routes.js`
+      (`GET`/`PUT /api/settings/alerts`), `state-repo.js` (`settings`), `application/read.js`
+      (`getExistencia`, threshold passed to the alerts), `application/alerts.js` (resolve uses the
+      same threshold), `read-routes.js` (`GET /api/existencia`). No migration (the `app_settings`
+      table already exists; no row = default 14). Test-first: `unit/existencia.test.js` (6) RED
+      (missing module) then GREEN; `integration/existencia-api.test.js` (7) RED (7 failures: no
+      routes, no alert) then GREEN; one wrong expectation in the test itself fixed (error code is
+      in `error`, not `code`).
+- [x] E8.T2 Frontend: Existencia screen (filters, sticky matrix, marks, totals), Excel export,
+      print stylesheet, days-since in sheets/plantillas, threshold setting in Administración,
+      alert rendering; design guide, classes in `v3.css`.
+      Commit `6f68b20`. Route: delegated writer. Code: `state/existencia.js` (pure mirror of the
+      server rules with the Buenos Aires date, labels/tones, `existenciaSheet` rows + legend),
+      `features/existencia/view.js` (`#existencia`: plantilla select, "Incluir cajas" / "Solo con
+      herramientas" chips, KPIs, matrix in `#exiwrap` with sticky header and first column, C/F marks
+      with letter + number + color, row/column/grand totals and pañol stock, legend; Excel via the
+      self-hosted xlsx; "Imprimir" with `body.print-exi` + `@media print` A4 landscape, repeated
+      header, black and white), `ui/components.js` (`ageChip`, alert icon/"Controlar" for
+      `sin_control`), tech/caja sheets and plantilla member cards (`ageChip`), Administración ›
+      Configuración card "Alerta de días sin control" (If-Match, 0–365), Alertas KPI "Sin control",
+      nav + Más entry, `IC.grid`/`IC.print`, `.exi*`/`.ctlage`/`.cfg*` in `v3.css`.
+      Test-first: `web/test/existencia.test.js` (5) RED (missing module) then GREEN.
+- [x] E8.T3 E2E: matrix values after entregas and a control with recambio/faltante, plantilla
+      filter, export file produced, print view renders, days-since and the alert crossing a
+      threshold changed in Administración, 390 px without page overflow.
+      Commit `bdf6492`. Route: delegated writer. New `t15-existencia` (3): matrix cells/marks/totals
+      (recambio not missing, unit-tracked tool, caja column, pañol stock) and API parity; plantilla
+      filter, cajas and "solo con herramientas" toggles; xlsx file (zip, >2 KB); print (window.print
+      called, print media hides the chrome, company header, repeated thead, black marks, legend);
+      alert at the default 14 days for a tech whose first entrega was backdated 20 days, gone at 30
+      and back at 10 set in Administración, out-of-range refused; days in tech/caja sheets and the
+      plantilla member card; 390 px without page overflow, matrix scrolls in its box with sticky
+      header/first column; gerencia opens it (403 on the threshold), responsable sees the value
+      read-only. `existencia` added to E2E `ROUTES`. Written with the code (passed on its first run).
+- [x] E8.V1 Review fixes. Route: delegated writer (one bounded writer, server + web + tests + doc).
+      Commit `9a8e1b4`. Shared fixture `server/test/fixtures/existencia.js`
+      (`fixture`, `reviewFixture`) used by the server unit test and the web parity test.
+      (1) Overdue = alert rule (no active assignments -> never overdue, tone `idle`, days shown):
+      `holderOverdue`, holders carry `active`/`overdue`, KPI/header/`ageChip` use it. RED: server
+      unit (no `overdue`/`active`), web unit (`ageTone` 'ok'/'bad' for Dora) -> GREEN.
+      (2) Web control date falls back to the start of its week (Buenos Aires midnight) like the
+      server; parity test runs both builders on the same fixtures (2 fixtures x 3 filters x 2
+      thresholds, deepEqual). RED: web parity + "sin fecha de finalización" -> GREEN.
+      (3) Tools filtered on archived only, `inactive` row flag, "(inactiva)" label (screen + Excel).
+      RED: server + web -> GREEN. (4) Unit codes per cell (`codes`): cell `title` + hidden text, Excel
+      cell `n (C · F) [TAL-1, TAL-2]`, legend lines. RED: server + web -> GREEN; E2E t15 updated
+      (cell text, title, API `codes`). (5) Doc notes (implementation notes, E8.V1). (6) Tests: resolved
+      `…-nunca` after a later first delivery stays hidden until a control (unit; passes on the old
+      code: documents existing behaviour); `/api/existencia?cajas=0&withTools=1` overdue holders =
+      tech `sin_control` alerts (integration; RED on the pre-fix server code, 1 failure -> GREEN).
+
+## Stage 8 implementation notes
+- API: `GET /api/existencia?plantilla=<id>&cajas=0|1&withTools=0|1` (any session, like
+  `/api/reports`) -> {now, controlOverdueDays, filters, holders [{key, kind, id, name, legajo,
+  especialidad, plantillaId, lastControlId, lastControlAt, never, from, days, total, cambio,
+  faltante}], rows [{toolId, n, name, categoryId, cells {holderKey: {qty, cambio, faltante}},
+  total, cambio, faltante, disponible}], totals}. `GET /api/settings/alerts` (any session) and
+  `PUT` {controlOverdueDays} + If-Match (409 stale, 422 `invalid_setting` outside 0–365, 400 non
+  integer); audit `alert_settings`. `/api/state` adds `settings: {controlOverdueDays}`.
+- "Last control" = the holder's latest effective control (highest period, then finish time — a
+  correction replaces its period); its date is `finishedAt`. "Days since" = local calendar days
+  (Buenos Aires) between that date and today; never controlled -> from the earliest `since` of
+  its active assignments; no assignments and no control -> null ("Sin controles").
+- Cell marks: `asgUnits(item of the latest control, qty)` per active assignment (same rule as the
+  reports: if the assigned qty changed since the control, the item state applies to all units);
+  an assignment delivered after that control has no marks. Unit-tracked tools add one per unit.
+- Writer decisions (consistent with stages 1–7): (1) the threshold is edited with
+  `plantillas_edit` (the permission of the existing Administración › Configuración setting, admin
+  by default) — there is no separate settings permission; (2) "Incluir cajas" adds every active
+  caja regardless of the plantilla filter (cajas belong to líneas, not plantillas), on by default;
+  (3) tools have no code field, so rows show their position in the custom order (N°) and name;
+  (4) holders: active techs by name, then active cajas by name; (5) the alert is `sin_control`,
+  sev 2, key `sinctl-<holderKey>-<lastControlId|nunca>`, title "Sin control hace N días", only for
+  active holders with active assignments and days > threshold; (6) the print stylesheet is
+  scoped to `body.print-exi` (set by "Imprimir", removed on `afterprint`); `@page` A4 landscape
+  applies to any print (stage 10 may refine it).
+- `.txt` v2 unaffected (`app_settings` is not exported). No new migration.
+- E8.V1 review notes: (a) a resolved `sin_control` alert stays hidden until a new effective
+  control changes its key, consistent with the key-based resolution model (accepted by the
+  parent); for a never-controlled holder the key is `…-nunca`, so a resolution also covers a later
+  new first delivery until the first control (pinned in `unit/existencia.test.js`). (b) Stage 10:
+  `@page{size:A4 landscape}` is global today; stage 10 must scope print page settings (named
+  `@page` / per print class) and handle Ctrl+P outside the print buttons. (c) Unit codes: kept in
+  the cell (`codes`), shown as the cell `title` + hidden text on screen and as `[TAL-1, TAL-2]`
+  after the quantity/marks in the Excel cell (no extra columns, the matrix stays readable).
+  (d) Tools filter on archived only; `inactive` marks the row. (e) The control date falls back to
+  the start of its week when `finishedAt` is missing on both sides; holders carry `active`
+  (active assignments, any tool) and `overdue` (builder option `threshold`).
+
+## Stage 8 verification (local, sequential, delegated writer)
+- On `bdf6492` (all three work units): `npm test` 229/229; `npm run test:db` 251/251 (542 s;
+  also 251/251 on `53eef77`, 551 s); `npm run build` ok; `PANOL_E2E_BUILD=1 npm run test:e2e`
+  67 passed, 1 failed: `t9-plantillas` "every route … without overflow" — `#existencia overflows
+  at 1280: 1320 > 1280` with the demo data (the visually hidden `.exi-sr` labels, absolutely
+  positioned without a positioned ancestor inside the scroll box, escaped it). Fixed in
+  `2998411` (`fix(web): keep hidden matrix labels inside the scroll box`: `.exiwrap` is
+  `position:relative`); that spec alone then passed.
+- On `2998411` (CSS-only change after the `test:db` run): `npm test` 229/229; `npm run build` ok;
+  `PANOL_E2E_BUILD=1 npm run test:e2e` 68 passed, 0 failed, 0 skipped (538 s).
+- Commits: `53eef77` (server), `6f68b20` (web), `bdf6492` (E2E), `2998411` (fix), then this doc
+  commit. Not pushed.
+- E8.V1 (`9a8e1b4`, review fixes): `npm test` 238/238; `npm run test:db` 252/252 (579 s, on the
+  commit); `npm run build` ok; `PANOL_E2E_BUILD=1 npm run test:e2e` 68 passed, 0 failed, 0 skipped
+  (562 s; first runs failed only in `t15-existencia`, whose cell text and API cell assertions
+  predated the unit `codes` — spec updated). Not pushed.
+
+## Next step
+- Stage 8: independent review, CI and PR #8 → `v3/etapa-7-gerencia`.
+- PRs #1–#7 await user review (stacked: #1 → `v3-servidor`, each next PR → the previous stage). Engram mirror of this document: pending (multiple active
   sessions). PR #1 awaits user review; after it is merged, rebase stage 2 onto `v3-servidor`.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);

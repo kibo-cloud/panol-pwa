@@ -4,7 +4,8 @@ import { esc } from './dom.js';
 import { icon } from './icons.js';
 import { ST, MSHORT } from '../state/constants.js';
 import { CLEAN, qtyText } from '../state/conteo.js';
-import { S, derive, can, who, toolName, holderName } from '../state/store.js';
+import { S, derive, can, who, toolName, holderName, overdueDays } from '../state/store.js';
+import { holderAge, ageLabel, ageTone, localDay } from '../state/existencia.js';
 import { holderKey } from '../state/plantillas.js';
 import { linkableMv } from '../state/novedades.js';
 import { alertPurchase } from '../state/compras.js';
@@ -78,9 +79,19 @@ export function mvRow(m, { plain = false } = {}) {
   return `<div class="row mvrow ${voidedBy ? 'voided' : ''}" data-mv="${esc(m.id || '')}"><span class="tag ${tg[1]}">${esc(tg[0])}</span><div class="grow"><div class="t">${esc(title)}</div><div class="s">${esc(meta)}</div>${voidOf}${m.reason || m.notes ? `<div class="s">${m.type === 'anulacion' ? 'Motivo: ' : ''}${esc([m.reason, m.notes].filter(Boolean).join('. '))}</div>` : ''}</div>${mark || voidBtn || novBtn || demoChip(m) ? `<span class="mvacts">${mark}${demoChip(m)}${novBtn}${voidBtn}</span>` : ''}</div>`;
 }
 export const mvList = (l) => (l.length ? `<div class="list">${l.map(mvRow).join('')}</div>` : `<div class="list">${emptyBox('Sin movimientos registrados', 'Las entregas, devoluciones y reposiciones aparecen acá.')}</div>`);
-const AL_IC = { faltante: 'x', cambio: 'wrench', consecutiva: 'alert', devolucion: 'swap', pendiente: 'clock', limpieza: 'clean' };
+const AL_IC = { faltante: 'x', cambio: 'wrench', consecutiva: 'alert', devolucion: 'swap', pendiente: 'clock', limpieza: 'clean', sin_control: 'cal' };
+// Etapa 8: días desde el último control efectivo de un poseedor (`<techId>` o `caja:<id>`), con
+// el tono según el umbral de la alerta (vencido en rojo, nunca controlado en gris; sin
+// herramientas activas nunca está vencido: los días se muestran en gris, como la alerta).
+const AGE_IC = { ok: 'ok', pend: 'clock', bad: 'cal', idle: 'clock' };
+export function ageChip(hk) {
+  const a = holderAge(derive(), hk, new Date()); const thr = overdueDays(); const tone = ageTone(a, thr);
+  const when = a.never ? '' : ` (${localDay(a.lastControlAt)})`;
+  return `<div class="ctlage" data-age="${esc(hk)}"><span class="chip ${tone === 'idle' ? 'pend' : tone}">${icon(AGE_IC[tone], 12)}${esc(ageLabel(a) + when)}${tone === 'bad' ? ` · más de ${thr} días` : ''}</span></div>`;
+}
 function alertAction(a) {
   if (a.type === 'limpieza' && a.controlId) return `<a class="btn sm" href="#controlver-${esc(a.controlId)}">Ver control</a>`;
+  if (a.type === 'sin_control' && can('controls_do')) return `<a class="btn sm" href="#control-${esc(holderKey(a))}">Controlar</a>`;
   if (a.type === 'pendiente' && can('controls_do')) return `<a class="btn sm" href="${esc(a.href)}">Controlar</a>`;
   if ((a.type === 'cambio' || a.type === 'consecutiva' || a.type === 'faltante') && can('movements_do')) return `<button class="btn sm" data-act="goRepo" data-t="${esc(holderKey(a))}" data-a="${esc(a.asgId)}">Registrar reposición</button>`;
   if (a.type === 'devolucion' && can('movements_do')) return `<button class="btn sm" data-act="recvPending" data-m="${esc(a.movId)}">Recibir devolución</button>`;

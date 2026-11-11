@@ -53,6 +53,9 @@ export const api = {
   moveSelected: (id, body, o) => http.post(`/api/plantillas/${enc(id)}/move-selected`, body, idem(o)),
   shiftLabels: () => http.get('/api/settings/shift-labels'),
   setShiftLabels: (labels, version) => http.put('/api/settings/shift-labels', { labels }, { version }),
+  // Etapa 8: umbral de la alerta "Sin control hace N días".
+  alertSettings: () => http.get('/api/settings/alerts'),
+  setAlertSettings: (controlOverdueDays, version) => http.put('/api/settings/alerts', { controlOverdueDays }, { version }),
 
   // líneas, sectores y cajas (etapa 2)
   createLinea: (body) => http.post('/api/lineas', body),

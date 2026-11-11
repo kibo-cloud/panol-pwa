@@ -8,7 +8,7 @@ import { VIEWS, UI, render } from '../../ui/registry.js';
 import { ACT, IN, CH } from '../../ui/actions.js';
 import { openModal, modalRerender, MOD } from '../../ui/modal.js';
 import { toast, act, UErr } from '../../ui/feedback.js';
-import { kpi, pageHead, emptyBox, avatar, demoChip, ctlBadge, sbar, cnts, plIcon, field, turnoText } from '../../ui/components.js';
+import { kpi, pageHead, emptyBox, avatar, demoChip, ctlBadge, sbar, cnts, plIcon, field, turnoText, ageChip } from '../../ui/components.js';
 import { api } from '../../api/index.js';
 import { S, derive, can, who, refresh, canRotate, plantillaName } from '../../state/store.js';
 import { plabel, fdate, todayISO } from '../../state/period.js';
@@ -43,7 +43,7 @@ function memberCard(t, sel, selectable) {
   const cov = coverageOf((S.plantillaHistory || {})[t.id] || [], todayISO());
   const covChip = cov && cov.started ? `<span class="chip warn">${icon('clock', 12)}Cobertura hasta el ${esc(fdate(cov.until))}</span>` : '';
   const box = selectable ? `<label class="selbox"><input id="sel-${esc(t.id)}" type="checkbox" data-ch="plSel" value="${esc(t.id)}" ${on ? 'checked' : ''} aria-label="Seleccionar a ${esc(t.name)}"></label>` : '';
-  return `<div class="card tc ${on ? 'sel' : ''}"><div class="tc-row">${box}<a class="tc-h grow" href="#tecnico-${esc(t.id)}">${avatar(t.name, i.light, true)}<span class="grow"><span class="t">${esc(t.name)} ${demoChip(t)}</span><span class="s" data-css="display:block">Leg. ${esc(t.legajo)} · ${i.total} herramientas</span></span>${ctlBadge(i.curStatus)}</a></div>${covChip ? `<div>${covChip}</div>` : ''}<div class="tc-b">${sbar(i)}${cnts(i)}</div>${can('controls_do') && i.lines && i.curStatus !== 'done' ? `<a class="btn ${i.curStatus === 'draft' ? '' : 'pri'} block" href="#control-${esc(t.id)}">${icon('check', 16)}${i.curStatus === 'draft' ? 'Continuar control' : 'Controlar'}</a>` : ''}</div>`;
+  return `<div class="card tc ${on ? 'sel' : ''}"><div class="tc-row">${box}<a class="tc-h grow" href="#tecnico-${esc(t.id)}">${avatar(t.name, i.light, true)}<span class="grow"><span class="t">${esc(t.name)} ${demoChip(t)}</span><span class="s" data-css="display:block">Leg. ${esc(t.legajo)} · ${i.total} herramientas</span></span>${ctlBadge(i.curStatus)}</a></div>${covChip ? `<div>${covChip}</div>` : ''}${ageChip(t.id)}<div class="tc-b">${sbar(i)}${cnts(i)}</div>${can('controls_do') && i.lines && i.curStatus !== 'done' ? `<a class="btn ${i.curStatus === 'draft' ? '' : 'pri'} block" href="#control-${esc(t.id)}">${icon('check', 16)}${i.curStatus === 'draft' ? 'Continuar control' : 'Controlar'}</a>` : ''}</div>`;
 }
 
 function historyCard(title, rows, empty) {
