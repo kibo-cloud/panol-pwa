@@ -264,3 +264,50 @@ describe('nota de faltante', () => {
     assert.deepEqual(it.map((x) => [x.note, x.qty_missing, x.qty_expected]), [[MISSING_NOTE, 1, 2]]);
   });
 });
+
+// E9.V1: hallazgos de la revisión de la etapa 9.
+describe('E9.V1', () => {
+  test('dos bloques el mismo día con más de 60 herramientas y una devolución de lo entregado en el primero', async () => {
+    const tools = Array.from({ length: 65 }, (_, i) => `Pieza ${String(i).padStart(2, '0')}`);
+    const first = Object.fromEntries(tools.map((t) => [t, { e: 1, c: 1 }]));
+    const second = Object.fromEntries(tools.map((t, i) => [t, i === 0 ? { d: 1, c: 0 } : { c: 1 }]));
+    const buf = buildWorkbook({ tools, techs: [{ legajo: 9501, name: 'Hugo Inventado' }], sheets: { 9501: { blocks: [{ date: '2025-10-08', cells: second }, { date: '2025-10-08', cells: first }] } } });
+    const p = (await preview('admin', buf)).json();
+    const r = await confirm('admin', buf, { token: p.token });
+    assert.equal(r.statusCode, 200, r.body);
+    const ctls = await api.q("SELECT c.id, c.correction, (SELECT count(*)::int FROM control_items ci WHERE ci.control_id = c.id) AS n FROM controls c WHERE c.import_batch_id = $1 ORDER BY c.finished_at", [r.json().batch.id]);
+    assert.deepEqual(ctls.map((c) => [c.correction, c.n]), [[false, 65], [true, 64]]);
+    assert.equal(await count('movements', "import_batch_id = $1 AND type = 'devolucion'", [r.json().batch.id]), 1);
+  });
+  test('conteo vacío probable: el ítem queda sin dato en ese control (sin faltante ni nota)', async () => {
+    const buf = buildWorkbook({ tools: ['Sierra Sable', 'Taladro'], techs: [{ legajo: 9502, name: 'Iris Inventada' }], sheets: { 9502: { blocks: [
+      { date: '2025-10-15', cells: { 'Sierra Sable': { c: 1 }, Taladro: { c: 1 } } },
+      { date: '2025-10-08', cells: { 'Sierra Sable': { c: 0 }, Taladro: { c: 1 } } },
+      { date: '2025-10-01', cells: { 'Sierra Sable': { e: 1, c: 1 }, Taladro: { e: 1, c: 1 } } },
+    ] } } });
+    const p = (await preview('admin', buf)).json();
+    assert.equal(p.caseCounts.conteo_vacio_probable, 1);
+    assert.equal(p.caseCounts.faltante, undefined);
+    const r = await confirm('admin', buf, { token: p.token });
+    assert.equal(r.statusCode, 200, r.body);
+    const its = await api.q("SELECT c.period_w, ci.tool_name, ci.qty_missing FROM control_items ci JOIN controls c ON c.id = ci.control_id WHERE c.import_batch_id = $1 ORDER BY c.finished_at, ci.tool_name", [r.json().batch.id]);
+    assert.deepEqual(its.map((i) => [i.period_w, i.tool_name, i.qty_missing]), [[1, 'Sierra Sable', 0], [1, 'Taladro', 0], [2, 'Taladro', 0], [3, 'Sierra Sable', 0], [3, 'Taladro', 0]]);
+  });
+  test('una sola importación a la vez: la segunda vista previa simultánea responde import_busy', async () => {
+    const buf = buildWorkbook(sampleSpec());
+    const rs = await Promise.all([preview('admin', buf), preview('admin', buf)]);
+    assert.deepEqual(rs.map((r) => r.statusCode).sort(), [200, 409]);
+    assert.equal(rs.find((r) => r.statusCode === 409).json().error, 'import_busy');
+    assert.equal((await preview('admin', buf)).statusCode, 200);
+  });
+  test('sin kit base en el servidor, se crea con BLANCO', async () => {
+    await api.q('DELETE FROM kits WHERE especialidad_id IS NULL');
+    const buf = buildWorkbook({ tools: ['Escuadra', 'Nivel Láser'], techs: [{ legajo: 9503, name: 'Juan Inventado' }], sheets: { 9503: { blocks: [{ date: '2025-10-01', cells: { Escuadra: { e: 1, c: 1 } } }] } } });
+    const p = (await preview('admin', buf)).json();
+    assert.match(p.cases.find((c) => c.type === 'kit_base').message, /Se crea el kit base/);
+    const r = await confirm('admin', buf, { token: p.token });
+    assert.equal(r.statusCode, 200, r.body);
+    const kit = await api.q('SELECT t.name FROM kit_items ki JOIN kits k ON k.id = ki.kit_id JOIN tools t ON t.id = ki.tool_id WHERE k.especialidad_id IS NULL ORDER BY ki.sort_order');
+    assert.deepEqual(kit.map((k) => k.name), ['Escuadra', 'Nivel Láser']);
+  });
+});

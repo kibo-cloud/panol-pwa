@@ -11,7 +11,8 @@ export class ZipError extends Error {
   }
 }
 
-export const ZIP_LIMITS = Object.freeze({ entries: 5000, entryBytes: 64 * 1024 * 1024, totalBytes: 256 * 1024 * 1024 });
+// Cada parte XML descomprimida, hasta 16 MB (E9.V1); el total leído, hasta 128 MB.
+export const ZIP_LIMITS = Object.freeze({ entries: 5000, entryBytes: 16 * 1024 * 1024, totalBytes: 128 * 1024 * 1024 });
 
 const SIG_EOCD = 0x06054b50;
 const SIG_CEN = 0x02014b50;
@@ -38,8 +39,9 @@ export function openZip(buf, limits = ZIP_LIMITS) {
   if (offset + size > buf.length) throw new ZipError('El archivo está dañado: el índice apunta fuera del archivo.');
   const entries = new Map();
   let p = offset;
+  const cenEnd = offset + size;
   for (let i = 0; i < count; i++) {
-    if (p + 46 > buf.length || buf.readUInt32LE(p) !== SIG_CEN) throw new ZipError('El archivo está dañado: índice incompleto.');
+    if (p + 46 > cenEnd || buf.readUInt32LE(p) !== SIG_CEN) throw new ZipError('El archivo está dañado: índice incompleto.');
     const flags = buf.readUInt16LE(p + 8);
     const method = buf.readUInt16LE(p + 10);
     const csize = buf.readUInt32LE(p + 20);
@@ -48,6 +50,8 @@ export function openZip(buf, limits = ZIP_LIMITS) {
     const xlen = buf.readUInt16LE(p + 30);
     const clen = buf.readUInt16LE(p + 32);
     const local = buf.readUInt32LE(p + 42);
+    if (p + 46 + nlen + xlen + clen > cenEnd) throw new ZipError('El archivo está dañado: índice incompleto.');
+    if (csize === 0xffffffff || usize === 0xffffffff || local === 0xffffffff) throw new ZipError('El formato del archivo no es compatible (ZIP64).');
     const name = buf.toString(flags & 0x800 ? 'utf8' : 'latin1', p + 46, p + 46 + nlen);
     if (!entries.has(name)) entries.set(name, { flags, method, csize, usize, local });
     p += 46 + nlen + xlen + clen;

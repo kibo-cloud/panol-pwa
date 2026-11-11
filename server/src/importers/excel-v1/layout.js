@@ -13,7 +13,12 @@
 //   (una columna por técnico desde E); debajo, HERRAMIENTAS y la lista de herramientas.
 // - NOVEDADES: rótulos FECHA, HORA, LEGAJO, COMENTARIO y una novedad por fila.
 
+import { WorkbookError } from './workbook.js';
+
 export const KNOWN_SHEETS = ['RESUMEN', 'BLANCO', 'NOVEDADES', 'CRONOGRAMA'];
+// Límites (E9.V1): bloques y filas de herramientas por hoja, y bloques × herramientas en todo el
+// libro (lo que recorre el plan), para que ningún archivo dispare el trabajo.
+export const LAYOUT_LIMITS = Object.freeze({ blocks: 2000, tools: 2000, blockCells: 1_000_000 });
 const MAX_SCAN = 40;
 
 // Texto comparable: sin tildes, mayúsculas, espacios simples.
@@ -35,7 +40,7 @@ function findRow(sh, test, from = 0, to = MAX_SCAN) {
 
 // Hoja con el diseño de legajo (o BLANCO): { header, dateRow, tools: [{ row, name }], blocks:
 // [{ col, date, rows: { [row]: { e, d, c } } }] } o null si no tiene ese diseño.
-export function parseLegajoSheet(sh) {
+export function parseLegajoSheet(sh, limits = LAYOUT_LIMITS, budget = { n: 0 }) {
   const header = findRow(sh, (r) => norm(sh.get(r, 2)) === 'ENTREGA' && norm(sh.get(r, 3)).startsWith('DEVOLUCI') && norm(sh.get(r, 4)) === 'CONTEO');
   if (header < 1) return null;
   const tools = [];
@@ -44,15 +49,23 @@ export function parseLegajoSheet(sh) {
     const name = clean(v);
     if (!name || norm(name).startsWith('TOTAL')) continue;
     tools.push({ row: r, name });
+    if (tools.length > limits.tools) throw new WorkbookError(`La hoja ${clean(sh.name)} tiene más de ${limits.tools} herramientas: no se puede importar.`);
   }
-  const blocks = [];
+  const cols = [];
   for (let c = 6; c <= sh.maxC; c++) {
     if (norm(sh.get(header, c)) !== 'ENTREGA' || !norm(sh.get(header, c + 1)).startsWith('DEVOLUCI') || norm(sh.get(header, c + 2)) !== 'CONTEO') continue;
+    cols.push(c);
+    if (cols.length > limits.blocks) throw new WorkbookError(`La hoja ${clean(sh.name)} tiene más de ${limits.blocks} bloques de control: no se puede importar.`);
+    c += 2;
+  }
+  budget.n += cols.length * tools.length;
+  if (budget.n > limits.blockCells) throw new WorkbookError('El libro tiene demasiados bloques de control para importarlo de una vez (bloques × herramientas). Dividilo en partes.');
+  const blocks = [];
+  for (const c of cols) {
     const date = [c, c + 1, c + 2].map((x) => sh.get(header - 1, x)).find((x) => x !== null) ?? null;
     const rows = {};
     for (const t of tools) rows[t.row] = { e: sh.get(t.row, c), d: sh.get(t.row, c + 1), c: sh.get(t.row, c + 2) };
     blocks.push({ col: c, date, rows });
-    c += 2;
   }
   return { header, dateRow: header - 1, tools, blocks };
 }
@@ -99,11 +112,13 @@ export function parseNovedades(sh) {
 }
 
 // Libro completo -> estructura del Excel de herramientas.
-export function parseBook(wb) {
+export function parseBook(wb, limits = {}) {
+  const lim = { ...LAYOUT_LIMITS, ...limits };
+  const budget = { n: 0 };
   const byName = new Map(wb.sheets.map((s) => [norm(s.name), s]));
   const res = byName.get('RESUMEN') ? parseResumen(byName.get('RESUMEN')) : null;
   const blancoSheet = byName.get('BLANCO');
-  const blanco = blancoSheet ? parseLegajoSheet(blancoSheet) : null;
+  const blanco = blancoSheet ? parseLegajoSheet(blancoSheet, lim, budget) : null;
   const nov = byName.get('NOVEDADES') ? parseNovedades(byName.get('NOVEDADES')) : null;
   const resLegajos = new Set((res ? res.techs : []).map((t) => norm(t.legajo)));
   const legajoSheets = [];
@@ -112,7 +127,7 @@ export function parseBook(wb) {
     const n = norm(s.name);
     if (KNOWN_SHEETS.includes(n)) continue;
     if (!/^\d+$/.test(n) && !resLegajos.has(n)) { ignored.push(clean(s.name)); continue; }
-    legajoSheets.push({ name: clean(s.name), legajo: clean(s.name), layout: parseLegajoSheet(s) });
+    legajoSheets.push({ name: clean(s.name), legajo: clean(s.name), layout: parseLegajoSheet(s, lim, budget) });
   }
   return {
     date1904: !!wb.date1904,

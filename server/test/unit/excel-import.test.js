@@ -277,3 +277,109 @@ describe('plan: novedades, decisiones y estabilidad', () => {
     assert.deepEqual(p.totals, { techsCreate: 3, techsAttach: 0, toolsCreate: 5, toolsMatched: 0, kitItems: 5, controls: 5, corrections: 1, entregas: 4, ajustes: 1, reposiciones: 0, devoluciones: 1, bajas: 0, ingresos: 4, novedades: 2 });
   });
 });
+
+// E9.V1: hallazgos de la revisión de la etapa 9.
+describe('E9.V1: orden, límites, conteos vacíos y casos menores', () => {
+  const TOOLS70 = Array.from({ length: 70 }, (_, i) => `Herramienta ${String(i).padStart(2, '0')}`);
+  test('dos bloques el mismo día con más de 60 herramientas: cada bloque entero, en orden, sin pisarse', () => {
+    const first = Object.fromEntries(TOOLS70.map((t) => [t, { e: 1, c: 1 }]));
+    const second = Object.fromEntries(TOOLS70.map((t, i) => [t, i === 0 ? { d: 1, c: 0 } : { c: 1 }]));
+    // El bloque nuevo a la izquierda (el + del Excel), los dos el mismo día.
+    const p = plan(one(TOOLS70, [{ date: '2025-10-08', cells: second }, { date: '2025-10-08', cells: first }]));
+    assert.deepEqual(p.errors, []);
+    const mine = p.ops.filter((o) => o.legajo === 'l0' && o.kind !== 'tech');
+    const kinds = mine.map((o) => o.kind);
+    const c0 = kinds.indexOf('control');
+    assert.deepEqual(kinds.slice(0, c0), Array(70).fill('entrega'));
+    assert.deepEqual(kinds.slice(c0 + 1), ['devolucion', 'control']);
+    for (let i = 1; i < mine.length; i++) assert.ok(mine[i - 1].at < mine[i].at, `${i}: ${mine[i - 1].at} < ${mine[i].at}`);
+    assert.ok(mine.every((o) => o.at.startsWith('2025-10-08')));
+    const [k0, k1] = ops(p, 'control');
+    assert.equal(k0.items.length, 70);
+    assert.equal(k1.items.length, 69);
+    assert.equal(k1.correctionOf, k0.ref);
+    // La devolución es de la asignación abierta en el bloque anterior.
+    const dev = ops(p, 'devolucion')[0];
+    assert.equal(dev.slot, ops(p, 'entrega').find((o) => o.tool === dev.tool).slot);
+  });
+  test('ninguna fecha importada queda en el futuro (bloque y novedad de hoy)', () => {
+    const now = Date.parse('2025-11-30T12:30:00Z'); // 9:30 en Buenos Aires
+    const spec = one(['Alicate', 'Pinza'], [{ date: '2025-11-30', cells: { Alicate: { e: 1, c: 1 }, Pinza: { e: 2, c: 2 } } }], { novedades: [{ fecha: '2025-11-30', hora: 0.95, legajo: 1, comentario: 'Hoy tarde' }] });
+    const p = planExcelImport(readExcelBook(buildWorkbook(spec)), EMPTY, { today: '2025-11-30', now });
+    const timedOps = p.ops.filter((o) => o.at);
+    assert.ok(timedOps.length >= 5);
+    for (const o of timedOps) assert.ok(Date.parse(o.at) <= now, `${o.kind} ${o.at}`);
+    const mine = p.ops.filter((o) => o.legajo === 'l0' && o.kind !== 'novedad' && o.at);
+    for (let i = 1; i < mine.length; i++) assert.ok(mine[i - 1].at < mine[i].at);
+  });
+  test('límites: bloques y herramientas por hoja y bloques × herramientas en total', () => {
+    const many = Array.from({ length: 2001 }, (_, i) => ({ date: '2025-10-01', cells: i ? {} : { Alicate: { e: 1, c: 1 } } }));
+    assert.throws(() => readExcelBook(buildWorkbook(one(['Alicate'], many))), (e) => e instanceof WorkbookError && /bloques/.test(e.message));
+    const tools = Array.from({ length: 2001 }, (_, i) => `H${i}`);
+    assert.throws(() => readExcelBook(buildWorkbook(one(tools, [{ date: '2025-10-01', cells: { H0: { e: 1, c: 1 } } }]))), (e) => e instanceof WorkbookError && /herramientas/.test(e.message));
+    const wb = readWorkbook(buildWorkbook(one(['Alicate', 'Pinza'], [{ date: '2025-10-01', cells: {} }, { date: '2025-10-08', cells: {} }])));
+    assert.throws(() => parseBook(wb, { blockCells: 3 }), /demasiados bloques/);
+    assert.ok(parseBook(wb, { blockCells: 4 }));
+  });
+  test('kit base: si el servidor no tiene, se crea con BLANCO', () => {
+    const p = plan(sampleSpec(), { ...EMPTY, baseKit: null });
+    const c = caseOf(p, 'kit_base')[0];
+    assert.equal(c.decision, 'accept');
+    assert.match(c.message, /Se crea el kit base/);
+    const [k] = ops(p, 'kit');
+    assert.equal(k.kitId, null);
+    assert.equal(k.items.length, 5);
+  });
+  test('DEVOLUCIÓN igual a un conteo previo x,5: solo la de recambio va a baja; las buenas vuelven a disponible', () => {
+    const p = plan(one(['Llave'], [
+      { date: '2025-10-15', cells: { Llave: { d: 1.5, c: 0 } } },
+      { date: '2025-10-08', cells: { Llave: { c: 1.5 } } },
+      { date: '2025-10-01', cells: { Llave: { e: 2, c: 2 } } },
+    ]));
+    assert.deepEqual(ops(p, 'devolucion').map((o) => [o.cond, o.qty]), [['baja', 1], ['disponible', 1]]);
+    assert.equal(p.totals.bajas, 1);
+    assert.equal(p.totals.devoluciones, 1);
+    assert.match(caseOf(p, 'devolucion')[0].message, /baja de 1 unidad.*disponible de 1 unidad/);
+  });
+  test('conteo vacío probable: 0 que se vuelve a contar después sin entrega en el medio queda sin dato', () => {
+    const spec = one(['Alicate', 'Pinza', 'Martillo', 'Llave'], [
+      { date: '2025-10-15', cells: { Alicate: { c: 1 }, Pinza: { e: 1, c: 1 }, Llave: { c: 1 } } },
+      { date: '2025-10-08', cells: { Alicate: { c: 0 }, Pinza: { c: 0 }, Martillo: { c: 0 }, Llave: { c: 1 } } },
+      { date: '2025-10-01', cells: { Alicate: { e: 1, c: 1 }, Pinza: { e: 1, c: 1 }, Martillo: { e: 1, c: 1 }, Llave: { e: 2, c: 2 } } },
+    ]);
+    let p = plan(spec);
+    const vac = caseOf(p, 'conteo_vacio_probable');
+    // Alicate (0 y después 1, sin entrega en el medio). Llave (1 de 2 y después 1: no sube) no.
+    assert.deepEqual(vac.map((c) => [c.tool, c.decision, c.skippable]), [['Alicate', 'skip', true]]);
+    // Pinza (entrega en el medio) y Martillo (no se vuelve a contar) siguen siendo faltantes.
+    assert.deepEqual(caseOf(p, 'faltante').map((c) => [c.tool, c.date]).sort(), [['Llave', '2025-10-08'], ['Llave', '2025-10-15'], ['Martillo', '2025-10-08'], ['Martillo', '2025-10-15'], ['Pinza', '2025-10-08']]);
+    const ctl = ops(p, 'control')[1];
+    assert.equal(ctl.day, '2025-10-08');
+    assert.deepEqual(itemOf(p, ctl, 'Alicate'), []);
+    // Importado como faltante (decisión por caso), sin un caso de faltante aparte.
+    p = plan(spec, EMPTY, { decisions: { [vac[0].id]: 'accept' } });
+    assert.deepEqual(itemOf(p, ops(p, 'control')[1], 'Alicate').map((i) => [i.missing, i.expected]), [[1, 1]]);
+    assert.equal(caseOf(p, 'faltante').filter((c) => c.tool === 'Alicate').length, 0);
+  });
+  test('conteo vacío probable también para un conteo menor que lo asignado que después sube', () => {
+    const p = plan(one(['Llave', 'Pinza'], [
+      { date: '2025-10-15', cells: { Llave: { c: 3 }, Pinza: { c: 1 } } },
+      { date: '2025-10-08', cells: { Llave: { c: 1 }, Pinza: { c: 1 } } },
+      { date: '2025-10-01', cells: { Llave: { e: 3, c: 3 }, Pinza: { e: 1, c: 1 } } },
+    ]));
+    assert.deepEqual(caseOf(p, 'conteo_vacio_probable').map((c) => [c.tool, c.date]), [['Llave', '2025-10-08']]);
+    assert.equal(caseOf(p, 'faltante').length, 0);
+  });
+  test('la pantalla conoce todos los tipos de caso, en el mismo orden', async () => {
+    const { CASE_INFO } = await import('../../../web/src/state/excelimport.js');
+    const { CASE_TYPES } = await import('../../src/importers/excel-v1/plan.js');
+    assert.deepEqual(Object.keys(CASE_INFO), CASE_TYPES);
+  });
+  test('decisiones viejas: muchas no tardan', () => {
+    const decisions = Object.fromEntries(Array.from({ length: 20000 }, (_, i) => [`x:${i}`, 'skip']));
+    const t0 = performance.now();
+    const p = plan(sampleSpec(), EMPTY, { decisions });
+    assert.equal(p.staleDecisions.length, 20000);
+    assert.ok(performance.now() - t0 < 2000);
+  });
+});

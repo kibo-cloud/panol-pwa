@@ -16,18 +16,27 @@
 //   esa herramienta y repone lo asignado; si no, adicional) y después el conteo, que es un
 //   control finalizado en esa fecha: 1 = bueno, 0,5 = recambio (x,5 = x - 0,5 buenas y 1 para
 //   recambio), menos que lo asignado = faltante con nota "Conteo 0 en Excel"; vacío = 0.
+//   Cada bloque se aplica entero y en orden (devoluciones, entregas, control), en su propia
+//   ventana de tiempo de ese día; ninguna fecha queda después de "ahora".
+// - Conteo vacío probable (E9.V1): un conteo menor que lo asignado (sin recambio) que un bloque
+//   posterior de la hoja supera sin una ENTREGA de esa herramienta en el medio: por defecto queda
+//   "sin dato" (el ítem no entra en ese control, como uno no contado); se puede importar como
+//   faltante. Los demás conteos menores son faltantes.
 // - Conteo mayor que lo asignado (saldo positivo): entrega de ajuste marcada (un caso por
 //   técnico y herramienta; si se omite, el conteo se recorta a lo asignado).
-// - DEVOLUCIÓN 0,5 junto a un conteo x,5: se ignora. Igual al conteo previo: devolución (a baja
-//   si el conteo previo era un recambio x,5; si no, a disponible). Otro valor entero: caso dudoso,
-//   omitido salvo que se acepte (devolución a disponible).
+// - DEVOLUCIÓN 0,5 junto a un conteo x,5: se ignora. Igual al conteo previo: devolución a
+//   disponible; si el conteo previo era x,5, la unidad de recambio va a baja y las x − 0,5 buenas
+//   a disponible. Otro valor entero: caso dudoso, omitido salvo que se acepte (a disponible).
 // - Dos bloques en la misma semana (período de control): el último queda vigente como
 //   corrección del anterior, que queda como historial.
 // - NOVEDADES: fecha y hora de la hoja, técnico por legajo, autor = quien importa.
 import { norm, clean, legajoOf } from './layout.js';
 import { zonedDate, periodOf, pkeyOf, pad } from '../../domain/period.js';
+import { WorkbookError } from './workbook.js';
 
-export const PLAN_VERSION = 1;
+export const PLAN_VERSION = 2;
+// Trabajo máximo del plan (operaciones + ítems de control), contra libros armados para crecer.
+export const PLAN_LIMITS = Object.freeze({ work: 2_000_000 });
 const MAX_NAME = 120;
 const MAX_LEGAJO = 50;
 const MAX_COMMENT = 2000;
@@ -45,7 +54,7 @@ export const NOTES = {
 export const CASE_TYPES = [
   'conflicto', 'tecnico_nuevo', 'tecnico_existente', 'legajo_sin_resumen', 'legajo_repetido', 'legajo_invalido', 'especialidad_desconocida',
   'herramienta_nueva', 'herramienta_no_importable', 'kit_base',
-  'ajuste', 'faltante', 'recambio', 'devolucion', 'devolucion_dudosa', 'devolucion_05', 'reposicion', 'semana_duplicada',
+  'ajuste', 'faltante', 'conteo_vacio_probable', 'recambio', 'devolucion', 'devolucion_dudosa', 'devolucion_05', 'reposicion', 'semana_duplicada',
   'bloque_sin_fecha', 'fecha_invalida', 'bloque_vacio', 'hoja_sin_bloques', 'hoja_sin_formato', 'hoja_ignorada', 'valor_invalido',
   'novedad_sin_tecnico', 'novedad_invalida', 'novedad_recortada',
 ];
@@ -115,8 +124,10 @@ const units = (n) => `${n} ${n === 1 ? 'unidad' : 'unidades'}`;
 // book: parseBook(). server: { techs: [{ id, legajo, name, active, archived, hasHistory }],
 //   tools: [{ id, name, serialized, active, archived }], especialidades: [{ id, name, archived }],
 //   baseKit: { id, items: [{ toolId, qty }] } | null }.
-// opts: { decisions: { [caseId]: 'accept' | 'skip' }, today: 'AAAA-MM-DD' (fecha local) }.
-export function planExcelImport(book, server, { decisions = {}, today }) {
+// opts: { decisions: { [caseId]: 'accept' | 'skip' }, today: 'AAAA-MM-DD' (fecha local),
+//   now: instante (ms) que ninguna fecha importada supera }.
+export function planExcelImport(book, server, { decisions = {}, today, now = Date.now() }) {
+  const nowMs = typeof now === 'number' ? now : Date.parse(now);
   const cases = [];
   const errors = [];
   const caseIds = new Set();
@@ -257,25 +268,44 @@ export function planExcelImport(book, server, { decisions = {}, today }) {
     else ops.push({ kind: 'attach', legajo: L.ref, techId: L.techId });
   }
 
-  // Kit base = BLANCO.
+  // Kit base = BLANCO (si el servidor no tiene kit base, se crea).
   if (book.blanco) {
     const items = [];
     for (const n of book.blanco.tools) { const t = toolByKey.get(norm(clean(n).slice(0, MAX_NAME))); if (t && t.usable && !items.some((x) => x.tool === t.idx)) items.push({ tool: t.idx, qty: 1 }); }
     if (items.length) {
       const had = server.baseKit && server.baseKit.items ? server.baseKit.items.length : 0;
-      const c = addCase({
-        id: 'kit', type: 'kit_base', skippable: true, defaultDecision: had ? 'skip' : 'accept',
-        message: had ? `El kit base del servidor ya tiene ${had} herramientas: aceptá para reemplazarlo por las ${items.length} de BLANCO (1 de cada una).` : `El kit base queda con las ${items.length} herramientas de BLANCO (1 de cada una).`,
-      });
-      if (c.decision === 'accept' && server.baseKit) ops.push({ kind: 'kit', kitId: server.baseKit.id, items });
+      const message = !server.baseKit ? `Se crea el kit base con las ${items.length} herramientas de BLANCO (1 de cada una).`
+        : had ? `El kit base del servidor ya tiene ${had} herramientas: aceptá para reemplazarlo por las ${items.length} de BLANCO (1 de cada una).`
+          : `El kit base queda con las ${items.length} herramientas de BLANCO (1 de cada una).`;
+      const c = addCase({ id: 'kit', type: 'kit_base', skippable: true, defaultDecision: had ? 'skip' : 'accept', message });
+      if (c.decision === 'accept') ops.push({ kind: 'kit', kitId: server.baseKit ? server.baseKit.id : null, items });
     }
   }
 
-  // Línea de tiempo de cada hoja incluida.
-  const timed = [];
-  let seq = 0;
-  const push = (op) => timed.push({ ...op, seq: seq++ });
+  // Línea de tiempo de cada hoja incluida, en el orden del plan: bloque por bloque, primero las
+  // devoluciones, después las entregas y al final el control de ese bloque. Cada bloque tiene su
+  // propia ventana de tiempo dentro del día (de 8 a 20 h repartidas entre los bloques de ese
+  // día; hoy, hasta "ahora"), así que nunca se mezcla con otro bloque ni queda en el futuro.
+  const sheetOps = [];
   const firstDay = new Map();
+  const windows = new Map();
+  const dayWindow = (day) => {
+    if (!windows.has(day)) {
+      let ws = Date.parse(localIso(day, 8));
+      let we = Date.parse(localIso(day, 20));
+      if (we > nowMs) {
+        we = nowMs;
+        if (we <= ws) ws = Date.parse(localIso(day, 0));
+      }
+      windows.set(day, [ws, we]);
+    }
+    return windows.get(day);
+  };
+  let work = 0;
+  const spend = (n) => {
+    work += n;
+    if (work > PLAN_LIMITS.work) throw new WorkbookError('El libro genera demasiados movimientos y controles para importarlo de una vez. Dividilo en partes.', 'too_complex');
+  };
   for (const L of legajos) {
     if (!L.include || !L.sheet) continue;
     const lay = L.sheet.layout;
@@ -309,6 +339,47 @@ export function planExcelImport(book, server, { decisions = {}, today }) {
       continue;
     }
     firstDay.set(L.ref, blocks[0].day);
+    const perDay = new Map();
+    for (const b of blocks) perDay.set(b.day, (perDay.get(b.day) || 0) + 1);
+
+    // Valores de cada bloque y herramienta importable (un valor inválido es un caso y vale vacío).
+    const rowsT = [];
+    for (const r of lay.tools) {
+      const t = toolByKey.get(norm(r.name.slice(0, MAX_NAME)));
+      if (t && t.usable) rowsT.push(t);
+    }
+    spend(blocks.length * rowsT.length);
+    const values = [];
+    for (const b of blocks) {
+      const row = [];
+      for (const r of lay.tools) {
+        const t = toolByKey.get(norm(r.name.slice(0, MAX_NAME)));
+        if (!t || !t.usable) continue;
+        const v = b.rows[r.row];
+        const bad = (what) => addCase({ id: `val:${L.ref}:${b.bk}:t${t.idx}:${norm(what).slice(0, 3).toLowerCase()}`, type: 'valor_invalido', legajo: L.legajo, tech: L.displayName, tool: t.name, date: b.day, message: `Hoja ${L.sheet.name}, ${fmtDay(b.day)}, ${t.name}: el valor de ${what} no es válido; se toma como vacío.` });
+        let e = numOf(v.e);
+        let d = numOf(v.d);
+        let c = numOf(v.c);
+        if (e === undefined || (e !== null && !isWhole(e))) { bad('ENTREGA'); e = null; }
+        if (c === undefined || (c !== null && !isCount(c))) { bad('CONTEO'); c = null; }
+        if (d === undefined || (d !== null && !isCount(d))) { bad('DEVOLUCIÓN'); d = null; }
+        row.push({ e, d, c });
+      }
+      values.push(row);
+    }
+    // Un conteo es "vacío probable" si un bloque posterior cuenta más unidades de esa fila sin una
+    // ENTREGA en el medio (incluida la del bloque que cuenta más). De atrás para adelante: lineal.
+    const rises = values.map(() => new Array(rowsT.length).fill(false));
+    for (let k = 0; k < rowsT.length; k++) {
+      let max = -1;
+      for (let bi = blocks.length - 1; bi >= 0; bi--) {
+        const x = values[bi][k];
+        const u = Math.ceil(x.c ?? 0);
+        rises[bi][k] = max > u;
+        if (x.e) max = -1;
+        else if (u > max) max = u;
+      }
+    }
 
     const state = new Map(); // tool idx -> { slots: [{ id, qty }], prev, loss, nslot }
     const stOf = (t) => {
@@ -318,58 +389,54 @@ export function planExcelImport(book, server, { decisions = {}, today }) {
     const adjust = new Map(); // tool idx -> { units, dates }
     const periods = new Map(); // pkey -> ref del último control de ese período
     const sameDay = new Map();
-    for (const b of blocks) {
+    for (let bi = 0; bi < blocks.length; bi++) {
+      const b = blocks[bi];
       const nDay = sameDay.get(b.day) || 0;
       sameDay.set(b.day, nDay + 1);
-      let sec = 0;
-      const movAt = () => localIso(b.day, 8, nDay, sec++);
-      const ctlAt = localIso(b.day, 12, nDay);
+      const devs = [];
+      const ents = [];
       const items = [];
-      for (const r of lay.tools) {
-        const t = toolByKey.get(norm(r.name.slice(0, MAX_NAME)));
-        if (!t || !t.usable) continue;
-        const v = b.rows[r.row];
+      for (let k = 0; k < rowsT.length; k++) {
+        const t = rowsT[k];
+        const { e, d, c } = values[bi][k];
         const st = stOf(t);
         const A = () => st.slots.reduce((a, s) => a + s.qty, 0);
-        const bad = (what) => addCase({ id: `val:${L.ref}:${b.bk}:t${t.idx}:${norm(what).slice(0, 3).toLowerCase()}`, type: 'valor_invalido', legajo: L.legajo, tech: L.displayName, tool: t.name, date: b.day, message: `Hoja ${L.sheet.name}, ${fmtDay(b.day)}, ${t.name}: el valor de ${what} no es válido; se toma como vacío.` });
-        let e = numOf(v.e);
-        let d = numOf(v.d);
-        let c = numOf(v.c);
-        if (e === undefined || (e !== null && !isWhole(e))) { bad('ENTREGA'); e = null; }
-        if (c === undefined || (c !== null && !isCount(c))) { bad('CONTEO'); c = null; }
-        if (d === undefined || (d !== null && !isCount(d))) { bad('DEVOLUCIÓN'); d = null; }
         const cHalf = c !== null && frac(c) === 0.5;
+        const caseBase = { legajo: L.legajo, tech: L.displayName, tool: t.name, date: b.day };
+        const who = `${L.displayName}, ${t.name}, ${fmtDay(b.day)}`;
 
-        // 1) Devolución.
+        // 1) Devolución: [[unidades, destino]] de las asignaciones más nuevas.
         if (d) {
-          const caseBase = { legajo: L.legajo, tech: L.displayName, tool: t.name, date: b.day };
-          let qty = 0;
-          let cond = 'disponible';
+          let back = [];
           if (d === 0.5 && cHalf) {
-            addCase({ id: `d05:${L.ref}:${b.bk}:t${t.idx}`, type: 'devolucion_05', ...caseBase, message: `${L.displayName}, ${t.name}, ${fmtDay(b.day)}: el 0,5 en DEVOLUCIÓN acompaña al recambio; se ignora.` });
+            addCase({ id: `d05:${L.ref}:${b.bk}:t${t.idx}`, type: 'devolucion_05', ...caseBase, message: `${who}: el 0,5 en DEVOLUCIÓN acompaña al recambio; se ignora.` });
           } else if (st.prev && d === st.prev) {
-            qty = Math.ceil(st.prev);
-            cond = frac(st.prev) === 0.5 ? 'baja' : 'disponible';
-            if (!A()) { addCase({ id: `dev:${L.ref}:${b.bk}:t${t.idx}`, type: 'devolucion_dudosa', ...caseBase, message: `${L.displayName}, ${t.name}, ${fmtDay(b.day)}: devolución de ${units(qty)} sin herramienta asignada; se ignora.` }); qty = 0; }
+            const qty = Math.min(Math.ceil(st.prev), A());
+            if (!A()) addCase({ id: `dev:${L.ref}:${b.bk}:t${t.idx}`, type: 'devolucion_dudosa', ...caseBase, message: `${who}: devolución de ${units(Math.ceil(st.prev))} sin herramienta asignada; se ignora.` });
             else {
-              const cs = addCase({ id: `dev:${L.ref}:${b.bk}:t${t.idx}`, type: 'devolucion', skippable: true, ...caseBase, message: `${L.displayName}, ${t.name}, ${fmtDay(b.day)}: DEVOLUCIÓN igual al conteo previo; ${cond === 'baja' ? 'baja (era para recambio)' : 'devolución a disponible'} de ${units(Math.min(qty, A()))}.` });
-              if (cs.decision !== 'accept') qty = 0;
+              // x,5: la unidad de recambio va a baja; las x − 0,5 buenas, a disponible.
+              const baja = frac(st.prev) === 0.5 ? 1 : 0;
+              const disp = qty - baja;
+              const what = baja ? `baja de ${units(baja)} (la de recambio)${disp ? ` y devolución a disponible de ${units(disp)}` : ''}` : `devolución a disponible de ${units(disp)}`;
+              const cs = addCase({ id: `dev:${L.ref}:${b.bk}:t${t.idx}`, type: 'devolucion', skippable: true, ...caseBase, message: `${who}: DEVOLUCIÓN igual al conteo previo; ${what}.` });
+              if (cs.decision === 'accept') back = [[baja, 'baja'], [disp, 'disponible']];
             }
           } else if (Number.isInteger(d) && A()) {
-            qty = d;
-            const cs = addCase({ id: `dev:${L.ref}:${b.bk}:t${t.idx}`, type: 'devolucion_dudosa', skippable: true, defaultDecision: 'skip', ...caseBase, message: `${L.displayName}, ${t.name}, ${fmtDay(b.day)}: DEVOLUCIÓN ${d} no coincide con el conteo previo; si la aceptás, es una devolución a disponible de ${units(Math.min(d, A()))}.` });
-            if (cs.decision !== 'accept') qty = 0;
+            const cs = addCase({ id: `dev:${L.ref}:${b.bk}:t${t.idx}`, type: 'devolucion_dudosa', skippable: true, defaultDecision: 'skip', ...caseBase, message: `${who}: DEVOLUCIÓN ${d} no coincide con el conteo previo; si la aceptás, es una devolución a disponible de ${units(Math.min(d, A()))}.` });
+            if (cs.decision === 'accept') back = [[d, 'disponible']];
           } else {
-            addCase({ id: `dev:${L.ref}:${b.bk}:t${t.idx}`, type: 'devolucion_dudosa', ...caseBase, message: `${L.displayName}, ${t.name}, ${fmtDay(b.day)}: DEVOLUCIÓN ${String(d).replace('.', ',')} no se puede interpretar${A() ? '' : ' (sin herramienta asignada)'}; se ignora.` });
+            addCase({ id: `dev:${L.ref}:${b.bk}:t${t.idx}`, type: 'devolucion_dudosa', ...caseBase, message: `${who}: DEVOLUCIÓN ${String(d).replace('.', ',')} no se puede interpretar${A() ? '' : ' (sin herramienta asignada)'}; se ignora.` });
           }
-          qty = Math.min(qty, A());
-          while (qty > 0) {
-            const s = st.slots[st.slots.length - 1];
-            const take = Math.min(qty, s.qty);
-            push({ kind: 'devolucion', legajo: L.ref, tool: t.idx, slot: s.id, qty: take, cond, at: movAt() });
-            s.qty -= take;
-            qty -= take;
-            if (!s.qty) st.slots.pop();
+          for (const [q0, cond] of back) {
+            let qty = Math.min(q0, A());
+            while (qty > 0) {
+              const s = st.slots[st.slots.length - 1];
+              const take = Math.min(qty, s.qty);
+              devs.push({ kind: 'devolucion', legajo: L.ref, tool: t.idx, slot: s.id, qty: take, cond });
+              s.qty -= take;
+              qty -= take;
+              if (!s.qty) st.slots.pop();
+            }
           }
         }
 
@@ -377,16 +444,16 @@ export function planExcelImport(book, server, { decisions = {}, today }) {
         if (e) {
           if (!A()) {
             const id = `s${st.nslot++}`;
-            push({ kind: 'entrega', type: 'entrega_inicial', legajo: L.ref, tool: t.idx, slot: id, qty: e, at: movAt() });
+            ents.push({ kind: 'entrega', type: 'entrega_inicial', legajo: L.ref, tool: t.idx, slot: id, qty: e });
             st.slots.push({ id, qty: e });
           } else if (st.loss && st.slots.length === 1 && st.slots[0].qty === e) {
             const id = `s${st.nslot++}`;
-            push({ kind: 'reposicion', legajo: L.ref, tool: t.idx, slot: st.slots[0].id, newSlot: id, qty: e, at: movAt() });
-            addCase({ id: `rep:${L.ref}:${b.bk}:t${t.idx}`, type: 'reposicion', legajo: L.legajo, tech: L.displayName, tool: t.name, date: b.day, message: `${L.displayName}, ${t.name}, ${fmtDay(b.day)}: la entrega sigue a un faltante o recambio; se registra como reposición (la anterior va a baja).` });
+            ents.push({ kind: 'reposicion', legajo: L.ref, tool: t.idx, slot: st.slots[0].id, newSlot: id, qty: e });
+            addCase({ id: `rep:${L.ref}:${b.bk}:t${t.idx}`, type: 'reposicion', ...caseBase, message: `${who}: la entrega sigue a un faltante o recambio; se registra como reposición (la anterior va a baja).` });
             st.slots = [{ id, qty: e }];
           } else {
             const id = `s${st.nslot++}`;
-            push({ kind: 'entrega', type: 'adicional', legajo: L.ref, tool: t.idx, slot: id, qty: e, at: movAt() });
+            ents.push({ kind: 'entrega', type: 'adicional', legajo: L.ref, tool: t.idx, slot: id, qty: e });
             st.slots.push({ id, qty: e });
           }
         }
@@ -404,19 +471,27 @@ export function planExcelImport(book, server, { decisions = {}, today }) {
           adjust.set(t.idx, a);
           if (accepted(id)) {
             const sid = `s${st.nslot++}`;
-            push({ kind: 'entrega', type: A() ? 'adicional' : 'entrega_inicial', adjust: true, legajo: L.ref, tool: t.idx, slot: sid, qty: n - A(), at: movAt() });
+            ents.push({ kind: 'entrega', type: A() ? 'adicional' : 'entrega_inicial', adjust: true, legajo: L.ref, tool: t.idx, slot: sid, qty: n - A() });
             st.slots.push({ id: sid, qty: n - A() });
           } else {
             change = Math.min(change, A());
             good = Math.min(good, A() - change);
           }
         }
-        st.prev = cv;
         const total = A();
-        if (!total) { st.loss = false; continue; }
         const missing = total - good - change;
-        if (missing > 0) addCase({ id: `fal:${L.ref}:${b.bk}:t${t.idx}`, type: 'faltante', legajo: L.legajo, tech: L.displayName, tool: t.name, date: b.day, message: `${L.displayName}, ${t.name}, ${fmtDay(b.day)}: faltan ${missing} de ${total} (nota "${MISSING_NOTE}").` });
-        if (change > 0) addCase({ id: `rec:${L.ref}:${b.bk}:t${t.idx}`, type: 'recambio', legajo: L.legajo, tech: L.displayName, tool: t.name, date: b.day, message: `${L.displayName}, ${t.name}, ${fmtDay(b.day)}: ${change} para recambio${cv === 0.5 ? ' (conteo 0,5)' : ` (conteo ${String(cv).replace('.', ',')})`}.` });
+        let asMissing = false;
+        if (total && missing > 0 && change === 0 && rises[bi][k]) {
+          const cs = addCase({ id: `vac:${L.ref}:${b.bk}:t${t.idx}`, type: 'conteo_vacio_probable', skippable: true, defaultDecision: 'skip', ...caseBase, message: `${who}: conteo ${String(cv).replace('.', ',')} de ${total}, pero un bloque posterior cuenta más sin una ENTREGA en el medio (probablemente la celda quedó sin llenar). Omitido: queda sin dato en este control. Si lo importás, faltan ${missing} (nota "${MISSING_NOTE}").` });
+          // Sin dato: el ítem no entra en este control (como uno no contado); sigue valiendo el
+          // estado anterior y el conteo no cuenta como previo para las devoluciones.
+          if (cs.decision !== 'accept') continue;
+          asMissing = true;
+        }
+        st.prev = cv;
+        if (!total) { st.loss = false; continue; }
+        if (missing > 0 && !asMissing) addCase({ id: `fal:${L.ref}:${b.bk}:t${t.idx}`, type: 'faltante', ...caseBase, message: `${who}: faltan ${missing} de ${total} (nota "${MISSING_NOTE}").` });
+        if (change > 0) addCase({ id: `rec:${L.ref}:${b.bk}:t${t.idx}`, type: 'recambio', ...caseBase, message: `${who}: ${change} para recambio${cv === 0.5 ? ' (conteo 0,5)' : ` (conteo ${String(cv).replace('.', ',')})`}.` });
         st.loss = missing + change > 0;
         // Reparto por asignación: primero las buenas, después las de recambio, el resto falta.
         let g = good;
@@ -429,14 +504,26 @@ export function planExcelImport(book, server, { decisions = {}, today }) {
           items.push({ tool: t.idx, slot: s.id, expected: s.qty, good: sg, change: sc, missing: s.qty - sg - sc });
         }
       }
-      if (!items.length) continue;
-      const period = periodOf(new Date(ctlAt));
-      const pk = pkeyOf(period);
-      const ref = `${L.ref}:${b.bk}`;
-      const prev = periods.get(pk) || null;
-      if (prev) addCase({ id: `sem:${ref}`, type: 'semana_duplicada', legajo: L.legajo, tech: L.displayName, date: b.day, message: `${L.displayName}: el bloque del ${fmtDay(b.day)} cae en la misma semana que el anterior; queda vigente y el anterior como historial.` });
-      periods.set(pk, ref);
-      push({ kind: 'control', legajo: L.ref, ref, day: b.day, at: ctlAt, period, correctionOf: prev, items });
+      const blockOps = [...devs, ...ents];
+      if (items.length) {
+        const period = periodOf(new Date(localIso(b.day, 12)));
+        const pk = pkeyOf(period);
+        const ref = `${L.ref}:${b.bk}`;
+        const prev = periods.get(pk) || null;
+        if (prev) addCase({ id: `sem:${ref}`, type: 'semana_duplicada', legajo: L.legajo, tech: L.displayName, date: b.day, message: `${L.displayName}: el bloque del ${fmtDay(b.day)} cae en la misma semana que el anterior; queda vigente y el anterior como historial.` });
+        periods.set(pk, ref);
+        blockOps.push({ kind: 'control', legajo: L.ref, ref, day: b.day, at: null, period, correctionOf: prev, items });
+      }
+      if (!blockOps.length) continue;
+      spend(blockOps.length + items.length);
+      // Ventana del bloque: su parte del día, con un paso de hasta 1 s entre operaciones.
+      const [ws, we] = dayWindow(b.day);
+      const span = Math.floor((we - ws) / perDay.get(b.day));
+      const step = Math.min(1000, Math.floor(span / (blockOps.length + 1)));
+      if (step < 1) throw new WorkbookError(`La hoja ${L.sheet.name} tiene demasiados movimientos el ${fmtDay(b.day)} para importarlos.`, 'too_complex');
+      const start = ws + nDay * span;
+      blockOps.forEach((op, i) => { op.at = new Date(start + i * step).toISOString(); });
+      for (const op of blockOps) sheetOps.push(op);
     }
     for (const [idx, a] of adjust) {
       const t = toolList[idx];
@@ -448,14 +535,15 @@ export function planExcelImport(book, server, { decisions = {}, today }) {
   // Stock: un ingreso por herramienta con todo lo que se entrega (entregas, ajustes y
   // reposiciones), una hora antes de su primera entrega. Las existencias del servidor no se tocan.
   const need = new Map();
-  for (const op of timed) {
+  for (const op of sheetOps) {
     if (op.kind !== 'entrega' && op.kind !== 'reposicion') continue;
     const x = need.get(op.tool) || { qty: 0, at: op.at };
     x.qty += op.qty;
     if (op.at < x.at) x.at = op.at;
     need.set(op.tool, x);
   }
-  for (const [tool, x] of need) push({ kind: 'ingreso', tool, qty: x.qty, at: new Date(new Date(x.at).getTime() - 3600_000).toISOString() });
+  for (const [tool, x] of need) ops.push({ kind: 'ingreso', tool, qty: x.qty, at: new Date(new Date(x.at).getTime() - 3600_000).toISOString() });
+  for (const op of sheetOps) ops.push(op);
 
   // ------------------------------------------------ novedades
   const nov = book.novedades;
@@ -482,12 +570,11 @@ export function planExcelImport(book, server, { decisions = {}, today }) {
         comment = comment.slice(0, MAX_COMMENT - 1) + '…';
         addCase({ id: `novrec:${id}`, type: 'novedad_recortada', message: `NOVEDADES fila ${r.row + 1}: el comentario supera ${MAX_COMMENT} caracteres y se recorta.` });
       }
-      push({ kind: 'novedad', legajo, comment, at: localIso(day, tm.h, tm.mi), day });
+      // Nunca después de "ahora" (una novedad de hoy con una hora que todavía no llegó).
+      const at = new Date(Math.min(Date.parse(localIso(day, tm.h, tm.mi)), nowMs)).toISOString();
+      ops.push({ kind: 'novedad', legajo, comment, at, day });
     }
   }
-
-  timed.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.seq - b.seq));
-  for (const op of timed) { delete op.seq; ops.push(op); }
 
   // ------------------------------------------------ totales
   const totals = { techsCreate: 0, techsAttach: 0, toolsCreate: 0, toolsMatched: 0, kitItems: 0, controls: 0, corrections: 0, entregas: 0, ajustes: 0, reposiciones: 0, devoluciones: 0, bajas: 0, ingresos: 0, novedades: 0 };
@@ -507,7 +594,8 @@ export function planExcelImport(book, server, { decisions = {}, today }) {
 
   const effectiveDecisions = {};
   for (const c of cases) if (c.skippable && decided.has(c.id)) effectiveDecisions[c.id] = c.decision;
-  const staleDecisions = Object.keys(decisions).filter((id) => !cases.some((c) => c.id === id && c.skippable)).sort();
+  const skippableIds = new Set(cases.filter((c) => c.skippable).map((c) => c.id));
+  const staleDecisions = Object.keys(decisions).filter((id) => !skippableIds.has(id)).sort();
   cases.sort((a, b) => CASE_TYPES.indexOf(a.type) - CASE_TYPES.indexOf(b.type));
   const tools = toolList.filter((t) => t.usable).map((t) => ({ idx: t.idx, name: t.name, serverId: t.serverId, create: t.create }));
   const techs = legajos.filter((L) => L.include).map((L) => ({ ref: L.ref, legajo: L.legajo, name: L.displayName, techId: L.techId, create: L.create }));

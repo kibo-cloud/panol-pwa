@@ -14,12 +14,16 @@
 // - Los controles importados se escriben ya finalizados, sin pasar por finalizeControl: no
 //   crean solicitudes de compra (la creación automática de la etapa 7 es de los controles hechos
 //   en la app) ni auditan cada movimiento (el lote se audita una vez).
+// - E9.V1: la lectura y el plan corren en un worker con tiempo máximo (planInWorker); una sola
+//   importación (vista previa o confirmación) a la vez en el proceso (409 `import_busy`). El
+//   token no incluye las horas de las operaciones (un bloque de hoy se acota a "ahora", que avanza
+//   entre la vista previa y la confirmación); sí todo lo demás.
 import crypto from 'node:crypto';
 import { withSnapshot } from '../adapters/pg/state-repo.js';
 import { loadInventoryContext, applyMovementPlan, saveControl } from '../adapters/pg/inventory-repo.js';
 import { loadKits } from '../adapters/pg/kits-repo.js';
 import { lockName } from '../adapters/pg/catalog-repo.js';
-import { readExcelBook, planExcelImport, caseCounts, WorkbookError, PLAN_VERSION, MISSING_NOTE, NOTES } from '../importers/excel-v1/index.js';
+import { planInWorker, caseCounts, WorkbookError, PLAN_VERSION, MISSING_NOTE, NOTES } from '../importers/excel-v1/index.js';
 import { planMovement } from '../domain/movements.js';
 import { buildControlDoc } from '../domain/controls.js';
 import { localDateISO } from '../domain/period.js';
@@ -34,13 +38,32 @@ const rule = (msg, code, status = 422) => new DomainError(msg, code, status);
 const withExtra = (err, extra) => Object.assign(err, { extra });
 export const FILE_NAME_RE = /\.(xlsx|xlsm)$/i;
 
-function readFile(fileName, buf) {
+function checkName(fileName) {
   if (!FILE_NAME_RE.test(String(fileName || ''))) throw rule('Elegí el archivo de Excel (.xlsx o .xlsm).', 'invalid_file_name');
+}
+
+// Lectura + plan en el worker. Errores del libro -> 413 (tamaño), 422 import_timeout o 422
+// invalid_workbook.
+async function planFile(file, server, decisions) {
   try {
-    return readExcelBook(buf);
+    return await planInWorker({ file, server, decisions, today: localDateISO(), now: Date.now() });
   } catch (err) {
-    if (err instanceof WorkbookError) throw rule(err.message, err.code === 'too_large' ? 'too_large' : 'invalid_workbook', err.code === 'too_large' ? 413 : 422);
-    throw err;
+    if (!(err instanceof WorkbookError)) throw err;
+    if (err.code === 'too_large') throw rule(err.message, 'too_large', 413);
+    throw rule(err.message, err.code === 'import_timeout' ? 'import_timeout' : 'invalid_workbook');
+  }
+}
+
+// Una sola importación del Excel a la vez en este proceso (cada una puede ocupar un worker y una
+// transacción hasta el tiempo máximo).
+let busy = false;
+async function exclusive(fn) {
+  if (busy) throw rule('Ya hay una importación del Excel en curso. Esperá a que termine y probá de nuevo.', 'import_busy', 409);
+  busy = true;
+  try {
+    return await fn();
+  } finally {
+    busy = false;
   }
 }
 
@@ -68,7 +91,8 @@ function alreadyImported(b) {
 
 // Token: el hash del archivo y la versión del plan (operaciones, casos con su decisión, errores).
 function tokenOf(hash, p) {
-  return sha256(JSON.stringify({ v: PLAN_VERSION, hash, ops: p.ops, cases: p.cases.map((c) => [c.id, c.decision]), errors: p.errors }));
+  const ops = p.ops.map(({ at, ...o }) => o);
+  return sha256(JSON.stringify({ v: PLAN_VERSION, hash, ops, cases: p.cases.map((c) => [c.id, c.decision]), errors: p.errors }));
 }
 
 function reportOf(p, { fileName, hash, bytes, token }) {
@@ -80,14 +104,14 @@ function reportOf(p, { fileName, hash, bytes, token }) {
 }
 
 export async function previewExcel(db, actor, { fileName, file, decisions = {} }) {
-  const book = readFile(fileName, file);
+  checkName(fileName);
   const hash = sha256(file);
-  return withSnapshot(db, async (q) => {
+  return exclusive(() => withSnapshot(db, async (q) => {
     const done = await batchOf(q, hash);
     if (done) throw alreadyImported(done);
-    const p = planExcelImport(book, await loadServer(q), { decisions, today: localDateISO() });
+    const p = await planFile(file, await loadServer(q), decisions);
     return reportOf(p, { fileName, hash, bytes: file.length, token: tokenOf(hash, p) });
-  });
+  }));
 }
 
 async function withSerializable(pool, fn) {
@@ -125,9 +149,9 @@ function applyToCtx(ctx, plan) {
 }
 
 export async function applyExcel(db, actor, { fileName, file, token, decisions = {} }) {
-  const book = readFile(fileName, file);
+  checkName(fileName);
   const hash = sha256(file);
-  return withSerializable(db, async (c) => {
+  return exclusive(() => withSerializable(db, async (c) => {
     // Orden de bloqueos: nombres (importación, legajos, herramientas) -> alcance de orden ->
     // kit -> técnicos -> herramientas (como alta de técnico/herramienta, entregar kit y movimientos).
     await lockName(c, 'import:excel');
@@ -136,7 +160,7 @@ export async function applyExcel(db, actor, { fileName, file, token, decisions =
     await lockName(c, 'techs.legajo');
     await lockName(c, 'tools.name');
     const server = await loadServer(c);
-    const p = planExcelImport(book, server, { decisions, today: localDateISO() });
+    const p = await planFile(file, server, decisions);
     const report = reportOf(p, { fileName, hash, bytes: file.length, token: tokenOf(hash, p) });
     if (p.errors.length) throw withExtra(rule('El archivo no se puede importar así: revisá la vista previa.', 'import_invalid'), { report });
     if (!token || token !== report.token) throw withExtra(rule('Los datos o las decisiones cambiaron desde la vista previa: volvé a previsualizar antes de confirmar.', 'import_changed', 409), { report });
@@ -144,7 +168,13 @@ export async function applyExcel(db, actor, { fileName, file, token, decisions =
     const newTools = p.ops.filter((o) => o.kind === 'tool');
     if (newTools.length) await lockScope(c, toolScope(null));
     const kitOp = p.ops.find((o) => o.kind === 'kit');
-    if (kitOp) await c.query('SELECT id FROM kits WHERE id = $1 FOR UPDATE', [kitOp.kitId]);
+    // Kit base: el del servidor o, si no hay (E9.V1), se crea (o se recupera uno eliminado).
+    let kitId = null;
+    if (kitOp) {
+      const k = (await c.query('SELECT id, archived_at FROM kits WHERE especialidad_id IS NULL FOR UPDATE')).rows[0];
+      if (kitOp.kitId && (!k || k.id !== kitOp.kitId || k.archived_at)) throw rule('El kit base cambió desde la vista previa: volvé a previsualizar.', 'import_changed', 409);
+      kitId = k ? k.id : null;
+    }
     const espIds = [...new Set(p.ops.filter((o) => o.kind === 'tech' && o.especialidadId).map((o) => o.especialidadId))].sort();
     if (espIds.length) await c.query('SELECT id FROM especialidades WHERE id = ANY($1) AND archived_at IS NULL ORDER BY id FOR SHARE', [espIds]);
     const attachIds = p.ops.filter((o) => o.kind === 'attach').map((o) => o.techId).sort();
@@ -181,9 +211,13 @@ export async function applyExcel(db, actor, { fileName, file, token, decisions =
 
     // Kit base = BLANCO (1 de cada herramienta, en ese orden).
     if (kitOp) {
-      await c.query('DELETE FROM kit_items WHERE kit_id = $1', [kitOp.kitId]);
-      for (const [i, it] of kitOp.items.entries()) await c.query('INSERT INTO kit_items (kit_id, tool_id, qty, sort_order) VALUES ($1,$2,$3,$4)', [kitOp.kitId, toolId[it.tool], it.qty, i + 1]);
-      await c.query('UPDATE kits SET name = name WHERE id = $1', [kitOp.kitId]);
+      if (!kitId) {
+        kitId = newId('kit');
+        await c.query("INSERT INTO kits (id, name, created_by) VALUES ($1, 'Kit base', $2)", [kitId, actor.id]);
+      } else if (!kitOp.kitId) await c.query('UPDATE kits SET archived_at = NULL, archived_by = NULL, archive_reason = NULL WHERE id = $1', [kitId]);
+      await c.query('DELETE FROM kit_items WHERE kit_id = $1', [kitId]);
+      for (const [i, it] of kitOp.items.entries()) await c.query('INSERT INTO kit_items (kit_id, tool_id, qty, sort_order) VALUES ($1,$2,$3,$4)', [kitId, toolId[it.tool], it.qty, i + 1]);
+      await c.query('UPDATE kits SET name = name WHERE id = $1', [kitId]);
     }
 
     // Movimientos, controles y novedades en orden de fecha, con el planificador del dominio.
@@ -244,7 +278,7 @@ export async function applyExcel(db, actor, { fileName, file, token, decisions =
       detail: `Importación del Excel (lote ${batchId}): ${t.techsCreate} técnicos nuevos, ${t.techsAttach} existentes, ${t.toolsCreate} herramientas nuevas, ${t.controls} controles (${t.corrections} correcciones), ${t.entregas} entregas, ${t.ajustes} entregas de ajuste, ${t.reposiciones} reposiciones, ${t.devoluciones} devoluciones, ${t.bajas} bajas, ${t.novedades} novedades, ${p.cases.length} casos revisados`,
     });
     return { applied: true, batch: { id: batchId, fileHash: hash }, totals: p.totals, caseCounts: report.caseCounts };
-  });
+  }));
 }
 
 export async function listBatches(db) {

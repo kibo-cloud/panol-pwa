@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { readExcelBook, planExcelImport, caseCounts, CASE_TYPES } from '../src/importers/excel-v1/index.js';
+import { readExcelBook, planInWorker, caseCounts, CASE_TYPES } from '../src/importers/excel-v1/index.js';
 import { localDateISO } from '../src/domain/period.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -27,10 +27,14 @@ if (!file) {
 const buf = fs.readFileSync(file);
 const book = readExcelBook(buf);
 const server = { techs: [], tools: [], especialidades: ESPECIALIDADES.map((name, i) => ({ id: `e${i}`, name })), baseKit: { id: 'kit-base', items: [] } };
-const plan = planExcelImport(book, server, { today: localDateISO() });
+// El plan, como en el servidor: en el worker con tiempo máximo.
+const t0 = performance.now();
+const plan = await planInWorker({ file: buf, server, decisions: {}, today: localDateISO(), now: Date.now() });
+const workerMs = Math.round(performance.now() - t0);
 const counts = caseCounts(plan.cases);
 const out = {
   bytes: buf.length,
+  workerMs,
   sha256Prefix: crypto.createHash('sha256').update(buf).digest('hex').slice(0, 8),
   sheets: { legajo: book.legajoSheets.length, sinFormato: book.legajoSheets.filter((s) => !s.layout).length, ignoradas: book.ignoredSheets.length, resumen: !!book.resumen, blanco: !!book.blanco, novedades: !!book.novedades },
   resumenColumns: book.resumen ? book.resumen.techs.length : 0,

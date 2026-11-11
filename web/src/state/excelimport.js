@@ -18,6 +18,7 @@ export const CASE_INFO = {
   kit_base: { label: 'Kit base (hoja BLANCO)', tone: 'ok', icon: 'box' },
   ajuste: { label: 'Entregas de ajuste (conteo sin entrega)', tone: 'warn', icon: 'swap' },
   faltante: { label: 'Faltantes (conteo menor a lo entregado)', tone: 'bad', icon: 'x' },
+  conteo_vacio_probable: { label: 'Conteos probablemente sin llenar (quedan sin dato; Importar = faltante)', tone: 'pend', icon: 'info' },
   recambio: { label: 'Recambios (0,5)', tone: 'warn', icon: 'wrench' },
   devolucion: { label: 'Devoluciones y bajas', tone: 'ok', icon: 'swap' },
   devolucion_dudosa: { label: 'Devoluciones dudosas', tone: 'warn', icon: 'alert' },
