@@ -64,8 +64,8 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 4. Conteo por cantidad y limpieza — done (PR #4)
 5. Eliminar y anular — done (PR #5)
 6. Novedades — done (PR #6)
-7. Gerencia — in progress (`v3/etapa-7-gerencia`)
-8. Existencia por técnico y alertas
+7. Gerencia — done (PR #7)
+8. Existencia por técnico y alertas — in progress (`v3/etapa-8-existencia`)
 9. Importador del Excel
 10. Impresión de auditoría
 
@@ -1655,10 +1655,54 @@ the old Excel workflow (counts, cleaning, purchases, audits) is not covered.
 - E7.V1 (`71c23a6`): `npm test` 218/218; `npm run test:db` 244/244 (514 s); `npm run build` ok;
   `PANOL_E2E_BUILD=1 npm run test:e2e` 65 passed, 0 failed, 0 skipped (514 s). Not pushed.
 
-## Next step
-- Stage 7: E7.T1–E7.T3 done (delegated writer); next: independent review, CI and PR #7 →
+- Stage 7 closed 2026-11-11: E7.V1 `71c23a6`, CI run 42965378623 green, PR #7 →
   `v3/etapa-6-novedades`.
-- PRs #1–#6 await user review (stacked: #1 → `v3-servidor`, each next PR → the previous stage). Engram mirror of this document: pending (multiple active
+
+## Stage 8 decisions (parent, within PEDIDO §2.9)
+- Existencia screen (new nav item "Existencia", visible to every role that can see reports,
+  gerencia included — user decision: gerencia has read-only stock per tech): equivalent of the
+  Excel RESUMEN. Rows = active tools in the custom order of stage 3 (code + name); columns = the
+  holders (técnicos and cajas) of the selected plantilla (filter: plantilla, or all; toggles
+  "incluir cajas" and "solo con herramientas"), each column header with legajo/name,
+  especialidad, last effective control date and days since it.
+- Cell = assigned quantity of that tool to that holder; when the holder's latest effective
+  control reports recambio or faltante for it, the cell shows the marks (C n / F n) with symbols
+  and color (legible in black and white). Per row: total assigned, total recambio, total
+  faltante, and pañol stock (available). Per column: total assigned, recambio, faltante. Grand
+  totals. Archived holders/tools excluded (they are history).
+- One pure domain function builds the matrix (server `domain/` + the web uses the same rules as
+  the reports do), tested in Node; the screen derives it from `/api/state` like the reports. Large
+  plantillas: sticky first column and header, horizontal scroll inside the table only (no page
+  overflow at 390 px).
+- Export to Excel with the existing self-hosted `xlsx` (same pattern as `reportes/export.js`),
+  same rows/columns/totals plus a legend; print with a print stylesheet (landscape, repeated
+  header, symbols + legend at the foot), `reports_export` permission for both, as reports.
+- Days since the last effective control: shown in the tech and caja sheets, in plantilla member
+  lists and in the Existencia header; holders with active assignments and no control show
+  "Sin controles" (days counted from their first active assignment).
+- Alert "Sin control hace N días": per holder with active assignments whose last effective
+  control is older than the threshold (or never, counted from the first active assignment).
+  Threshold configurable in Administración (company settings), default 14 days, 0 disables it;
+  needs the existing settings permission. The alert key includes the last control id so it
+  resolves by itself with a new control; resolutions follow the existing alert model.
+- No new tables beyond the setting (migration `016_existencia.sql` only if the settings store
+  needs a column/row); `.txt` v2 unaffected.
+
+## Stage 8 tasks (branch `v3/etapa-8-existencia`, stacked on stage 7)
+- [ ] E8.T1 Domain/back: matrix builder + days-since helper (pure, unit-tested), alert rule with
+      configurable threshold (server alerts + setting + migration if needed), any API the screen
+      needs; unit + integration tests (test-first where a RED is meaningful).
+- [ ] E8.T2 Frontend: Existencia screen (filters, sticky matrix, marks, totals), Excel export,
+      print stylesheet, days-since in sheets/plantillas, threshold setting in Administración,
+      alert rendering; design guide, classes in `v3.css`.
+- [ ] E8.T3 E2E: matrix values after entregas and a control with recambio/faltante, plantilla
+      filter, export file produced, print view renders, days-since and the alert crossing a
+      threshold changed in Administración, 390 px without page overflow.
+
+## Next step
+- Stage 8: E8.T1–E8.T3 (one delegated writer), then independent review, CI and PR #8 →
+  `v3/etapa-7-gerencia`.
+- PRs #1–#7 await user review (stacked: #1 → `v3-servidor`, each next PR → the previous stage). Engram mirror of this document: pending (multiple active
   sessions). PR #1 awaits user review; after it is merged, rebase stage 2 onto `v3-servidor`.
 - Follow-ups: periodic cleanup of expired sessions, old login attempts and idempotency
   keys; SSE does not re-check the session after it is opened (closes on reconnect only);
