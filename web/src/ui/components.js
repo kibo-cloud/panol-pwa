@@ -7,6 +7,7 @@ import { CLEAN, qtyText } from '../state/conteo.js';
 import { S, derive, can, who, toolName, holderName } from '../state/store.js';
 import { holderKey } from '../state/plantillas.js';
 import { linkableMv } from '../state/novedades.js';
+import { alertPurchase } from '../state/compras.js';
 import { fdt, mlabel, pkeyOf, wrange, pnumOf, plabel } from '../state/period.js';
 
 export const nf = (n) => Number(n || 0).toLocaleString('es-AR');
@@ -85,9 +86,20 @@ function alertAction(a) {
   if (a.type === 'devolucion' && can('movements_do')) return `<button class="btn sm" data-act="recvPending" data-m="${esc(a.movId)}">Recibir devolución</button>`;
   return `<a class="btn sm" href="${esc(a.cajaId ? '#caja-' + a.cajaId : '#tecnico-' + a.techId)}">Ver ficha</a>`;
 }
+// Etapa 7: la compra de una alerta de faltante o cambio ("compra rechazada" con su motivo), y
+// "Solicitar compra" cuando no hay una abierta.
+const LOSS = { faltante: 'faltante', cambio: 'cambio', consecutiva: 'cambio' };
+function alertCompra(a, full) {
+  const p = alertPurchase(a.purchase);
+  const chip = p ? `<div class="alcmp"><a class="chip ${p.cls}" href="${esc(p.href)}">${icon(p.ic, 12)}${esc(a.purchase.name)}: ${esc(p.label.toLowerCase())}</a>${p.detail ? `<span class="s">${esc(p.detail)}</span>` : ''}</div>` : '';
+  const ask = full && LOSS[a.type] && a.asgId && can('purchases_create') && (!a.purchase || a.purchase.status === 'rechazada')
+    ? `<button class="btn sm" data-act="cmpFromAlert" data-a="${esc(a.asgId)}" data-r="${esc(LOSS[a.type])}" data-q="${esc(a.qty || 1)}" data-k="${esc(a.key)}">${icon('cart', 14)}Solicitar compra</button>` : '';
+  return { chip, ask };
+}
 export function alertRow(a, full) {
   const cls = a.sev >= 3 ? 'bad' : a.sev === 2 ? 'warn' : 'pend';
-  return `<div class="al"><span class="al-ic ${cls}">${icon(AL_IC[a.type] || 'alert', 16)}</span><div class="grow"><a class="t" href="${esc(a.href)}">${esc(a.title)}</a><div class="s">${esc(a.text)}</div>${full ? `<div class="al-acts">${alertAction(a)}${can('alerts_resolve') ? `<button class="btn sm dark" data-act="resolveAlert" data-k="${esc(a.key)}">Marcar resuelta</button>` : ''}</div>` : ''}</div></div>`;
+  const cmp = alertCompra(a, full);
+  return `<div class="al"><span class="al-ic ${cls}">${icon(AL_IC[a.type] || 'alert', 16)}</span><div class="grow"><a class="t" href="${esc(a.href)}">${esc(a.title)}</a><div class="s">${esc(a.text)}</div>${cmp.chip}${full ? `<div class="al-acts">${alertAction(a)}${cmp.ask}${can('alerts_resolve') ? `<button class="btn sm dark" data-act="resolveAlert" data-k="${esc(a.key)}">Marcar resuelta</button>` : ''}</div>` : ''}</div></div>`;
 }
 export const alertList = (l, full) => (l.length ? `<div class="list">${l.map((a) => alertRow(a, full)).join('')}</div>` : `<div class="list">${emptyBox('Sin alertas abiertas', 'Todo en orden por ahora.')}</div>`);
 

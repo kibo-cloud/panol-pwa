@@ -9,7 +9,8 @@ import { toast } from '../../ui/feedback.js';
 import { kpi, pageHead, emptyBox, alertList, field } from '../../ui/components.js';
 import { gateUI, espSelect } from '../tecnicos/view.js';
 import { api } from '../../api/index.js';
-import { S, derive, who, refresh } from '../../state/store.js';
+import { S, derive, who, refresh, can } from '../../state/store.js';
+import { pendingCount } from '../../state/compras.js';
 import { mineFirst } from '../../state/plantillas.js';
 
 // Filtro elegido, o la plantilla propia del supervisor la primera vez.
@@ -26,7 +27,10 @@ VIEWS.alertas = () => {
   const chips = [['all', 'Todas'], ...mineFirst(d.shifts, d.myPlantilla.plantillaIds).map((p) => [p.id, p.name + (d.myPlantilla.plantillaIds.includes(p.id) ? ' (mi plantilla)' : '')]), ...(d.cajas.length ? [['cajas', 'Cajas compartidas']] : [])];
   const res = Object.entries(S.alertRes).map(([k, r]) => ({ key: k, ...r })).sort((a, b) => (b.at || '').localeCompare(a.at || ''));
   const byType = (t) => open.filter((a) => a.type === t).length;
-  return pageHead('Alertas', 'Situaciones que requieren atención') +
+  // Etapa 7: alerta "compras pendientes" para quien decide.
+  const nCmp = can('purchases_decide') ? pendingCount(S.purchases) : 0;
+  const cmpBanner = nCmp ? `<div class="banner warn cmpban" role="status"><div><b>${nCmp === 1 ? '1 compra pendiente' : nCmp + ' compras pendientes'} de aprobación.</b><div class="sm">Aprobalas o rechazalas desde Gerencia.</div></div><div class="acts"><a class="btn sm pri" href="#compras">${icon('cart', 14)}Ver compras</a></div></div>` : '';
+  return pageHead('Alertas', 'Situaciones que requieren atención') + cmpBanner +
   `<section class="kpis" data-css="margin-bottom:14px">${kpi(byType('faltante'), 'Faltantes', '', 'bad')}${kpi(byType('cambio') + byType('consecutiva'), 'Para cambio', '', 'warn', byType('consecutiva') ? `${byType('consecutiva')} en controles seguidos` : '')}${kpi(byType('devolucion'), 'Devoluciones pendientes', '', 'bad')}${kpi(byType('pendiente'), 'Controles pendientes', '', 'pend')}${kpi(byType('limpieza'), 'Limpieza', '', 'warn', 'dos controles seguidos')}</section>
   <div class="fchips" data-css="margin-bottom:12px" aria-label="Filtrar por plantilla">${chips.map(([k, l]) => `<button class="fchip ${pf === k ? 'on' : ''}" data-act="alertPl" data-v="${esc(k)}" aria-pressed="${pf === k}">${esc(l)}${k === 'all' ? '' : ` (${(k === 'all' ? d.alertsOpen : d.alertsByPlantilla[k] || []).length})`}</button>`).join('')}</div>
   <div class="toolbar">${espSelect('alert-esp', 'alertEsp', UI.alertEsp)}</div><div class="seg" role="tablist" data-css="margin-bottom:12px;max-width:420px"><button role="tab" aria-selected="${tab === 'open'}" class="${tab === 'open' ? 'on' : ''}" data-act="alertTab" data-v="open">Abiertas (${open.length})</button><button role="tab" aria-selected="${tab === 'res'}" class="${tab === 'res' ? 'on' : ''}" data-act="alertTab" data-v="res">Resueltas (${res.length})</button></div>

@@ -100,6 +100,15 @@ export const api = {
   createNovedad: (body, o) => http.post('/api/novedades', body, idem(o)),
   updateNovedad: (id, body, version) => http.patch(`/api/novedades/${enc(id)}`, body, { version }),
 
+  // etapa 7: compras (apartado de Gerencia). Alta y transiciones con Idempotency-Key; If-Match en
+  // cada transición y edición.
+  compras: (qs = '') => http.get(`/api/compras${qs ? '?' + qs : ''}`),
+  compraTotals: (qs = '') => http.get(`/api/compras/totals${qs ? '?' + qs : ''}`),
+  compra: (id) => http.get(`/api/compras/${enc(id)}`),
+  createCompra: (body, o) => http.post('/api/compras', body, idem(o)),
+  updateCompra: (id, body, version) => http.patch(`/api/compras/${enc(id)}`, body, { version }),
+  compraAction: (id, action, body, version, o) => http.post(`/api/compras/${enc(id)}/${enc(action)}`, body, idem({ ...o, version })),
+
   // archivo .txt
   importTxt: (text, mode, token) => http.request('POST', `/api/import/txt?mode=${enc(mode)}${token ? '&token=' + enc(token) : '&dryRun=1'}`, { rawText: text }),
   exportTxt: () => http.get('/api/export/txt', { text: true }),

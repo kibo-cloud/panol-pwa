@@ -12,6 +12,7 @@ import { api, newIdempotencyKey } from '../../api/index.js';
 import { S, derive, can, refresh, toolName, catName, holderName } from '../../state/store.js';
 import { POOL, UNIT_ST, POOL_CLS, LIM } from '../../state/constants.js';
 import { fdate, plabel } from '../../state/period.js';
+import { toolComprasCard } from '../compras/view.js';
 
 VIEWS.inventario = () => {
   const d = derive(); const q = UI.invQ.trim().toLowerCase();
@@ -39,7 +40,7 @@ VIEWS.herramienta = (id) => {
   <section class="kpis">${['asignado', 'disponible', 'reparacion', 'pendiente', 'retirado', 'baja'].map((k) => kpi(p[k], POOL[k], '', k === 'disponible' ? 'ok' : k === 'reparacion' ? 'warn' : k === 'pendiente' ? 'bad' : '')).join('')}</section>
   <div class="two"><section><h2 class="sec" data-css="margin-top:6px">Quién la tiene</h2>${holders.length ? `<div class="list">${holders.map((a) => { const s = d.stateOf[a.id]; const u = a.unitId && S.units[a.unitId]; return `<a class="row" href="${a.cajaId ? '#caja-' + esc(a.cajaId) : '#tecnico-' + esc(a.techId)}"><div class="grow"><div class="t">${esc(holderName(a) || 'Técnico')}</div><div class="s">${u ? 'Código ' + esc(u.code) + ', ' : ''}${a.qty > 1 ? a.qty + ' unidades, ' : ''}desde ${fdate(a.since)}</div></div>${stChip(s ? s.state : 'pendiente')}</a>`; }).join('')}</div>` : `<div class="list">${emptyBox('No está asignada a nadie', '')}</div>`}
   ${t.serialized ? `<h2 class="sec">Unidades (${units.length})</h2>${units.length ? `<div class="list">${units.map((u) => `<div class="row"><div class="grow"><div class="t">${esc(u.code)}</div><div class="s">${u.techId && holderName(u) ? esc(holderName(u)) + ', ' : ''}alta ${fdate(u.createdAt)}</div></div><span class="chip ${POOL_CLS[u.status] || ''}">${UNIT_ST[u.status] || esc(u.status)}</span></div>`).join('')}</div>` : `<div class="list">${emptyBox('Sin unidades', 'Dá de alta códigos desde Ajustar inventario.')}</div>`}` : ''}</section>
-  <section><h2 class="sec" data-css="margin-top:6px">Estado en controles</h2>${ctlHist.length ? `<div class="list">${ctlHist.slice(0, 40).map(({ c, it }) => `<a class="row" href="#controlver-${esc(c.id)}"><div class="grow"><div class="t">${esc(holderName(c) || c.techName)}${it.unitCode ? ', ' + esc(it.unitCode) : ''}</div><div class="s">${plabel(c.period)}${it.note ? '. ' + esc(it.note) : ''}</div></div>${stChip(it.state)}</a>`).join('')}</div>` : `<div class="list">${emptyBox('Sin controles registrados', '')}</div>`}
+  <section>${toolComprasCard(id)}<h2 class="sec" data-css="margin-top:6px">Estado en controles</h2>${ctlHist.length ? `<div class="list">${ctlHist.slice(0, 40).map(({ c, it }) => `<a class="row" href="#controlver-${esc(c.id)}"><div class="grow"><div class="t">${esc(holderName(c) || c.techName)}${it.unitCode ? ', ' + esc(it.unitCode) : ''}</div><div class="s">${plabel(c.period)}${it.note ? '. ' + esc(it.note) : ''}</div></div>${stChip(it.state)}</a>`).join('')}</div>` : `<div class="list">${emptyBox('Sin controles registrados', '')}</div>`}
   <h2 class="sec">Movimientos</h2>${mvList(movs.slice(0, 60))}</section></div>`;
 };
 
